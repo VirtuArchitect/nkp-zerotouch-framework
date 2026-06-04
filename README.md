@@ -82,6 +82,11 @@ Additional operational phases are available for secrets, backup, upgrade plannin
 - `docs/troubleshooting.md`
 - `docs/public-readiness.md`
 - `docs/implementation-status.md`
+- `docs/dashboard.md`
+- `docs/architecture.md`
+- `docs/container-runner.md`
+- `docs/self-hosted-ci.md`
+- `docs/upgrade-destroy-policy.md`
 
 ## Tests and Packaging
 
@@ -89,6 +94,7 @@ Additional operational phases are available for secrets, backup, upgrade plannin
 .\tests\smoke.ps1 -Config .\configs\environments\connected.example.yaml
 .\scripts\package.ps1 -Version dev
 .\scripts\security-scan.ps1
+python .\dashboard\app.py 8080
 ```
 
 ```bash

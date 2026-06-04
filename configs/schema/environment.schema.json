@@ -62,7 +62,12 @@
         "endpoint": { "type": "string" },
         "namespace": { "type": "string" },
         "insecure": { "type": "boolean" },
-        "caCert": { "type": "string" }
+        "caCert": { "type": "string" },
+        "pushConcurrency": { "type": "integer", "minimum": 1 },
+        "onExistingTag": {
+          "type": "string",
+          "enum": ["overwrite", "error", "skip"]
+        }
       }
     },
     "cluster": {

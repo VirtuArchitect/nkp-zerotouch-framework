@@ -13,7 +13,7 @@ if (Test-Path -LiteralPath $staging) {
 }
 New-Item -ItemType Directory -Path $staging | Out-Null
 
-foreach ($item in @("configs", "docs", "scripts", "templates", "tests", "tools", "README.md", "LICENSE", "VERSION", "CHANGELOG.md", "SECURITY.md", ".gitignore")) {
+foreach ($item in @("configs", "dashboard", "docs", "scripts", "templates", "tests", "tools", "README.md", "LICENSE", "VERSION", "CHANGELOG.md", "SECURITY.md", "CONTRIBUTING.md", "Dockerfile", "Containerfile", ".gitignore")) {
     Copy-Item -LiteralPath (Join-Path $repoRoot $item) -Destination $staging -Recurse -Force
 }
 

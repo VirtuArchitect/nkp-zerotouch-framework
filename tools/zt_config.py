@@ -109,6 +109,8 @@ def context(data, config_path):
         "registryNamespace": dotted_get(data, "registry.namespace"),
         "registryInsecure": dotted_get(data, "registry.insecure", "false"),
         "registryCaCert": dotted_get(data, "registry.caCert"),
+        "registryPushConcurrency": dotted_get(data, "registry.pushConcurrency", "1"),
+        "registryOnExistingTag": dotted_get(data, "registry.onExistingTag", "overwrite"),
         "httpProxy": dotted_get(data, "environment.proxy.httpProxy"),
         "httpsProxy": dotted_get(data, "environment.proxy.httpsProxy"),
         "noProxy": dotted_get(data, "environment.proxy.noProxy"),

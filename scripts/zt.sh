@@ -8,6 +8,7 @@ apply="false"
 secrets_path=""
 target_bundle=""
 confirm_destroy="false"
+kubeconfig_source=""
 failures=0
 warnings=0
 python_bin="${PYTHON_BIN:-}"
@@ -27,7 +28,7 @@ fi
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    validate|prepare|generate|registry|deploy|verify|secrets|backup|upgrade|destroy|runs|ci)
+    validate|prepare|generate|registry|deploy|verify|kubeconfig|secrets|backup|upgrade|destroy|runs|ci)
       command_name="$1"
       shift
       ;;
@@ -54,6 +55,10 @@ while [[ $# -gt 0 ]]; do
     --confirm-destroy)
       confirm_destroy="true"
       shift
+      ;;
+    --kubeconfig)
+      kubeconfig_source="${2:-}"
+      shift 2
       ;;
     *)
       echo "Unknown argument: $1" >&2
@@ -367,6 +372,9 @@ load_context() {
   registry_endpoint="$(section_scalar registry endpoint)"
   registry_namespace="$(section_scalar registry namespace)"
   registry_ca_cert="$(section_scalar registry caCert)"
+  registry_insecure="$(section_scalar registry insecure)"
+  registry_push_concurrency="$(section_scalar registry pushConcurrency)"
+  registry_on_existing_tag="$(section_scalar registry onExistingTag)"
   http_proxy="$(section_scalar proxy httpProxy)"
   https_proxy="$(section_scalar proxy httpsProxy)"
   context_paths
@@ -467,6 +475,15 @@ EOF
   else
     local konvoy_bundle="$bundle_path/container-images/konvoy-image-bundle-$nkp_version.tar"
     local kommander_bundle="$bundle_path/container-images/kommander-image-bundle-$nkp_version.tar"
+    local registry_extra_flags=""
+    [[ -n "$registry_ca_cert" ]] && registry_extra_flags="$registry_extra_flags  --to-registry-ca-cert-file \"$registry_ca_cert\" \\
+"
+    [[ "$registry_insecure" == "true" || "$registry_insecure" == "True" ]] && registry_extra_flags="$registry_extra_flags  --to-registry-insecure-skip-tls-verify \\
+"
+    [[ -n "$registry_push_concurrency" ]] && registry_extra_flags="$registry_extra_flags  --image-push-concurrency $registry_push_concurrency \\
+"
+    [[ -n "$registry_on_existing_tag" ]] && registry_extra_flags="$registry_extra_flags  --on-existing-tag $registry_on_existing_tag \\
+"
     cat >"$generated_dir/registry-plan.md" <<EOF
 # Registry Plan
 
@@ -493,6 +510,7 @@ fi
   --image-bundle "$konvoy_bundle" \\
   --image-bundle "$kommander_bundle" \\
   --to-registry "$registry_endpoint" \\
+${registry_extra_flags}  --force-oci-media-types \\
   --to-registry-username "\$ZT_REGISTRY_USERNAME" \\
   --to-registry-password "\$ZT_REGISTRY_PASSWORD"
 EOF
@@ -572,10 +590,29 @@ verify_phase() {
   if [[ -f "$state_dir/kubeconfig" && -f "$bin_dir/kubectl" ]]; then
     mkdir -p "$logs_dir"
     "$bin_dir/kubectl" --kubeconfig "$state_dir/kubeconfig" get nodes -o wide >"$logs_dir/verify-kubectl.log" 2>&1
+    "$bin_dir/kubectl" --kubeconfig "$state_dir/kubeconfig" get nodes >>"$logs_dir/verify-kubectl.log" 2>&1
     "$bin_dir/kubectl" --kubeconfig "$state_dir/kubeconfig" get pods -A >>"$logs_dir/verify-kubectl.log" 2>&1
+    "$bin_dir/kubectl" --kubeconfig "$state_dir/kubeconfig" get pods -A --field-selector=status.phase!=Running,status.phase!=Succeeded >>"$logs_dir/verify-kubectl.log" 2>&1 || true
+    "$bin_dir/nkp" get clusters -A --kubeconfig "$state_dir/kubeconfig" >>"$logs_dir/verify-kubectl.log" 2>&1 || true
+    "$bin_dir/nkp" get appdeployments -A --kubeconfig "$state_dir/kubeconfig" >>"$logs_dir/verify-kubectl.log" 2>&1 || true
     check PASS "Live kubectl verification log: $logs_dir/verify-kubectl.log"
   fi
   check PASS "Wrote verification report: $report_path"
+}
+
+kubeconfig_phase() {
+  load_context
+  assert_prepared
+  if [[ -z "$kubeconfig_source" ]]; then
+    echo "Kubeconfig path is required. Use --kubeconfig <path>." >&2
+    exit 2
+  fi
+  if [[ ! -f "$kubeconfig_source" ]]; then
+    echo "Kubeconfig not found: $kubeconfig_source" >&2
+    exit 1
+  fi
+  cp "$kubeconfig_source" "$state_dir/kubeconfig"
+  check PASS "Captured kubeconfig: $state_dir/kubeconfig"
 }
 
 secrets_phase() {
@@ -821,6 +858,9 @@ case "$command_name" in
     ;;
   verify)
     verify_phase
+    ;;
+  kubeconfig)
+    kubeconfig_phase
     ;;
   secrets)
     secrets_phase

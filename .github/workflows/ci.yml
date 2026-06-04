@@ -32,6 +32,7 @@ jobs:
         run: |
           python tools/zt_config.py validate --config configs/environments/connected.example.yaml
           python tools/zt_config.py context --config configs/environments/connected.example.yaml
+          python tests/test_config.py
 
       - name: Test scripts syntax
         shell: pwsh
@@ -44,3 +45,6 @@ jobs:
 
       - name: Package smoke
         run: bash scripts/package.sh ci
+
+      - name: Containerfile syntax smoke
+        run: test -s Dockerfile && test -s Containerfile

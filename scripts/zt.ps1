@@ -1,6 +1,6 @@
 param(
     [Parameter(Position = 0)]
-    [ValidateSet("validate", "prepare", "generate", "registry", "deploy", "verify", "secrets", "backup", "upgrade", "destroy", "runs", "ci")]
+    [ValidateSet("validate", "prepare", "generate", "registry", "deploy", "verify", "kubeconfig", "secrets", "backup", "upgrade", "destroy", "runs", "ci")]
     [string]$Command = "validate",
 
     [Parameter(Mandatory = $true)]
@@ -15,6 +15,8 @@ param(
     [string]$TargetBundle,
 
     [switch]$ConfirmDestroy
+    ,
+    [string]$Kubeconfig
 )
 
 $ErrorActionPreference = "Stop"
@@ -520,6 +522,8 @@ function Get-ZtContext {
         registryNamespace = Get-YamlSectionScalar -ConfigPath $ConfigPath -Section "registry" -Key "namespace"
         registryInsecure = Get-YamlSectionScalar -ConfigPath $ConfigPath -Section "registry" -Key "insecure"
         registryCaCert = Get-YamlSectionScalar -ConfigPath $ConfigPath -Section "registry" -Key "caCert"
+        registryPushConcurrency = Get-YamlSectionScalar -ConfigPath $ConfigPath -Section "registry" -Key "pushConcurrency"
+        registryOnExistingTag = Get-YamlSectionScalar -ConfigPath $ConfigPath -Section "registry" -Key "onExistingTag"
         httpProxy = Get-YamlSectionScalar -ConfigPath $ConfigPath -Section "proxy" -Key "httpProxy"
         httpsProxy = Get-YamlSectionScalar -ConfigPath $ConfigPath -Section "proxy" -Key "httpsProxy"
         environmentRoot = $environmentRoot
@@ -697,6 +701,11 @@ No mandatory image mirroring is required. Use this phase only if you want a cont
     else {
         $konvoyBundle = "$($context.bundlePath)/container-images/konvoy-image-bundle-$($context.nkpVersion).tar"
         $kommanderBundle = "$($context.bundlePath)/container-images/kommander-image-bundle-$($context.nkpVersion).tar"
+        $registryExtraFlags = ""
+        if ($context.registryCaCert) { $registryExtraFlags += "  --to-registry-ca-cert-file `"$($context.registryCaCert)`" \`n" }
+        if ($context.registryInsecure -eq "True" -or $context.registryInsecure -eq "true") { $registryExtraFlags += "  --to-registry-insecure-skip-tls-verify \`n" }
+        if ($context.registryPushConcurrency) { $registryExtraFlags += "  --image-push-concurrency $($context.registryPushConcurrency) \`n" }
+        if ($context.registryOnExistingTag) { $registryExtraFlags += "  --on-existing-tag $($context.registryOnExistingTag) \`n" }
         @"
 # Registry Plan
 
@@ -729,10 +738,11 @@ fi
   --image-bundle "__KONVOY_BUNDLE__" \
   --image-bundle "__KOMMANDER_BUNDLE__" \
   --to-registry "__REGISTRY_ENDPOINT__" \
+__REGISTRY_EXTRA_FLAGS__  --force-oci-media-types \
   --to-registry-username "$ZT_REGISTRY_USERNAME" \
   --to-registry-password "$ZT_REGISTRY_PASSWORD"
 '@
-        $registryScript = $registryScript.Replace("__KONVOY_BUNDLE__", $konvoyBundle).Replace("__KOMMANDER_BUNDLE__", $kommanderBundle).Replace("__REGISTRY_ENDPOINT__", $context.registryEndpoint)
+        $registryScript = $registryScript.Replace("__KONVOY_BUNDLE__", $konvoyBundle).Replace("__KOMMANDER_BUNDLE__", $kommanderBundle).Replace("__REGISTRY_ENDPOINT__", $context.registryEndpoint).Replace("__REGISTRY_EXTRA_FLAGS__", $registryExtraFlags)
         $registryScript | Set-Content -LiteralPath $registryScriptPath -Encoding utf8
 
         Write-Check -Status "PASS" -Message "Generated registry plan: $registryPlanPath"
@@ -850,10 +860,26 @@ function Invoke-Verify {
         $kubectlLog = Join-Path $context.logsDir "verify-kubectl.log"
         $bashKubeconfig = Convert-ToBashPath -Path $kubeconfigPath
         $bashKubectl = Convert-ToBashPath -Path $kubectlPath
-        bash -lc "'$bashKubectl' --kubeconfig '$bashKubeconfig' get nodes -o wide && '$bashKubectl' --kubeconfig '$bashKubeconfig' get pods -A" *> $kubectlLog
+        bash -lc "'$bashKubectl' --kubeconfig '$bashKubeconfig' get nodes -o wide; '$bashKubectl' --kubeconfig '$bashKubeconfig' get nodes; '$bashKubectl' --kubeconfig '$bashKubeconfig' get pods -A; '$bashKubectl' --kubeconfig '$bashKubeconfig' get pods -A --field-selector=status.phase!=Running,status.phase!=Succeeded || true; ./bin/nkp get clusters -A --kubeconfig '$bashKubeconfig' || true; ./bin/nkp get appdeployments -A --kubeconfig '$bashKubeconfig' || true" *> $kubectlLog
         Write-Check -Status "PASS" -Message "Live kubectl verification log: $kubectlLog"
     }
     Write-Check -Status "PASS" -Message "Wrote verification report: $reportPath"
+}
+
+function Invoke-Kubeconfig {
+    param([string]$ConfigPath)
+
+    $context = Get-ZtContext -ConfigPath $ConfigPath
+    Assert-Prepared -Context $context
+    if (-not $Kubeconfig) {
+        throw "Kubeconfig path is required. Use -Kubeconfig <path>."
+    }
+    if (-not (Test-Path -LiteralPath $Kubeconfig)) {
+        throw "Kubeconfig not found: $Kubeconfig"
+    }
+    $target = Join-Path $context.stateDir "kubeconfig"
+    Copy-Item -LiteralPath $Kubeconfig -Destination $target -Force
+    Write-Check -Status "PASS" -Message "Captured kubeconfig: $target"
 }
 
 function Invoke-Secrets {
@@ -1091,6 +1117,9 @@ switch ($Command) {
     }
     "verify" {
         Invoke-Verify -ConfigPath $Config
+    }
+    "kubeconfig" {
+        Invoke-Kubeconfig -ConfigPath $Config
     }
     "secrets" {
         Invoke-Secrets -ConfigPath $Config
