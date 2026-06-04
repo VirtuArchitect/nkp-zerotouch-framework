@@ -22,6 +22,19 @@ $ErrorActionPreference = "Stop"
 $script:ValidationFailures = 0
 $script:ValidationWarnings = 0
 
+function Invoke-ConfigTool {
+    param(
+        [string[]]$Arguments
+    )
+
+    $toolPath = Join-Path $PSScriptRoot "..\tools\zt_config.py"
+    $output = & python $toolPath @Arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "Config helper failed: $($output -join "`n")"
+    }
+    return ($output -join "`n")
+}
+
 function Write-Check {
     param(
         [ValidateSet("PASS", "WARN", "FAIL", "INFO")]
@@ -49,12 +62,23 @@ function Get-YamlScalar {
         [string]$Key
     )
 
-    $match = Select-String -LiteralPath $ConfigPath -Pattern "^\s*$([regex]::Escape($Key)):\s*(.+?)\s*$" | Select-Object -First 1
-    if (-not $match) {
-        return $null
+    $legacyMap = @{
+        "name" = "environment.name"
+        "type" = "environment.type"
+        "version" = "nkp.version"
+        "bundleType" = "nkp.bundleType"
+        "bundlePath" = "nkp.bundlePath"
+        "prismCentralEndpoint" = "nutanix.prismCentralEndpoint"
+        "endpoint" = "registry.endpoint"
+        "namespace" = "registry.namespace"
+        "httpProxy" = "environment.proxy.httpProxy"
+        "httpsProxy" = "environment.proxy.httpsProxy"
     }
 
-    return $match.Matches[0].Groups[1].Value.Trim(" '""")
+    $path = if ($Key -match "\.") { $Key } elseif ($legacyMap.ContainsKey($Key)) { $legacyMap[$Key] } else { $Key }
+    $value = Invoke-ConfigTool -Arguments @("get", "--config", $ConfigPath, "--path", $path)
+    if ([string]::IsNullOrWhiteSpace($value)) { return $null }
+    return $value.Trim()
 }
 
 function Get-YamlSectionScalar {
@@ -64,24 +88,9 @@ function Get-YamlSectionScalar {
         [string]$Key
     )
 
-    $lines = Get-Content -LiteralPath $ConfigPath
-    $inSection = $false
-    foreach ($line in $lines) {
-        if ($line -match "^\s*$([regex]::Escape($Section)):\s*$") {
-            $inSection = $true
-            continue
-        }
-
-        if ($inSection -and $line -match "^\S") {
-            break
-        }
-
-        if ($inSection -and $line -match "^\s+$([regex]::Escape($Key)):\s*(.+?)\s*$") {
-            return $Matches[1].Trim(" '""")
-        }
-    }
-
-    return $null
+    $value = Invoke-ConfigTool -Arguments @("get", "--config", $ConfigPath, "--path", "$Section.$Key")
+    if ([string]::IsNullOrWhiteSpace($value)) { return $null }
+    return $value.Trim()
 }
 
 function Convert-WslPathToWindowsPath {
@@ -273,6 +282,14 @@ function Invoke-Validate {
         throw "Config file not found: $ConfigPath"
     }
 
+    $schemaResult = Invoke-ConfigTool -Arguments @("validate", "--config", $ConfigPath) | ConvertFrom-Json
+    foreach ($errorItem in $schemaResult.errors) {
+        Write-Check -Status "FAIL" -Message "Schema: $errorItem"
+    }
+    foreach ($warningItem in $schemaResult.warnings) {
+        Write-Check -Status "WARN" -Message "Schema: $warningItem"
+    }
+
     $environmentName = Get-YamlScalar -ConfigPath $ConfigPath -Key "name"
     $environmentType = Get-YamlScalar -ConfigPath $ConfigPath -Key "type"
     $bundleType = Get-YamlScalar -ConfigPath $ConfigPath -Key "bundleType"
@@ -391,11 +408,12 @@ function Invoke-Prepare {
     $generatedDir = Join-Path $environmentRoot "generated"
     $logsDir = Join-Path $environmentRoot "logs"
     $stateDir = Join-Path $environmentRoot "state"
+    $secretsDir = Join-Path $environmentRoot "secrets"
 
     Write-Host ""
     Write-Check -Status "INFO" -Message "Preparing ZeroTouch workspace for '$environmentName'."
 
-    @($environmentRoot, $binDir, $generatedDir, $logsDir, $stateDir) | ForEach-Object {
+    @($environmentRoot, $binDir, $generatedDir, $logsDir, $stateDir, $secretsDir) | ForEach-Object {
         New-ZtDirectory -Path $_
         Write-Check -Status "PASS" -Message "Directory ready: $_"
     }
@@ -435,6 +453,7 @@ function Invoke-Prepare {
             generated = $generatedDir
             logs = $logsDir
             state = $stateDir
+            secrets = $secretsDir
         }
     }
 
@@ -487,8 +506,20 @@ function Get-ZtContext {
         workerReplicas = Get-YamlSectionScalar -ConfigPath $ConfigPath -Section "cluster" -Key "workerReplicas"
         podCidr = Get-YamlSectionScalar -ConfigPath $ConfigPath -Section "cluster" -Key "podCidr"
         serviceCidr = Get-YamlSectionScalar -ConfigPath $ConfigPath -Section "cluster" -Key "serviceCidr"
+        controlPlaneEndpointIp = Get-YamlSectionScalar -ConfigPath $ConfigPath -Section "cluster" -Key "controlPlaneEndpointIp"
+        controlPlaneEndpointPort = Get-YamlSectionScalar -ConfigPath $ConfigPath -Section "cluster" -Key "controlPlaneEndpointPort"
+        sshPublicKeyFile = Get-YamlSectionScalar -ConfigPath $ConfigPath -Section "cluster" -Key "sshPublicKeyFile"
+        sshUsername = Get-YamlSectionScalar -ConfigPath $ConfigPath -Section "cluster" -Key "sshUsername"
+        ntpServers = Get-YamlSectionScalar -ConfigPath $ConfigPath -Section "cluster" -Key "ntpServers"
+        loadBalancerIpRange = Get-YamlSectionScalar -ConfigPath $ConfigPath -Section "cluster" -Key "loadBalancerIpRange"
+        selfManaged = Get-YamlSectionScalar -ConfigPath $ConfigPath -Section "cluster" -Key "selfManaged"
+        fips = Get-YamlSectionScalar -ConfigPath $ConfigPath -Section "cluster" -Key "fips"
+        storageContainer = Get-YamlSectionScalar -ConfigPath $ConfigPath -Section "nutanix" -Key "storageContainer"
+        project = Get-YamlSectionScalar -ConfigPath $ConfigPath -Section "nutanix" -Key "project"
         registryEndpoint = Get-YamlSectionScalar -ConfigPath $ConfigPath -Section "registry" -Key "endpoint"
         registryNamespace = Get-YamlSectionScalar -ConfigPath $ConfigPath -Section "registry" -Key "namespace"
+        registryInsecure = Get-YamlSectionScalar -ConfigPath $ConfigPath -Section "registry" -Key "insecure"
+        registryCaCert = Get-YamlSectionScalar -ConfigPath $ConfigPath -Section "registry" -Key "caCert"
         httpProxy = Get-YamlSectionScalar -ConfigPath $ConfigPath -Section "proxy" -Key "httpProxy"
         httpsProxy = Get-YamlSectionScalar -ConfigPath $ConfigPath -Section "proxy" -Key "httpsProxy"
         environmentRoot = $environmentRoot
@@ -497,6 +528,7 @@ function Get-ZtContext {
         logsDir = Join-Path $environmentRoot "logs"
         stateDir = Join-Path $environmentRoot "state"
         reportsDir = Join-Path $environmentRoot "reports"
+        secretsDir = Join-Path $environmentRoot "secrets"
     }
 }
 
@@ -560,8 +592,20 @@ function Invoke-Generate {
     if ($context.bundlePath) {
         $bundleFlags = " --bootstrap-cluster-image $($context.bundlePath)/konvoy-bootstrap-image-$($context.nkpVersion).tar --bundle $($context.bundlePath)/container-images/konvoy-image-bundle-$($context.nkpVersion).tar,$($context.bundlePath)/container-images/kommander-image-bundle-$($context.nkpVersion).tar"
     }
+    $advancedFlags = ""
+    if ($context.controlPlaneEndpointIp) { $advancedFlags += " --control-plane-endpoint-ip $($context.controlPlaneEndpointIp)" }
+    if ($context.controlPlaneEndpointPort) { $advancedFlags += " --control-plane-endpoint-port $($context.controlPlaneEndpointPort)" }
+    if ($context.sshPublicKeyFile) { $advancedFlags += " --ssh-public-key-file $($context.sshPublicKeyFile)" }
+    if ($context.sshUsername) { $advancedFlags += " --ssh-username $($context.sshUsername)" }
+    if ($context.loadBalancerIpRange) { $advancedFlags += " --kubernetes-service-load-balancer-ip-range $($context.loadBalancerIpRange)" }
+    if ($context.ntpServers) { $advancedFlags += " --ntp-servers $($context.ntpServers -replace '[\[\]`"]', '' -replace ',', ',')" }
+    if ($context.storageContainer) { $advancedFlags += " --csi-storage-container $($context.storageContainer)" }
+    if ($context.project) { $advancedFlags += " --control-plane-pc-project $($context.project) --worker-pc-project $($context.project)" }
+    if ($context.selfManaged -eq "True" -or $context.selfManaged -eq "true") { $advancedFlags += " --self-managed" }
+    if ($context.fips -eq "True" -or $context.fips -eq "true") { $advancedFlags += " --fips" }
+    if ($context.registryCaCert) { $advancedFlags += " --registry-cacert $($context.registryCaCert)" }
 
-    $nkpCommand = "./bin/nkp create cluster nutanix --cluster-name $($context.clusterName) --endpoint $($context.prismCentralEndpoint) --kubernetes-version $($context.kubernetesVersion) --control-plane-replicas $($context.controlPlaneReplicas) --worker-replicas $($context.workerReplicas) --vm-image $($context.imageName) --control-plane-prism-element-cluster $($context.prismElementCluster) --worker-prism-element-cluster $($context.prismElementCluster) --control-plane-subnets $($context.subnetName) --worker-subnets $($context.subnetName) --kubernetes-pod-network-cidr $($context.podCidr) --kubernetes-service-cidr $($context.serviceCidr)$airgapFlag$registryFlags$proxyFlags$bundleFlags --dry-run --output yaml --output-directory ./generated"
+    $nkpCommand = "./bin/nkp create cluster nutanix --cluster-name $($context.clusterName) --endpoint $($context.prismCentralEndpoint) --kubernetes-version $($context.kubernetesVersion) --control-plane-replicas $($context.controlPlaneReplicas) --worker-replicas $($context.workerReplicas) --vm-image $($context.imageName) --control-plane-prism-element-cluster $($context.prismElementCluster) --worker-prism-element-cluster $($context.prismElementCluster) --control-plane-subnets $($context.subnetName) --worker-subnets $($context.subnetName) --kubernetes-pod-network-cidr $($context.podCidr) --kubernetes-service-cidr $($context.serviceCidr)$airgapFlag$registryFlags$proxyFlags$bundleFlags$advancedFlags --dry-run --output yaml --output-directory ./generated"
 
     @"
 environment:
@@ -601,6 +645,10 @@ ZT_REGISTRY_ENDPOINT=$($context.registryEndpoint)
 #!/usr/bin/env bash
 set -euo pipefail
 cd "`$(dirname "`$0")/.."
+if [[ -f ./secrets/secrets.env ]]; then
+  # shellcheck disable=SC1091
+  source ./secrets/secrets.env
+fi
 $nkpCommand
 "@ | Set-Content -LiteralPath $deployScriptPath -Encoding utf8
 
@@ -670,9 +718,13 @@ The generated script uses nkp push image-bundle. Provide credentials through env
         $registryScript = @'
 #!/usr/bin/env bash
 set -euo pipefail
+cd "$(dirname "$0")/.."
+if [[ -f ./secrets/secrets.env ]]; then
+  # shellcheck disable=SC1091
+  source ./secrets/secrets.env
+fi
 : "${ZT_REGISTRY_USERNAME:?Set ZT_REGISTRY_USERNAME}"
 : "${ZT_REGISTRY_PASSWORD:?Set ZT_REGISTRY_PASSWORD}"
-cd "$(dirname "$0")/.."
 ./bin/nkp push image-bundle \
   --image-bundle "__KONVOY_BUNDLE__" \
   --image-bundle "__KOMMANDER_BUNDLE__" \
@@ -692,6 +744,22 @@ cd "$(dirname "$0")/.."
         registryPlan = $registryPlanPath
         registryScript = if (Test-Path -LiteralPath $registryScriptPath) { $registryScriptPath } else { $null }
     } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $context.stateDir "registry.json") -Encoding utf8
+
+    if ($Apply) {
+        if ($context.environmentType -ne "air-gapped") {
+            Write-Check -Status "INFO" -Message "Registry apply is optional for $($context.environmentType); generated plan only."
+            return
+        }
+        if ($context.registryEndpoint -match "\.example\.com") {
+            throw "Refusing registry apply because registry endpoint is still a placeholder."
+        }
+        New-ZtDirectory -Path $context.logsDir
+        $registryLog = Join-Path $context.logsDir "registry-push.log"
+        $bashPath = Convert-ToBashPath -Path $registryScriptPath
+        Write-Check -Status "INFO" -Message "Applying registry script; log: $registryLog"
+        bash -lc "chmod +x '$bashPath' && '$bashPath'" *> $registryLog
+        Write-Check -Status "PASS" -Message "Registry apply completed."
+    }
 }
 
 function Invoke-Deploy {
@@ -734,8 +802,11 @@ Default behavior is dry-run. Use `-Apply` only when configuration and credential
     }
 
     $bashPath = Convert-ToBashPath -Path $deployScript
+    New-ZtDirectory -Path $context.logsDir
+    $deployLog = Join-Path $context.logsDir "deploy.log"
     Write-Check -Status "INFO" -Message "Applying deploy script with bash: $bashPath"
-    bash -lc "chmod +x '$bashPath' && '$bashPath'"
+    bash -lc "chmod +x '$bashPath' && '$bashPath'" *> $deployLog
+    Write-Check -Status "PASS" -Message "Deploy apply completed; log: $deployLog"
 }
 
 function Invoke-Verify {
@@ -774,6 +845,14 @@ function Invoke-Verify {
 
     $lines | Set-Content -LiteralPath $reportPath -Encoding utf8
     $checks | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $context.reportsDir "component-health.json") -Encoding utf8
+    if (Test-Path -LiteralPath $kubeconfigPath) {
+        New-ZtDirectory -Path $context.logsDir
+        $kubectlLog = Join-Path $context.logsDir "verify-kubectl.log"
+        $bashKubeconfig = Convert-ToBashPath -Path $kubeconfigPath
+        $bashKubectl = Convert-ToBashPath -Path $kubectlPath
+        bash -lc "'$bashKubectl' --kubeconfig '$bashKubeconfig' get nodes -o wide && '$bashKubectl' --kubeconfig '$bashKubeconfig' get pods -A" *> $kubectlLog
+        Write-Check -Status "PASS" -Message "Live kubectl verification log: $kubectlLog"
+    }
     Write-Check -Status "PASS" -Message "Wrote verification report: $reportPath"
 }
 
@@ -808,6 +887,10 @@ function Invoke-Secrets {
     $summaryPath = Join-Path $context.stateDir "secrets.json"
     $summary | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $summaryPath -Encoding utf8
 
+    New-ZtDirectory -Path $context.secretsDir
+    $secretEnvPath = Join-Path $context.secretsDir "secrets.env"
+    Invoke-ConfigTool -Arguments @("secret-env", "--secrets", $secretsPath) | Set-Content -LiteralPath $secretEnvPath -Encoding utf8
+
     $envExamplePath = Join-Path $context.generatedDir "secrets.env.example"
     New-ZtDirectory -Path $context.generatedDir
     @"
@@ -819,6 +902,7 @@ export ZT_REGISTRY_PASSWORD="change-me"
 "@ | Set-Content -LiteralPath $envExamplePath -Encoding utf8
 
     Write-Check -Status "PASS" -Message "Recorded redacted secrets summary: $summaryPath"
+    Write-Check -Status "PASS" -Message "Rendered local secret environment file: $secretEnvPath"
     Write-Check -Status "PASS" -Message "Wrote shell secrets example: $envExamplePath"
 }
 

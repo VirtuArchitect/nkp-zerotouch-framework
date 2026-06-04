@@ -51,7 +51,9 @@
         "prismCentralEndpoint": { "type": "string" },
         "clusterName": { "type": "string" },
         "subnetName": { "type": "string" },
-        "imageName": { "type": "string" }
+        "imageName": { "type": "string" },
+        "storageContainer": { "type": "string" },
+        "project": { "type": "string" }
       }
     },
     "registry": {
@@ -59,7 +61,8 @@
       "properties": {
         "endpoint": { "type": "string" },
         "namespace": { "type": "string" },
-        "insecure": { "type": "boolean" }
+        "insecure": { "type": "boolean" },
+        "caCert": { "type": "string" }
       }
     },
     "cluster": {
@@ -71,7 +74,18 @@
         "controlPlaneReplicas": { "type": "integer", "minimum": 1 },
         "workerReplicas": { "type": "integer", "minimum": 0 },
         "podCidr": { "type": "string" },
-        "serviceCidr": { "type": "string" }
+        "serviceCidr": { "type": "string" },
+        "controlPlaneEndpointIp": { "type": "string" },
+        "controlPlaneEndpointPort": { "type": "integer", "minimum": 1 },
+        "loadBalancerIpRange": { "type": "string" },
+        "ntpServers": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "sshPublicKeyFile": { "type": "string" },
+        "sshUsername": { "type": "string" },
+        "selfManaged": { "type": "boolean" },
+        "fips": { "type": "boolean" }
       }
     }
   },

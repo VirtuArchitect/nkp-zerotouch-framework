@@ -71,6 +71,26 @@ See `docs/phases.md` for details.
 
 Additional operational phases are available for secrets, backup, upgrade planning, guarded destroy planning, and CI smoke checks. See `docs/operations.md`.
 
+## Documentation
+
+- `docs/config-reference.md`
+- `docs/runbook-connected.md`
+- `docs/runbook-proxied.md`
+- `docs/runbook-air-gapped.md`
+- `docs/troubleshooting.md`
+
+## Tests and Packaging
+
+```powershell
+.\tests\smoke.ps1 -Config .\configs\environments\connected.example.yaml
+.\scripts\package.ps1 -Version dev
+```
+
+```bash
+./tests/smoke.sh ./configs/environments/connected.example.yaml
+./scripts/package.sh dev
+```
+
 ## NKP Bundle Note
 
 The NKP 2.17.1 bundles contain Linux AMD64 binaries. Run NKP deployment steps from Linux or WSL when using the bundled `nkp` and `kubectl` binaries.

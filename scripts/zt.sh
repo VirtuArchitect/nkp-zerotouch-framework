@@ -10,6 +10,20 @@ target_bundle=""
 confirm_destroy="false"
 failures=0
 warnings=0
+python_bin="${PYTHON_BIN:-}"
+
+if [[ -z "$python_bin" ]]; then
+  if command -v python3 >/dev/null 2>&1; then
+    python_bin="python3"
+  elif command -v python >/dev/null 2>&1; then
+    python_bin="python"
+  elif command -v python.exe >/dev/null 2>&1; then
+    python_bin="python.exe"
+  else
+    echo "Python is required. Set PYTHON_BIN or install python3." >&2
+    exit 2
+  fi
+fi
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -68,8 +82,20 @@ check() {
 
 yaml_scalar() {
   local key="$1"
-  grep -m 1 -E "^[[:space:]]*${key}:[[:space:]]*" "$config_path" \
-    | sed -E "s/^[[:space:]]*${key}:[[:space:]]*[\"']?([^\"'[:space:]]+)['\"]?[[:space:]]*$/\1/" || true
+  local path="$key"
+  case "$key" in
+    name) path="environment.name" ;;
+    type) path="environment.type" ;;
+    version) path="nkp.version" ;;
+    bundleType) path="nkp.bundleType" ;;
+    bundlePath) path="nkp.bundlePath" ;;
+    prismCentralEndpoint) path="nutanix.prismCentralEndpoint" ;;
+    endpoint) path="registry.endpoint" ;;
+    namespace) path="registry.namespace" ;;
+    httpProxy) path="environment.proxy.httpProxy" ;;
+    httpsProxy) path="environment.proxy.httpsProxy" ;;
+  esac
+  "$python_bin" ./tools/zt_config.py get --config "$config_path" --path "$path"
 }
 
 required_scalar() {
@@ -209,16 +235,18 @@ prepare_workspace() {
   local generated_dir="$environment_root/generated"
   local logs_dir="$environment_root/logs"
   local state_dir="$environment_root/state"
+  local secrets_dir="$environment_root/secrets"
 
   printf '\n'
   check INFO "Preparing ZeroTouch workspace for '$environment_name'."
 
-  mkdir -p "$bin_dir" "$generated_dir" "$logs_dir" "$state_dir"
+  mkdir -p "$bin_dir" "$generated_dir" "$logs_dir" "$state_dir" "$secrets_dir"
   check PASS "Directory ready: $environment_root"
   check PASS "Directory ready: $bin_dir"
   check PASS "Directory ready: $generated_dir"
   check PASS "Directory ready: $logs_dir"
   check PASS "Directory ready: $state_dir"
+  check PASS "Directory ready: $secrets_dir"
 
   if [[ -n "$bundle_path" ]]; then
     cp -f "$bundle_path/cli/nkp" "$bin_dir/nkp"
@@ -256,7 +284,8 @@ prepare_workspace() {
     "bin": "$bin_dir",
     "generated": "$generated_dir",
     "logs": "$logs_dir",
-    "state": "$state_dir"
+    "state": "$state_dir",
+    "secrets": "$secrets_dir"
   }
 }
 EOF
@@ -286,16 +315,7 @@ EOF
 section_scalar() {
   local section="$1"
   local key="$2"
-  awk -v section="$section" -v key="$key" '
-    $0 ~ "^[[:space:]]*" section ":[[:space:]]*$" { in_section=1; next }
-    in_section && $0 ~ "^[^[:space:]]" { exit }
-    in_section && $0 ~ "^[[:space:]]+" key ":[[:space:]]*" {
-      sub("^[[:space:]]+" key ":[[:space:]]*", "", $0)
-      gsub(/^["'\'' ]+|["'\'' ]+$/, "", $0)
-      print
-      exit
-    }
-  ' "$config_path"
+  "$python_bin" ./tools/zt_config.py get --config "$config_path" --path "$section.$key"
 }
 
 context_paths() {
@@ -306,6 +326,7 @@ context_paths() {
   logs_dir="$environment_root/logs"
   state_dir="$environment_root/state"
   reports_dir="$environment_root/reports"
+  secrets_dir="$environment_root/secrets"
 }
 
 assert_prepared() {
@@ -333,8 +354,19 @@ load_context() {
   worker_replicas="$(section_scalar cluster workerReplicas)"
   pod_cidr="$(section_scalar cluster podCidr)"
   service_cidr="$(section_scalar cluster serviceCidr)"
+  control_plane_endpoint_ip="$(section_scalar cluster controlPlaneEndpointIp)"
+  control_plane_endpoint_port="$(section_scalar cluster controlPlaneEndpointPort)"
+  ssh_public_key_file="$(section_scalar cluster sshPublicKeyFile)"
+  ssh_username="$(section_scalar cluster sshUsername)"
+  ntp_servers="$(section_scalar cluster ntpServers)"
+  load_balancer_ip_range="$(section_scalar cluster loadBalancerIpRange)"
+  self_managed="$(section_scalar cluster selfManaged)"
+  fips="$(section_scalar cluster fips)"
+  storage_container="$(section_scalar nutanix storageContainer)"
+  project="$(section_scalar nutanix project)"
   registry_endpoint="$(section_scalar registry endpoint)"
   registry_namespace="$(section_scalar registry namespace)"
+  registry_ca_cert="$(section_scalar registry caCert)"
   http_proxy="$(section_scalar proxy httpProxy)"
   https_proxy="$(section_scalar proxy httpsProxy)"
   context_paths
@@ -357,8 +389,20 @@ generate_assets() {
   if [[ -n "$bundle_path" ]]; then
     bundle_flags=" --bootstrap-cluster-image $bundle_path/konvoy-bootstrap-image-$nkp_version.tar --bundle $bundle_path/container-images/konvoy-image-bundle-$nkp_version.tar,$bundle_path/container-images/kommander-image-bundle-$nkp_version.tar"
   fi
+  local advanced_flags=""
+  [[ -n "$control_plane_endpoint_ip" ]] && advanced_flags="$advanced_flags --control-plane-endpoint-ip $control_plane_endpoint_ip"
+  [[ -n "$control_plane_endpoint_port" ]] && advanced_flags="$advanced_flags --control-plane-endpoint-port $control_plane_endpoint_port"
+  [[ -n "$ssh_public_key_file" ]] && advanced_flags="$advanced_flags --ssh-public-key-file $ssh_public_key_file"
+  [[ -n "$ssh_username" ]] && advanced_flags="$advanced_flags --ssh-username $ssh_username"
+  [[ -n "$load_balancer_ip_range" ]] && advanced_flags="$advanced_flags --kubernetes-service-load-balancer-ip-range $load_balancer_ip_range"
+  [[ -n "$ntp_servers" ]] && advanced_flags="$advanced_flags --ntp-servers ${ntp_servers//[\[\]\"]/}"
+  [[ -n "$storage_container" ]] && advanced_flags="$advanced_flags --csi-storage-container $storage_container"
+  [[ -n "$project" ]] && advanced_flags="$advanced_flags --control-plane-pc-project $project --worker-pc-project $project"
+  [[ "$self_managed" == "true" || "$self_managed" == "True" ]] && advanced_flags="$advanced_flags --self-managed"
+  [[ "$fips" == "true" || "$fips" == "True" ]] && advanced_flags="$advanced_flags --fips"
+  [[ -n "$registry_ca_cert" ]] && advanced_flags="$advanced_flags --registry-cacert $registry_ca_cert"
 
-  local nkp_command="./bin/nkp create cluster nutanix --cluster-name $cluster_name --endpoint $prism_endpoint --kubernetes-version $kubernetes_version --control-plane-replicas $control_plane_replicas --worker-replicas $worker_replicas --vm-image $image_name --control-plane-prism-element-cluster $prism_cluster --worker-prism-element-cluster $prism_cluster --control-plane-subnets $subnet_name --worker-subnets $subnet_name --kubernetes-pod-network-cidr $pod_cidr --kubernetes-service-cidr $service_cidr$airgap_flag$registry_flags$proxy_flags$bundle_flags --dry-run --output yaml --output-directory ./generated"
+  local nkp_command="./bin/nkp create cluster nutanix --cluster-name $cluster_name --endpoint $prism_endpoint --kubernetes-version $kubernetes_version --control-plane-replicas $control_plane_replicas --worker-replicas $worker_replicas --vm-image $image_name --control-plane-prism-element-cluster $prism_cluster --worker-prism-element-cluster $prism_cluster --control-plane-subnets $subnet_name --worker-subnets $subnet_name --kubernetes-pod-network-cidr $pod_cidr --kubernetes-service-cidr $service_cidr$airgap_flag$registry_flags$proxy_flags$bundle_flags$advanced_flags --dry-run --output yaml --output-directory ./generated"
 
   cat >"$generated_dir/cluster-values.yaml" <<EOF
 environment:
@@ -386,6 +430,10 @@ EOF
 #!/usr/bin/env bash
 set -euo pipefail
 cd "\$(dirname "\$0")/.."
+if [[ -f ./secrets/secrets.env ]]; then
+  # shellcheck disable=SC1091
+  source ./secrets/secrets.env
+fi
 $nkp_command
 EOF
   chmod +x "$generated_dir/deploy.sh"
@@ -434,9 +482,13 @@ EOF
     cat >"$generated_dir/registry.sh" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
+cd "\$(dirname "\$0")/.."
+if [[ -f ./secrets/secrets.env ]]; then
+  # shellcheck disable=SC1091
+  source ./secrets/secrets.env
+fi
 : "\${ZT_REGISTRY_USERNAME:?Set ZT_REGISTRY_USERNAME}"
 : "\${ZT_REGISTRY_PASSWORD:?Set ZT_REGISTRY_PASSWORD}"
-cd "\$(dirname "\$0")/.."
 ./bin/nkp push image-bundle \\
   --image-bundle "$konvoy_bundle" \\
   --image-bundle "$kommander_bundle" \\
@@ -452,6 +504,19 @@ EOF
   cat >"$state_dir/registry.json" <<EOF
 { "generatedAt": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")", "registryPlan": "$generated_dir/registry-plan.md" }
 EOF
+  if [[ "$apply" == "true" ]]; then
+    if [[ "$environment_type" != "air-gapped" ]]; then
+      check INFO "Registry apply is optional for $environment_type; generated plan only."
+      return
+    fi
+    if [[ "$registry_endpoint" == *".example.com"* ]]; then
+      echo "Refusing registry apply because registry endpoint is still a placeholder." >&2
+      exit 1
+    fi
+    mkdir -p "$logs_dir"
+    "$generated_dir/registry.sh" >"$logs_dir/registry-push.log" 2>&1
+    check PASS "Registry apply completed; log: $logs_dir/registry-push.log"
+  fi
 }
 
 deploy_phase() {
@@ -483,7 +548,9 @@ EOF
     echo "Refusing apply because Prism Central endpoint is still a placeholder." >&2
     exit 1
   fi
-  "$generated_dir/deploy.sh"
+  mkdir -p "$logs_dir"
+  "$generated_dir/deploy.sh" >"$logs_dir/deploy.log" 2>&1
+  check PASS "Deploy apply completed; log: $logs_dir/deploy.log"
 }
 
 verify_phase() {
@@ -502,13 +569,19 @@ verify_phase() {
     [[ -f "$bin_dir/kubectl" ]] && echo "- pass: kubectl binary - $bin_dir/kubectl" || echo "- fail: kubectl binary - $bin_dir/kubectl"
     [[ -f "$state_dir/kubeconfig" ]] && echo "- pass: kubeconfig - $state_dir/kubeconfig" || echo "- warn: kubeconfig - $state_dir/kubeconfig"
   } >"$report_path"
+  if [[ -f "$state_dir/kubeconfig" && -f "$bin_dir/kubectl" ]]; then
+    mkdir -p "$logs_dir"
+    "$bin_dir/kubectl" --kubeconfig "$state_dir/kubeconfig" get nodes -o wide >"$logs_dir/verify-kubectl.log" 2>&1
+    "$bin_dir/kubectl" --kubeconfig "$state_dir/kubeconfig" get pods -A >>"$logs_dir/verify-kubectl.log" 2>&1
+    check PASS "Live kubectl verification log: $logs_dir/verify-kubectl.log"
+  fi
   check PASS "Wrote verification report: $report_path"
 }
 
 secrets_phase() {
   load_context
   assert_prepared
-  mkdir -p "$state_dir" "$generated_dir"
+  mkdir -p "$state_dir" "$generated_dir" "$secrets_dir"
   local resolved_secrets="$secrets_path"
   [[ -z "$resolved_secrets" ]] && resolved_secrets="$repo_root/configs/secrets/$environment_name.secrets.yaml"
   if [[ ! -f "$resolved_secrets" ]]; then
@@ -522,6 +595,7 @@ secrets_phase() {
   "redacted": true
 }
 EOF
+  "$python_bin" ./tools/zt_config.py secret-env --secrets "$resolved_secrets" >"$secrets_dir/secrets.env"
   cat >"$generated_dir/secrets.env.example" <<'EOF'
 # Source this file pattern with real values in your shell. Do not commit real secrets.
 export NUTANIX_PC_USERNAME="admin"
@@ -530,6 +604,7 @@ export ZT_REGISTRY_USERNAME="registry-user"
 export ZT_REGISTRY_PASSWORD="change-me"
 EOF
   check PASS "Recorded redacted secrets summary: $state_dir/secrets.json"
+  check PASS "Rendered local secret environment file: $secrets_dir/secrets.env"
   check PASS "Wrote shell secrets example: $generated_dir/secrets.env.example"
 }
 
@@ -667,6 +742,14 @@ case "$command_name" in
     registry_namespace="$(yaml_scalar namespace)"
     http_proxy="$(yaml_scalar httpProxy)"
     https_proxy="$(yaml_scalar httpsProxy)"
+
+    schema_result="$("$python_bin" ./tools/zt_config.py validate --config "$config_path")"
+    while IFS= read -r schema_error; do
+      [[ -n "$schema_error" ]] && check FAIL "Schema: $schema_error"
+    done < <("$python_bin" -c 'import json,sys; data=json.loads(sys.stdin.read()); print("\n".join(data.get("errors", [])))' <<<"$schema_result")
+    while IFS= read -r schema_warning; do
+      [[ -n "$schema_warning" ]] && check WARN "Schema: $schema_warning"
+    done < <("$python_bin" -c 'import json,sys; data=json.loads(sys.stdin.read()); print("\n".join(data.get("warnings", [])))' <<<"$schema_result")
 
     check INFO "ZeroTouch command: validate"
     check INFO "Config: $config_path"

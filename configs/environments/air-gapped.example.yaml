@@ -13,17 +13,30 @@ registry:
   endpoint: registry.airgap.example.com:5000
   namespace: nkp
   insecure: false
+  caCert: /etc/pki/ca-trust/source/anchors/registry-ca.crt
 
 nutanix:
   prismCentralEndpoint: https://prism-central.example.com:9440
   clusterName: nutanix-cluster
   subnetName: vlan-k8s
   imageName: nkp-node-image
+  storageContainer: default-container
+  project: default
 
 cluster:
   name: nkp-mgmt-airgapped
   kubernetesVersion: 1.34.3
+  controlPlaneEndpointIp: 10.10.30.50
+  controlPlaneEndpointPort: 6443
   controlPlaneReplicas: 3
   workerReplicas: 3
   podCidr: 192.168.0.0/16
   serviceCidr: 10.96.0.0/12
+  loadBalancerIpRange: 10.10.30.100-10.10.30.120
+  ntpServers:
+    - ntp1.airgap.example.com
+    - ntp2.airgap.example.com
+  sshPublicKeyFile: /home/nkp/.ssh/id_rsa.pub
+  sshUsername: nutanix
+  selfManaged: true
+  fips: false

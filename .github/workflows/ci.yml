@@ -27,3 +27,14 @@ jobs:
             echo "Checking $file"
             test -s "$file"
           done
+
+      - name: Python config helper
+        run: |
+          python tools/zt_config.py validate --config configs/environments/connected.example.yaml
+          python tools/zt_config.py context --config configs/environments/connected.example.yaml
+
+      - name: Test scripts syntax
+        shell: pwsh
+        run: |
+          $null = [scriptblock]::Create((Get-Content -Raw tests/smoke.ps1))
+          bash -n tests/smoke.sh
