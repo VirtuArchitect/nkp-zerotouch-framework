@@ -1,0 +1,32 @@
+environment:
+  name: lab-proxied
+  type: proxied
+  proxy:
+    httpProxy: http://proxy.example.com:8080
+    httpsProxy: http://proxy.example.com:8080
+    noProxy:
+      - localhost
+      - 127.0.0.1
+      - .example.com
+      - 10.0.0.0/8
+
+nkp:
+  version: v2.17.1
+  bundleType: standard
+  bundlePath: /mnt/c/Share/nkp-bundle_v2.17.1_linux_amd64/nkp-v2.17.1
+  cliPath: /mnt/c/Share/nkp-bundle_v2.17.1_linux_amd64/nkp-v2.17.1/cli/nkp
+  kubectlPath: /mnt/c/Share/nkp-bundle_v2.17.1_linux_amd64/nkp-v2.17.1/kubectl
+
+nutanix:
+  prismCentralEndpoint: https://prism-central.example.com:9440
+  clusterName: nutanix-cluster
+  subnetName: vlan-k8s
+  imageName: nkp-node-image
+
+cluster:
+  name: nkp-mgmt-proxied
+  kubernetesVersion: 1.34.3
+  controlPlaneReplicas: 3
+  workerReplicas: 3
+  podCidr: 192.168.0.0/16
+  serviceCidr: 10.96.0.0/12

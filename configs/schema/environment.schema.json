@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/nkp-zerotouch-framework/environment.schema.json",
+  "title": "NKP ZeroTouch Environment",
+  "type": "object",
+  "required": ["environment", "nkp", "nutanix", "cluster"],
+  "properties": {
+    "environment": {
+      "type": "object",
+      "required": ["name", "type"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "enum": ["connected", "proxied", "air-gapped"]
+        },
+        "proxy": {
+          "type": "object",
+          "properties": {
+            "httpProxy": { "type": "string" },
+            "httpsProxy": { "type": "string" },
+            "noProxy": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "nkp": {
+      "type": "object",
+      "required": ["version"],
+      "properties": {
+        "version": { "type": "string" },
+        "bundleType": {
+          "type": "string",
+          "enum": ["standard", "air-gapped"]
+        },
+        "bundlePath": { "type": "string" },
+        "cliPath": { "type": "string" },
+        "kubectlPath": { "type": "string" }
+      }
+    },
+    "nutanix": {
+      "type": "object",
+      "required": ["prismCentralEndpoint", "clusterName"],
+      "properties": {
+        "prismCentralEndpoint": { "type": "string" },
+        "clusterName": { "type": "string" },
+        "subnetName": { "type": "string" },
+        "imageName": { "type": "string" }
+      }
+    },
+    "registry": {
+      "type": "object",
+      "properties": {
+        "endpoint": { "type": "string" },
+        "namespace": { "type": "string" },
+        "insecure": { "type": "boolean" }
+      }
+    },
+    "cluster": {
+      "type": "object",
+      "required": ["name", "kubernetesVersion"],
+      "properties": {
+        "name": { "type": "string" },
+        "kubernetesVersion": { "type": "string" },
+        "controlPlaneReplicas": { "type": "integer", "minimum": 1 },
+        "workerReplicas": { "type": "integer", "minimum": 0 },
+        "podCidr": { "type": "string" },
+        "serviceCidr": { "type": "string" }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "environment": {
+            "properties": {
+              "type": { "const": "air-gapped" }
+            }
+          }
+        }
+      },
+      "then": {
+        "required": ["registry"],
+        "properties": {
+          "nkp": {
+            "required": ["bundleType", "bundlePath"],
+            "properties": {
+              "bundleType": { "const": "air-gapped" }
+            }
+          },
+          "registry": {
+            "required": ["endpoint", "namespace"]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "environment": {
+            "properties": {
+              "type": { "const": "proxied" }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "environment": {
+            "required": ["proxy"]
+          }
+        }
+      }
+    }
+  ]
+}

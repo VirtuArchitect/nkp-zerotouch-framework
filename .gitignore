@@ -1,0 +1,21 @@
+# NKP bundles and extracted artifacts are large external inputs.
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+nkp-bundle_*/
+nkp-air-gapped-bundle_*/
+
+# Local generated output.
+.zt/
+out/
+dist/
+logs/
+
+# Real secrets must stay local.
+configs/secrets/*.secrets.yaml
+!configs/secrets/*.secrets.example.yaml
+
+# Editor and OS files.
+.DS_Store
+Thumbs.db
