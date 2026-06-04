@@ -29,7 +29,7 @@ docker compose up --build dashboard
 Open:
 
 ```text
-http://localhost:8080
+http://localhost:18080
 ```
 
 The dashboard only exposes safe actions. Apply/destructive operations remain CLI-only.
@@ -38,7 +38,7 @@ Without Compose:
 
 ```bash
 docker build -t nkp-zerotouch-framework:dev .
-docker run --rm -p 8080:8080 \
+docker run --rm -p 18080:8080 \
   -e ZT_DASHBOARD_HOST=0.0.0.0 \
   -v "$PWD:/workspace" \
   -v C:/Share:/mnt/c/Share:ro \

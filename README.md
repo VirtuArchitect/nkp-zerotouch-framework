@@ -104,6 +104,8 @@ python .\dashboard\app.py 8080
 docker compose up --build dashboard
 ```
 
+Open the containerized dashboard at `http://localhost:18080`.
+
 ## Versioning
 
 The current framework version is stored in `VERSION`. Release notes live in `CHANGELOG.md`. Tag releases as `v<version>` to trigger the release packaging workflow.
