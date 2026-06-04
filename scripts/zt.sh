@@ -4,12 +4,16 @@ set -euo pipefail
 command_name="${1:-validate}"
 config_path=""
 strict="false"
+apply="false"
+secrets_path=""
+target_bundle=""
+confirm_destroy="false"
 failures=0
 warnings=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    validate|prepare|deploy|verify)
+    validate|prepare|generate|registry|deploy|verify|secrets|backup|upgrade|destroy|runs|ci)
       command_name="$1"
       shift
       ;;
@@ -19,6 +23,22 @@ while [[ $# -gt 0 ]]; do
       ;;
     --strict)
       strict="true"
+      shift
+      ;;
+    --apply)
+      apply="true"
+      shift
+      ;;
+    --secrets)
+      secrets_path="${2:-}"
+      shift 2
+      ;;
+    --target-bundle)
+      target_bundle="${2:-}"
+      shift 2
+      ;;
+    --confirm-destroy)
+      confirm_destroy="true"
       shift
       ;;
     *)
@@ -263,6 +283,368 @@ EOF
   printf '\nPrepare summary: workspace ready at %s\n' "$environment_root"
 }
 
+section_scalar() {
+  local section="$1"
+  local key="$2"
+  awk -v section="$section" -v key="$key" '
+    $0 ~ "^[[:space:]]*" section ":[[:space:]]*$" { in_section=1; next }
+    in_section && $0 ~ "^[^[:space:]]" { exit }
+    in_section && $0 ~ "^[[:space:]]+" key ":[[:space:]]*" {
+      sub("^[[:space:]]+" key ":[[:space:]]*", "", $0)
+      gsub(/^["'\'' ]+|["'\'' ]+$/, "", $0)
+      print
+      exit
+    }
+  ' "$config_path"
+}
+
+context_paths() {
+  repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  environment_root="$repo_root/.zt/environments/$environment_name"
+  bin_dir="$environment_root/bin"
+  generated_dir="$environment_root/generated"
+  logs_dir="$environment_root/logs"
+  state_dir="$environment_root/state"
+  reports_dir="$environment_root/reports"
+}
+
+assert_prepared() {
+  context_paths
+  if [[ ! -f "$state_dir/environment.json" ]]; then
+    echo "Prepare has not completed for '$environment_name'. Run prepare first." >&2
+    exit 1
+  fi
+  check PASS "Prepared workspace found: $environment_root"
+}
+
+load_context() {
+  environment_name="$(section_scalar environment name)"
+  environment_type="$(section_scalar environment type)"
+  bundle_type="$(section_scalar nkp bundleType)"
+  bundle_path="$(section_scalar nkp bundlePath)"
+  nkp_version="$(section_scalar nkp version)"
+  prism_endpoint="$(section_scalar nutanix prismCentralEndpoint)"
+  prism_cluster="$(section_scalar nutanix clusterName)"
+  subnet_name="$(section_scalar nutanix subnetName)"
+  image_name="$(section_scalar nutanix imageName)"
+  cluster_name="$(section_scalar cluster name)"
+  kubernetes_version="$(section_scalar cluster kubernetesVersion)"
+  control_plane_replicas="$(section_scalar cluster controlPlaneReplicas)"
+  worker_replicas="$(section_scalar cluster workerReplicas)"
+  pod_cidr="$(section_scalar cluster podCidr)"
+  service_cidr="$(section_scalar cluster serviceCidr)"
+  registry_endpoint="$(section_scalar registry endpoint)"
+  registry_namespace="$(section_scalar registry namespace)"
+  http_proxy="$(section_scalar proxy httpProxy)"
+  https_proxy="$(section_scalar proxy httpsProxy)"
+  context_paths
+}
+
+generate_assets() {
+  load_context
+  assert_prepared
+  mkdir -p "$generated_dir" "$state_dir" "$reports_dir"
+
+  local airgap_flag=""
+  [[ "$environment_type" == "air-gapped" ]] && airgap_flag=" --airgapped"
+  local registry_flags=""
+  [[ -n "$registry_endpoint" ]] && registry_flags=" --registry-url $registry_endpoint"
+  [[ "$environment_type" == "air-gapped" && -n "$registry_endpoint" ]] && registry_flags="$registry_flags --registry-mirror-url $registry_endpoint"
+  local proxy_flags=""
+  [[ "$environment_type" == "proxied" && -n "$http_proxy" ]] && proxy_flags="$proxy_flags --http-proxy $http_proxy"
+  [[ "$environment_type" == "proxied" && -n "$https_proxy" ]] && proxy_flags="$proxy_flags --https-proxy $https_proxy"
+  local bundle_flags=""
+  if [[ -n "$bundle_path" ]]; then
+    bundle_flags=" --bootstrap-cluster-image $bundle_path/konvoy-bootstrap-image-$nkp_version.tar --bundle $bundle_path/container-images/konvoy-image-bundle-$nkp_version.tar,$bundle_path/container-images/kommander-image-bundle-$nkp_version.tar"
+  fi
+
+  local nkp_command="./bin/nkp create cluster nutanix --cluster-name $cluster_name --endpoint $prism_endpoint --kubernetes-version $kubernetes_version --control-plane-replicas $control_plane_replicas --worker-replicas $worker_replicas --vm-image $image_name --control-plane-prism-element-cluster $prism_cluster --worker-prism-element-cluster $prism_cluster --control-plane-subnets $subnet_name --worker-subnets $subnet_name --kubernetes-pod-network-cidr $pod_cidr --kubernetes-service-cidr $service_cidr$airgap_flag$registry_flags$proxy_flags$bundle_flags --dry-run --output yaml --output-directory ./generated"
+
+  cat >"$generated_dir/cluster-values.yaml" <<EOF
+environment:
+  name: $environment_name
+  type: $environment_type
+nkp:
+  version: $nkp_version
+  bundleType: $bundle_type
+cluster:
+  name: $cluster_name
+  kubernetesVersion: $kubernetes_version
+EOF
+
+  cat >"$generated_dir/nkp.env" <<EOF
+ZT_ENVIRONMENT_NAME=$environment_name
+ZT_ENVIRONMENT_TYPE=$environment_type
+ZT_NKP_VERSION=$nkp_version
+ZT_CLUSTER_NAME=$cluster_name
+ZT_BUNDLE_TYPE=$bundle_type
+ZT_BUNDLE_PATH=$bundle_path
+ZT_REGISTRY_ENDPOINT=$registry_endpoint
+EOF
+
+  cat >"$generated_dir/deploy.sh" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+cd "\$(dirname "\$0")/.."
+$nkp_command
+EOF
+  chmod +x "$generated_dir/deploy.sh"
+
+  cat >"$state_dir/generate.json" <<EOF
+{
+  "generatedAt": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+  "dryRunCommand": "$nkp_command"
+}
+EOF
+
+  check PASS "Generated cluster values: $generated_dir/cluster-values.yaml"
+  check PASS "Generated environment file: $generated_dir/nkp.env"
+  check PASS "Generated deploy script: $generated_dir/deploy.sh"
+}
+
+registry_assets() {
+  load_context
+  assert_prepared
+  mkdir -p "$generated_dir" "$state_dir"
+
+  if [[ "$environment_type" != "air-gapped" ]]; then
+    cat >"$generated_dir/registry-plan.md" <<EOF
+# Registry Plan
+
+Environment \`$environment_name\` is \`$environment_type\`.
+
+No mandatory image mirroring is required.
+EOF
+    check PASS "Generated registry plan: $generated_dir/registry-plan.md"
+  else
+    local konvoy_bundle="$bundle_path/container-images/konvoy-image-bundle-$nkp_version.tar"
+    local kommander_bundle="$bundle_path/container-images/kommander-image-bundle-$nkp_version.tar"
+    cat >"$generated_dir/registry-plan.md" <<EOF
+# Registry Plan
+
+Environment: \`$environment_name\`
+Registry: \`$registry_endpoint\`
+Namespace: \`$registry_namespace\`
+
+Bundles:
+
+- \`$konvoy_bundle\`
+- \`$kommander_bundle\`
+EOF
+    cat >"$generated_dir/registry.sh" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+: "\${ZT_REGISTRY_USERNAME:?Set ZT_REGISTRY_USERNAME}"
+: "\${ZT_REGISTRY_PASSWORD:?Set ZT_REGISTRY_PASSWORD}"
+cd "\$(dirname "\$0")/.."
+./bin/nkp push image-bundle \\
+  --image-bundle "$konvoy_bundle" \\
+  --image-bundle "$kommander_bundle" \\
+  --to-registry "$registry_endpoint" \\
+  --to-registry-username "\$ZT_REGISTRY_USERNAME" \\
+  --to-registry-password "\$ZT_REGISTRY_PASSWORD"
+EOF
+    chmod +x "$generated_dir/registry.sh"
+    check PASS "Generated registry plan: $generated_dir/registry-plan.md"
+    check PASS "Generated registry script: $generated_dir/registry.sh"
+  fi
+
+  cat >"$state_dir/registry.json" <<EOF
+{ "generatedAt": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")", "registryPlan": "$generated_dir/registry-plan.md" }
+EOF
+}
+
+deploy_phase() {
+  load_context
+  assert_prepared
+  if [[ ! -f "$generated_dir/deploy.sh" ]]; then
+    echo "Generate has not completed for '$environment_name'. Run generate first." >&2
+    exit 1
+  fi
+  cat >"$generated_dir/deploy-plan.md" <<EOF
+# Deploy Plan
+
+Environment: \`$environment_name\`
+Cluster: \`$cluster_name\`
+Mode: \`$environment_type\`
+
+Generated script:
+
+\`\`\`bash
+$generated_dir/deploy.sh
+\`\`\`
+EOF
+  check PASS "Generated deploy plan: $generated_dir/deploy-plan.md"
+  if [[ "$apply" != "true" ]]; then
+    check INFO "Dry-run mode. Re-run with --apply to execute the generated deploy script."
+    return
+  fi
+  if [[ "$prism_endpoint" == *".example.com"* ]]; then
+    echo "Refusing apply because Prism Central endpoint is still a placeholder." >&2
+    exit 1
+  fi
+  "$generated_dir/deploy.sh"
+}
+
+verify_phase() {
+  load_context
+  assert_prepared
+  mkdir -p "$reports_dir"
+  local report_path="$reports_dir/verification-summary.md"
+  {
+    echo "# Verification Summary"
+    echo
+    echo "Environment: \`$environment_name\`"
+    echo "Cluster: \`$cluster_name\`"
+    echo
+    [[ -f "$state_dir/generate.json" ]] && echo "- pass: generated config - generate.json" || echo "- warn: generated config - generate.json"
+    [[ -f "$bin_dir/nkp" ]] && echo "- pass: nkp binary - $bin_dir/nkp" || echo "- fail: nkp binary - $bin_dir/nkp"
+    [[ -f "$bin_dir/kubectl" ]] && echo "- pass: kubectl binary - $bin_dir/kubectl" || echo "- fail: kubectl binary - $bin_dir/kubectl"
+    [[ -f "$state_dir/kubeconfig" ]] && echo "- pass: kubeconfig - $state_dir/kubeconfig" || echo "- warn: kubeconfig - $state_dir/kubeconfig"
+  } >"$report_path"
+  check PASS "Wrote verification report: $report_path"
+}
+
+secrets_phase() {
+  load_context
+  assert_prepared
+  mkdir -p "$state_dir" "$generated_dir"
+  local resolved_secrets="$secrets_path"
+  [[ -z "$resolved_secrets" ]] && resolved_secrets="$repo_root/configs/secrets/$environment_name.secrets.yaml"
+  if [[ ! -f "$resolved_secrets" ]]; then
+    echo "Secrets file not found: $resolved_secrets. Copy one of configs/secrets/*.example.yaml and remove .example." >&2
+    exit 1
+  fi
+  cat >"$state_dir/secrets.json" <<EOF
+{
+  "loadedAt": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+  "source": "$resolved_secrets",
+  "redacted": true
+}
+EOF
+  cat >"$generated_dir/secrets.env.example" <<'EOF'
+# Source this file pattern with real values in your shell. Do not commit real secrets.
+export NUTANIX_PC_USERNAME="admin"
+export NUTANIX_PC_PASSWORD="change-me"
+export ZT_REGISTRY_USERNAME="registry-user"
+export ZT_REGISTRY_PASSWORD="change-me"
+EOF
+  check PASS "Recorded redacted secrets summary: $state_dir/secrets.json"
+  check PASS "Wrote shell secrets example: $generated_dir/secrets.env.example"
+}
+
+backup_phase() {
+  load_context
+  assert_prepared
+  local stamp
+  stamp="$(date -u +"%Y%m%d-%H%M%S")"
+  local backup_dir="$environment_root/backup/$stamp"
+  mkdir -p "$backup_dir"
+  for dir_name in state generated reports; do
+    if [[ -d "$environment_root/$dir_name" ]]; then
+      cp -a "$environment_root/$dir_name" "$backup_dir/$dir_name"
+      check PASS "Backed up $dir_name"
+    fi
+  done
+  cat >"$backup_dir/backup-manifest.json" <<EOF
+{ "createdAt": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")", "environment": "$environment_name", "backup": "$backup_dir" }
+EOF
+  check PASS "Backup ready: $backup_dir"
+}
+
+upgrade_phase() {
+  load_context
+  assert_prepared
+  mkdir -p "$generated_dir"
+  cat >"$generated_dir/upgrade-plan.md" <<EOF
+# Upgrade Plan
+
+Environment: $environment_name
+Current NKP version: $nkp_version
+Target bundle: $target_bundle
+
+Planned flow:
+
+1. Run backup.
+2. Validate target bundle.
+3. Run NKP upgrade commands from Linux or WSL.
+4. Run verify.
+EOF
+  check PASS "Generated upgrade plan: $generated_dir/upgrade-plan.md"
+  if [[ "$apply" != "true" ]]; then
+    check INFO "Dry-run mode. Re-run with --apply after validating the target bundle."
+    return
+  fi
+  [[ -z "$target_bundle" ]] && { echo "target bundle is required for upgrade apply." >&2; exit 1; }
+  [[ "$prism_endpoint" == *".example.com"* ]] && { echo "Refusing upgrade apply because Prism Central endpoint is still a placeholder." >&2; exit 1; }
+  check WARN "Live upgrade execution is intentionally not automated yet; plan has been generated for operator review."
+}
+
+destroy_phase() {
+  load_context
+  assert_prepared
+  mkdir -p "$generated_dir"
+  cat >"$generated_dir/destroy-plan.md" <<EOF
+# Destroy Plan
+
+Environment: $environment_name
+Cluster: $cluster_name
+
+Command:
+
+\`\`\`bash
+./bin/nkp delete cluster --cluster-name $cluster_name
+\`\`\`
+
+Destroy requires both --apply and --confirm-destroy.
+EOF
+  check PASS "Generated destroy plan: $generated_dir/destroy-plan.md"
+  if [[ "$apply" != "true" || "$confirm_destroy" != "true" ]]; then
+    check INFO "Dry-run mode. Destruction requires --apply --confirm-destroy."
+    return
+  fi
+  [[ "$prism_endpoint" == *".example.com"* ]] && { echo "Refusing destroy apply because Prism Central endpoint is still a placeholder." >&2; exit 1; }
+  check WARN "Live destroy execution is guarded; run the generated plan manually from a prepared Linux/WSL runner."
+}
+
+runs_phase() {
+  load_context
+  assert_prepared
+  local stamp
+  stamp="$(date -u +"%Y%m%d-%H%M%S")"
+  local run_dir="$repo_root/.zt/runs/$stamp"
+  mkdir -p "$run_dir"
+  cat >"$run_dir/summary.json" <<EOF
+{
+  "capturedAt": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+  "environment": "$environment_name",
+  "type": "$environment_type",
+  "cluster": "$cluster_name"
+}
+EOF
+  {
+    echo "# Run Summary"
+    echo
+    echo "Environment: $environment_name"
+    echo "Cluster: $cluster_name"
+    echo
+    for file_name in environment.json staged-tools.json generate.json registry.json secrets.json; do
+      [[ -f "$state_dir/$file_name" ]] && echo "- present: $file_name" || echo "- missing: $file_name"
+    done
+  } >"$run_dir/summary.md"
+  check PASS "Captured run summary: $run_dir"
+}
+
+ci_phase() {
+  check INFO "Running local CI smoke checks."
+  bash -n ./scripts/zt.sh
+  check PASS "Bash syntax parsed."
+  for example in ./configs/environments/*.example.yaml; do
+    ./scripts/zt.sh validate --config "$example" >/dev/null
+  done
+  check PASS "Example config validation completed."
+}
+
 if [[ -z "$config_path" ]]; then
   echo "Missing required --config path." >&2
   exit 2
@@ -345,8 +727,35 @@ case "$command_name" in
       prepare_workspace "$environment_name" "$environment_type" "$bundle_type" "$bundle_path" "$nkp_version" "$prism_endpoint" "$registry_endpoint" "$registry_namespace"
     fi
     ;;
-  deploy|verify)
-    echo "Command '$command_name' is scaffolded. Mode-specific implementation comes next."
+  generate)
+    generate_assets
+    ;;
+  registry)
+    registry_assets
+    ;;
+  deploy)
+    deploy_phase
+    ;;
+  verify)
+    verify_phase
+    ;;
+  secrets)
+    secrets_phase
+    ;;
+  backup)
+    backup_phase
+    ;;
+  upgrade)
+    upgrade_phase
+    ;;
+  destroy)
+    destroy_phase
+    ;;
+  runs)
+    runs_phase
+    ;;
+  ci)
+    ci_phase
     ;;
   *)
     echo "Unsupported command '$command_name'." >&2

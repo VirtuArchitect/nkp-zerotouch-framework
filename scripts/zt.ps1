@@ -1,12 +1,20 @@
 param(
     [Parameter(Position = 0)]
-    [ValidateSet("validate", "prepare", "deploy", "verify")]
+    [ValidateSet("validate", "prepare", "generate", "registry", "deploy", "verify", "secrets", "backup", "upgrade", "destroy", "runs", "ci")]
     [string]$Command = "validate",
 
     [Parameter(Mandatory = $true)]
     [string]$Config,
 
-    [switch]$Strict
+    [switch]$Strict,
+
+    [switch]$Apply
+    ,
+    [string]$Secrets,
+
+    [string]$TargetBundle,
+
+    [switch]$ConfirmDestroy
 )
 
 $ErrorActionPreference = "Stop"
@@ -47,6 +55,33 @@ function Get-YamlScalar {
     }
 
     return $match.Matches[0].Groups[1].Value.Trim(" '""")
+}
+
+function Get-YamlSectionScalar {
+    param(
+        [string]$ConfigPath,
+        [string]$Section,
+        [string]$Key
+    )
+
+    $lines = Get-Content -LiteralPath $ConfigPath
+    $inSection = $false
+    foreach ($line in $lines) {
+        if ($line -match "^\s*$([regex]::Escape($Section)):\s*$") {
+            $inSection = $true
+            continue
+        }
+
+        if ($inSection -and $line -match "^\S") {
+            break
+        }
+
+        if ($inSection -and $line -match "^\s+$([regex]::Escape($Key)):\s*(.+?)\s*$") {
+            return $Matches[1].Trim(" '""")
+        }
+    }
+
+    return $null
 }
 
 function Convert-WslPathToWindowsPath {
@@ -428,12 +463,568 @@ function Invoke-Prepare {
     Write-Host "Prepare summary: workspace ready at $environmentRoot"
 }
 
+function Get-ZtContext {
+    param([string]$ConfigPath)
+
+    $environmentName = Get-YamlSectionScalar -ConfigPath $ConfigPath -Section "environment" -Key "name"
+    $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
+    $environmentRoot = Join-Path $repoRoot ".zt\environments\$environmentName"
+
+    return [ordered]@{
+        repoRoot = $repoRoot
+        environmentName = $environmentName
+        environmentType = Get-YamlSectionScalar -ConfigPath $ConfigPath -Section "environment" -Key "type"
+        bundleType = Get-YamlSectionScalar -ConfigPath $ConfigPath -Section "nkp" -Key "bundleType"
+        bundlePath = Get-YamlSectionScalar -ConfigPath $ConfigPath -Section "nkp" -Key "bundlePath"
+        nkpVersion = Get-YamlSectionScalar -ConfigPath $ConfigPath -Section "nkp" -Key "version"
+        prismCentralEndpoint = Get-YamlSectionScalar -ConfigPath $ConfigPath -Section "nutanix" -Key "prismCentralEndpoint"
+        prismElementCluster = Get-YamlSectionScalar -ConfigPath $ConfigPath -Section "nutanix" -Key "clusterName"
+        subnetName = Get-YamlSectionScalar -ConfigPath $ConfigPath -Section "nutanix" -Key "subnetName"
+        imageName = Get-YamlSectionScalar -ConfigPath $ConfigPath -Section "nutanix" -Key "imageName"
+        clusterName = Get-YamlSectionScalar -ConfigPath $ConfigPath -Section "cluster" -Key "name"
+        kubernetesVersion = Get-YamlSectionScalar -ConfigPath $ConfigPath -Section "cluster" -Key "kubernetesVersion"
+        controlPlaneReplicas = Get-YamlSectionScalar -ConfigPath $ConfigPath -Section "cluster" -Key "controlPlaneReplicas"
+        workerReplicas = Get-YamlSectionScalar -ConfigPath $ConfigPath -Section "cluster" -Key "workerReplicas"
+        podCidr = Get-YamlSectionScalar -ConfigPath $ConfigPath -Section "cluster" -Key "podCidr"
+        serviceCidr = Get-YamlSectionScalar -ConfigPath $ConfigPath -Section "cluster" -Key "serviceCidr"
+        registryEndpoint = Get-YamlSectionScalar -ConfigPath $ConfigPath -Section "registry" -Key "endpoint"
+        registryNamespace = Get-YamlSectionScalar -ConfigPath $ConfigPath -Section "registry" -Key "namespace"
+        httpProxy = Get-YamlSectionScalar -ConfigPath $ConfigPath -Section "proxy" -Key "httpProxy"
+        httpsProxy = Get-YamlSectionScalar -ConfigPath $ConfigPath -Section "proxy" -Key "httpsProxy"
+        environmentRoot = $environmentRoot
+        binDir = Join-Path $environmentRoot "bin"
+        generatedDir = Join-Path $environmentRoot "generated"
+        logsDir = Join-Path $environmentRoot "logs"
+        stateDir = Join-Path $environmentRoot "state"
+        reportsDir = Join-Path $environmentRoot "reports"
+    }
+}
+
+function Assert-Prepared {
+    param($Context)
+
+    $metadataPath = Join-Path $Context.stateDir "environment.json"
+    if (-not (Test-Path -LiteralPath $metadataPath)) {
+        throw "Prepare has not completed for '$($Context.environmentName)'. Run prepare first."
+    }
+
+    Write-Check -Status "PASS" -Message "Prepared workspace found: $($Context.environmentRoot)"
+}
+
+function Convert-ToBashPath {
+    param([string]$Path)
+
+    if ($Path -match "^([A-Za-z]):\\(.*)$") {
+        $drive = $Matches[1].ToLowerInvariant()
+        $rest = $Matches[2] -replace "\\", "/"
+        return "/mnt/$drive/$rest"
+    }
+
+    return ($Path -replace "\\", "/")
+}
+
+function New-GeneratedFiles {
+    param($Context)
+
+    New-ZtDirectory -Path $Context.generatedDir
+    New-ZtDirectory -Path $Context.stateDir
+    New-ZtDirectory -Path $Context.reportsDir
+}
+
+function Invoke-Generate {
+    param([string]$ConfigPath)
+
+    $context = Get-ZtContext -ConfigPath $ConfigPath
+    Assert-Prepared -Context $context
+    New-GeneratedFiles -Context $context
+
+    $clusterConfigPath = Join-Path $context.generatedDir "cluster-values.yaml"
+    $envPath = Join-Path $context.generatedDir "nkp.env"
+    $deployScriptPath = Join-Path $context.generatedDir "deploy.sh"
+    $deployPsPath = Join-Path $context.generatedDir "deploy.ps1"
+
+    $airgapFlag = if ($context.environmentType -eq "air-gapped") { " --airgapped" } else { "" }
+    $registryFlags = ""
+    if ($context.registryEndpoint) {
+        $registryFlags = " --registry-url $($context.registryEndpoint)"
+    }
+    if ($context.environmentType -eq "air-gapped" -and $context.registryEndpoint) {
+        $registryFlags += " --registry-mirror-url $($context.registryEndpoint)"
+    }
+    $proxyFlags = ""
+    if ($context.environmentType -eq "proxied") {
+        if ($context.httpProxy) { $proxyFlags += " --http-proxy $($context.httpProxy)" }
+        if ($context.httpsProxy) { $proxyFlags += " --https-proxy $($context.httpsProxy)" }
+    }
+    $bundleFlags = ""
+    if ($context.bundlePath) {
+        $bundleFlags = " --bootstrap-cluster-image $($context.bundlePath)/konvoy-bootstrap-image-$($context.nkpVersion).tar --bundle $($context.bundlePath)/container-images/konvoy-image-bundle-$($context.nkpVersion).tar,$($context.bundlePath)/container-images/kommander-image-bundle-$($context.nkpVersion).tar"
+    }
+
+    $nkpCommand = "./bin/nkp create cluster nutanix --cluster-name $($context.clusterName) --endpoint $($context.prismCentralEndpoint) --kubernetes-version $($context.kubernetesVersion) --control-plane-replicas $($context.controlPlaneReplicas) --worker-replicas $($context.workerReplicas) --vm-image $($context.imageName) --control-plane-prism-element-cluster $($context.prismElementCluster) --worker-prism-element-cluster $($context.prismElementCluster) --control-plane-subnets $($context.subnetName) --worker-subnets $($context.subnetName) --kubernetes-pod-network-cidr $($context.podCidr) --kubernetes-service-cidr $($context.serviceCidr)$airgapFlag$registryFlags$proxyFlags$bundleFlags --dry-run --output yaml --output-directory ./generated"
+
+    @"
+environment:
+  name: $($context.environmentName)
+  type: $($context.environmentType)
+nkp:
+  version: $($context.nkpVersion)
+  bundleType: $($context.bundleType)
+nutanix:
+  prismCentralEndpoint: $($context.prismCentralEndpoint)
+  prismElementCluster: $($context.prismElementCluster)
+  subnetName: $($context.subnetName)
+  imageName: $($context.imageName)
+cluster:
+  name: $($context.clusterName)
+  kubernetesVersion: $($context.kubernetesVersion)
+  controlPlaneReplicas: $($context.controlPlaneReplicas)
+  workerReplicas: $($context.workerReplicas)
+  podCidr: $($context.podCidr)
+  serviceCidr: $($context.serviceCidr)
+registry:
+  endpoint: $($context.registryEndpoint)
+  namespace: $($context.registryNamespace)
+"@ | Set-Content -LiteralPath $clusterConfigPath -Encoding utf8
+
+    @"
+ZT_ENVIRONMENT_NAME=$($context.environmentName)
+ZT_ENVIRONMENT_TYPE=$($context.environmentType)
+ZT_NKP_VERSION=$($context.nkpVersion)
+ZT_CLUSTER_NAME=$($context.clusterName)
+ZT_BUNDLE_TYPE=$($context.bundleType)
+ZT_BUNDLE_PATH=$($context.bundlePath)
+ZT_REGISTRY_ENDPOINT=$($context.registryEndpoint)
+"@ | Set-Content -LiteralPath $envPath -Encoding utf8
+
+    @"
+#!/usr/bin/env bash
+set -euo pipefail
+cd "`$(dirname "`$0")/.."
+$nkpCommand
+"@ | Set-Content -LiteralPath $deployScriptPath -Encoding utf8
+
+    @"
+param()
+Set-StrictMode -Version Latest
+`$ErrorActionPreference = "Stop"
+Set-Location (Join-Path `$PSScriptRoot "..")
+Write-Host "Run deploy.sh from Linux or WSL for NKP Linux binaries."
+Write-Host '$nkpCommand'
+"@ | Set-Content -LiteralPath $deployPsPath -Encoding utf8
+
+    $phaseState = [ordered]@{
+        generatedAt = (Get-Date).ToUniversalTime().ToString("o")
+        files = @($clusterConfigPath, $envPath, $deployScriptPath, $deployPsPath)
+        dryRunCommand = $nkpCommand
+    }
+    $phaseState | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $context.stateDir "generate.json") -Encoding utf8
+
+    Write-Check -Status "PASS" -Message "Generated cluster values: $clusterConfigPath"
+    Write-Check -Status "PASS" -Message "Generated environment file: $envPath"
+    Write-Check -Status "PASS" -Message "Generated deploy script: $deployScriptPath"
+    Write-Check -Status "PASS" -Message "Generated deploy helper: $deployPsPath"
+}
+
+function Invoke-Registry {
+    param([string]$ConfigPath)
+
+    $context = Get-ZtContext -ConfigPath $ConfigPath
+    Assert-Prepared -Context $context
+    New-GeneratedFiles -Context $context
+
+    $registryPlanPath = Join-Path $context.generatedDir "registry-plan.md"
+    $registryScriptPath = Join-Path $context.generatedDir "registry.sh"
+
+    if ($context.environmentType -ne "air-gapped") {
+        @"
+# Registry Plan
+
+Environment $($context.environmentName) is $($context.environmentType).
+
+No mandatory image mirroring is required. Use this phase only if you want a controlled private registry workflow.
+"@ | Set-Content -LiteralPath $registryPlanPath -Encoding utf8
+        Write-Check -Status "PASS" -Message "Generated registry plan: $registryPlanPath"
+    }
+    else {
+        $konvoyBundle = "$($context.bundlePath)/container-images/konvoy-image-bundle-$($context.nkpVersion).tar"
+        $kommanderBundle = "$($context.bundlePath)/container-images/kommander-image-bundle-$($context.nkpVersion).tar"
+        @"
+# Registry Plan
+
+Environment: $($context.environmentName)
+Registry: $($context.registryEndpoint)
+Namespace: $($context.registryNamespace)
+
+Bundles:
+
+- $konvoyBundle
+- $kommanderBundle
+
+The generated script uses nkp push image-bundle. Provide credentials through environment variables before running it:
+
+- ZT_REGISTRY_USERNAME
+- ZT_REGISTRY_PASSWORD
+"@ | Set-Content -LiteralPath $registryPlanPath -Encoding utf8
+
+        $registryScript = @'
+#!/usr/bin/env bash
+set -euo pipefail
+: "${ZT_REGISTRY_USERNAME:?Set ZT_REGISTRY_USERNAME}"
+: "${ZT_REGISTRY_PASSWORD:?Set ZT_REGISTRY_PASSWORD}"
+cd "$(dirname "$0")/.."
+./bin/nkp push image-bundle \
+  --image-bundle "__KONVOY_BUNDLE__" \
+  --image-bundle "__KOMMANDER_BUNDLE__" \
+  --to-registry "__REGISTRY_ENDPOINT__" \
+  --to-registry-username "$ZT_REGISTRY_USERNAME" \
+  --to-registry-password "$ZT_REGISTRY_PASSWORD"
+'@
+        $registryScript = $registryScript.Replace("__KONVOY_BUNDLE__", $konvoyBundle).Replace("__KOMMANDER_BUNDLE__", $kommanderBundle).Replace("__REGISTRY_ENDPOINT__", $context.registryEndpoint)
+        $registryScript | Set-Content -LiteralPath $registryScriptPath -Encoding utf8
+
+        Write-Check -Status "PASS" -Message "Generated registry plan: $registryPlanPath"
+        Write-Check -Status "PASS" -Message "Generated registry script: $registryScriptPath"
+    }
+
+    [ordered]@{
+        generatedAt = (Get-Date).ToUniversalTime().ToString("o")
+        registryPlan = $registryPlanPath
+        registryScript = if (Test-Path -LiteralPath $registryScriptPath) { $registryScriptPath } else { $null }
+    } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $context.stateDir "registry.json") -Encoding utf8
+}
+
+function Invoke-Deploy {
+    param([string]$ConfigPath)
+
+    $context = Get-ZtContext -ConfigPath $ConfigPath
+    Assert-Prepared -Context $context
+
+    $generateState = Join-Path $context.stateDir "generate.json"
+    $deployScript = Join-Path $context.generatedDir "deploy.sh"
+    if (-not (Test-Path -LiteralPath $generateState) -or -not (Test-Path -LiteralPath $deployScript)) {
+        throw "Generate has not completed for '$($context.environmentName)'. Run generate first."
+    }
+
+    $deployPlanPath = Join-Path $context.generatedDir "deploy-plan.md"
+    @"
+# Deploy Plan
+
+Environment: `$($context.environmentName)`
+Cluster: `$($context.clusterName)`
+Mode: `$($context.environmentType)`
+
+Generated script:
+
+```bash
+$(Convert-ToBashPath -Path $deployScript)
+```
+
+Default behavior is dry-run. Use `-Apply` only when configuration and credentials are ready.
+"@ | Set-Content -LiteralPath $deployPlanPath -Encoding utf8
+
+    if (-not $Apply) {
+        Write-Check -Status "PASS" -Message "Generated deploy plan: $deployPlanPath"
+        Write-Check -Status "INFO" -Message "Dry-run mode. Re-run with -Apply to execute the generated deploy script."
+        return
+    }
+
+    if ($context.prismCentralEndpoint -match "\.example\.com") {
+        throw "Refusing apply because Prism Central endpoint is still a placeholder."
+    }
+
+    $bashPath = Convert-ToBashPath -Path $deployScript
+    Write-Check -Status "INFO" -Message "Applying deploy script with bash: $bashPath"
+    bash -lc "chmod +x '$bashPath' && '$bashPath'"
+}
+
+function Invoke-Verify {
+    param([string]$ConfigPath)
+
+    $context = Get-ZtContext -ConfigPath $ConfigPath
+    Assert-Prepared -Context $context
+    New-ZtDirectory -Path $context.reportsDir
+
+    $reportPath = Join-Path $context.reportsDir "verification-summary.md"
+    $kubeconfigPath = Join-Path $context.stateDir "kubeconfig"
+    $kubectlPath = Join-Path $context.binDir "kubectl"
+    $nkpPath = Join-Path $context.binDir "nkp"
+
+    $checks = @(
+        [ordered]@{ name = "prepared workspace"; status = "pass"; detail = $context.environmentRoot },
+        [ordered]@{ name = "generated config"; status = if (Test-Path -LiteralPath (Join-Path $context.stateDir "generate.json")) { "pass" } else { "warn" }; detail = "generate.json" },
+        [ordered]@{ name = "nkp binary"; status = if (Test-Path -LiteralPath $nkpPath) { "pass" } else { "fail" }; detail = $nkpPath },
+        [ordered]@{ name = "kubectl binary"; status = if (Test-Path -LiteralPath $kubectlPath) { "pass" } else { "fail" }; detail = $kubectlPath },
+        [ordered]@{ name = "kubeconfig"; status = if (Test-Path -LiteralPath $kubeconfigPath) { "pass" } else { "warn" }; detail = $kubeconfigPath }
+    )
+
+    $lines = @("# Verification Summary", "", "Environment: $($context.environmentName)", "Cluster: $($context.clusterName)", "")
+    foreach ($check in $checks) {
+        $lines += "- $($check.status): $($check.name) - $($check.detail)"
+        if ($check.status -eq "pass") {
+            Write-Check -Status "PASS" -Message "$($check.name): $($check.detail)"
+        }
+        elseif ($check.status -eq "fail") {
+            Write-Check -Status "FAIL" -Message "$($check.name): $($check.detail)"
+        }
+        else {
+            Write-Check -Status "WARN" -Message "$($check.name): $($check.detail)"
+        }
+    }
+
+    $lines | Set-Content -LiteralPath $reportPath -Encoding utf8
+    $checks | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $context.reportsDir "component-health.json") -Encoding utf8
+    Write-Check -Status "PASS" -Message "Wrote verification report: $reportPath"
+}
+
+function Invoke-Secrets {
+    param([string]$ConfigPath)
+
+    $context = Get-ZtContext -ConfigPath $ConfigPath
+    Assert-Prepared -Context $context
+    New-ZtDirectory -Path $context.stateDir
+
+    $secretsPath = if ($Secrets) { $Secrets } else { Join-Path $context.repoRoot "configs\secrets\$($context.environmentName).secrets.yaml" }
+    if (-not (Test-Path -LiteralPath $secretsPath)) {
+        throw "Secrets file not found: $secretsPath. Copy one of configs/secrets/*.example.yaml and remove .example."
+    }
+
+    $content = Get-Content -LiteralPath $secretsPath -Raw
+    $summary = [ordered]@{
+        loadedAt = (Get-Date).ToUniversalTime().ToString("o")
+        source = (Resolve-Path -LiteralPath $secretsPath).Path
+        prismCentral = [ordered]@{
+            usernameConfigured = ($content -match "(?m)^\s*username:\s*\S+")
+            passwordConfigured = ($content -match "(?m)^\s*password:\s*\S+")
+        }
+        registry = [ordered]@{
+            configured = ($content -match "(?m)^\s*registry:\s*$")
+        }
+        ssh = [ordered]@{
+            configured = ($content -match "(?m)^\s*ssh:\s*$")
+        }
+    }
+
+    $summaryPath = Join-Path $context.stateDir "secrets.json"
+    $summary | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $summaryPath -Encoding utf8
+
+    $envExamplePath = Join-Path $context.generatedDir "secrets.env.example"
+    New-ZtDirectory -Path $context.generatedDir
+    @"
+# Source this file pattern with real values in your shell. Do not commit real secrets.
+export NUTANIX_PC_USERNAME="admin"
+export NUTANIX_PC_PASSWORD="change-me"
+export ZT_REGISTRY_USERNAME="registry-user"
+export ZT_REGISTRY_PASSWORD="change-me"
+"@ | Set-Content -LiteralPath $envExamplePath -Encoding utf8
+
+    Write-Check -Status "PASS" -Message "Recorded redacted secrets summary: $summaryPath"
+    Write-Check -Status "PASS" -Message "Wrote shell secrets example: $envExamplePath"
+}
+
+function Invoke-Backup {
+    param([string]$ConfigPath)
+
+    $context = Get-ZtContext -ConfigPath $ConfigPath
+    Assert-Prepared -Context $context
+
+    $backupRoot = Join-Path $context.environmentRoot "backup"
+    $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+    $backupDir = Join-Path $backupRoot $stamp
+    New-ZtDirectory -Path $backupDir
+
+    foreach ($dirName in @("state", "generated", "reports")) {
+        $source = Join-Path $context.environmentRoot $dirName
+        if (Test-Path -LiteralPath $source) {
+            Copy-Item -LiteralPath $source -Destination (Join-Path $backupDir $dirName) -Recurse -Force
+            Write-Check -Status "PASS" -Message "Backed up $dirName"
+        }
+    }
+
+    $manifest = [ordered]@{
+        createdAt = (Get-Date).ToUniversalTime().ToString("o")
+        environment = $context.environmentName
+        source = $context.environmentRoot
+        backup = $backupDir
+    }
+    $manifest | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $backupDir "backup-manifest.json") -Encoding utf8
+    Write-Check -Status "PASS" -Message "Backup ready: $backupDir"
+}
+
+function Invoke-Upgrade {
+    param([string]$ConfigPath)
+
+    $context = Get-ZtContext -ConfigPath $ConfigPath
+    Assert-Prepared -Context $context
+    New-ZtDirectory -Path $context.generatedDir
+
+    $planPath = Join-Path $context.generatedDir "upgrade-plan.md"
+    @"
+# Upgrade Plan
+
+Environment: $($context.environmentName)
+Current NKP version: $($context.nkpVersion)
+Target bundle: $TargetBundle
+
+Planned flow:
+
+1. Run backup.
+2. Validate target bundle.
+3. Run NKP upgrade commands from Linux or WSL.
+4. Run verify.
+
+This phase is plan-first. Use -Apply only after replacing placeholder endpoints and confirming the target bundle.
+"@ | Set-Content -LiteralPath $planPath -Encoding utf8
+
+    Write-Check -Status "PASS" -Message "Generated upgrade plan: $planPath"
+
+    if (-not $Apply) {
+        Write-Check -Status "INFO" -Message "Dry-run mode. Re-run with -Apply after validating the target bundle."
+        return
+    }
+
+    if (-not $TargetBundle) {
+        throw "TargetBundle is required for upgrade apply."
+    }
+    if ($context.prismCentralEndpoint -match "\.example\.com") {
+        throw "Refusing upgrade apply because Prism Central endpoint is still a placeholder."
+    }
+
+    Write-Check -Status "WARN" -Message "Live upgrade execution is intentionally not automated yet; plan has been generated for operator review."
+}
+
+function Invoke-Destroy {
+    param([string]$ConfigPath)
+
+    $context = Get-ZtContext -ConfigPath $ConfigPath
+    Assert-Prepared -Context $context
+    New-ZtDirectory -Path $context.generatedDir
+
+    $planPath = Join-Path $context.generatedDir "destroy-plan.md"
+    $command = "./bin/nkp delete cluster --cluster-name $($context.clusterName)"
+    @"
+# Destroy Plan
+
+Environment: $($context.environmentName)
+Cluster: $($context.clusterName)
+
+Command:
+
+```bash
+$command
+```
+
+Destroy requires both -Apply and -ConfirmDestroy.
+"@ | Set-Content -LiteralPath $planPath -Encoding utf8
+
+    Write-Check -Status "PASS" -Message "Generated destroy plan: $planPath"
+
+    if (-not $Apply -or -not $ConfirmDestroy) {
+        Write-Check -Status "INFO" -Message "Dry-run mode. Destruction requires -Apply -ConfirmDestroy."
+        return
+    }
+
+    if ($context.prismCentralEndpoint -match "\.example\.com") {
+        throw "Refusing destroy apply because Prism Central endpoint is still a placeholder."
+    }
+
+    Write-Check -Status "WARN" -Message "Live destroy execution is guarded; run the generated plan manually from a prepared Linux/WSL runner."
+}
+
+function Invoke-Runs {
+    param([string]$ConfigPath)
+
+    $context = Get-ZtContext -ConfigPath $ConfigPath
+    Assert-Prepared -Context $context
+
+    $runsRoot = Join-Path $context.repoRoot ".zt\runs"
+    $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+    $runDir = Join-Path $runsRoot $stamp
+    New-ZtDirectory -Path $runDir
+
+    $stateFiles = @("environment.json", "staged-tools.json", "generate.json", "registry.json", "secrets.json") | ForEach-Object {
+        $path = Join-Path $context.stateDir $_
+        [ordered]@{
+            name = $_
+            exists = Test-Path -LiteralPath $path
+            path = $path
+        }
+    }
+
+    $summary = [ordered]@{
+        capturedAt = (Get-Date).ToUniversalTime().ToString("o")
+        environment = $context.environmentName
+        type = $context.environmentType
+        cluster = $context.clusterName
+        stateFiles = $stateFiles
+    }
+    $summary | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $runDir "summary.json") -Encoding utf8
+
+    $lines = @("# Run Summary", "", "Environment: $($context.environmentName)", "Cluster: $($context.clusterName)", "")
+    foreach ($file in $stateFiles) {
+        $status = if ($file.exists) { "present" } else { "missing" }
+        $lines += "- ${status}: $($file.name)"
+    }
+    $lines | Set-Content -LiteralPath (Join-Path $runDir "summary.md") -Encoding utf8
+
+    Write-Check -Status "PASS" -Message "Captured run summary: $runDir"
+}
+
+function Invoke-Ci {
+    param([string]$ConfigPath)
+
+    Write-Check -Status "INFO" -Message "Running local CI smoke checks."
+    $null = [scriptblock]::Create((Get-Content -LiteralPath $PSCommandPath -Raw))
+    Write-Check -Status "PASS" -Message "PowerShell syntax parsed."
+
+    bash -lc "bash -n ./scripts/zt.sh"
+    Write-Check -Status "PASS" -Message "Bash syntax parsed."
+
+    foreach ($example in Get-ChildItem -LiteralPath (Join-Path (Get-ZtContext -ConfigPath $ConfigPath).repoRoot "configs\environments") -Filter "*.example.yaml") {
+        $script:ValidationFailures = 0
+        $script:ValidationWarnings = 0
+        Invoke-Validate -ConfigPath $example.FullName
+    }
+
+    Write-Check -Status "PASS" -Message "Example config validation completed."
+}
+
 switch ($Command) {
     "validate" {
         Invoke-Validate -ConfigPath $Config
     }
     "prepare" {
         Invoke-Prepare -ConfigPath $Config
+    }
+    "generate" {
+        Invoke-Generate -ConfigPath $Config
+    }
+    "registry" {
+        Invoke-Registry -ConfigPath $Config
+    }
+    "deploy" {
+        Invoke-Deploy -ConfigPath $Config
+    }
+    "verify" {
+        Invoke-Verify -ConfigPath $Config
+    }
+    "secrets" {
+        Invoke-Secrets -ConfigPath $Config
+    }
+    "backup" {
+        Invoke-Backup -ConfigPath $Config
+    }
+    "upgrade" {
+        Invoke-Upgrade -ConfigPath $Config
+    }
+    "destroy" {
+        Invoke-Destroy -ConfigPath $Config
+    }
+    "runs" {
+        Invoke-Runs -ConfigPath $Config
+    }
+    "ci" {
+        Invoke-Ci -ConfigPath $Config
     }
     default {
         Write-Host "Command '$Command' is scaffolded. Mode-specific implementation comes next."

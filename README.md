@@ -56,6 +56,21 @@ Prepare a local workspace after validation succeeds:
 
 See `docs/prepare.md` for workspace output and staged files.
 
+The main phase sequence is:
+
+```powershell
+.\scripts\zt.ps1 validate -Config .\configs\environments\connected.example.yaml
+.\scripts\zt.ps1 prepare  -Config .\configs\environments\connected.example.yaml
+.\scripts\zt.ps1 generate -Config .\configs\environments\connected.example.yaml
+.\scripts\zt.ps1 registry -Config .\configs\environments\connected.example.yaml
+.\scripts\zt.ps1 deploy   -Config .\configs\environments\connected.example.yaml
+.\scripts\zt.ps1 verify   -Config .\configs\environments\connected.example.yaml
+```
+
+See `docs/phases.md` for details.
+
+Additional operational phases are available for secrets, backup, upgrade planning, guarded destroy planning, and CI smoke checks. See `docs/operations.md`.
+
 ## NKP Bundle Note
 
 The NKP 2.17.1 bundles contain Linux AMD64 binaries. Run NKP deployment steps from Linux or WSL when using the bundled `nkp` and `kubectl` binaries.
