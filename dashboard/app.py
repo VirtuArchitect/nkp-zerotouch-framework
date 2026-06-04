@@ -2,6 +2,7 @@
 import html
 import json
 import os
+import shutil
 import subprocess
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -41,19 +42,33 @@ def env_state(name):
 
 
 def run_action(action, config):
-    command = [
-        "powershell",
-        "-NoProfile",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-File",
-        str(ROOT / "scripts" / "zt.ps1"),
-        action,
-        "-Config",
-        str(config),
-    ]
-    completed = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, timeout=300)
-    return completed.returncode, completed.stdout, completed.stderr
+    bash_path = shutil.which("bash")
+    pwsh_path = shutil.which("pwsh") or shutil.which("powershell")
+
+    if bash_path and (ROOT / "scripts" / "zt.sh").exists():
+        command = [bash_path, str(ROOT / "scripts" / "zt.sh"), action, "--config", str(config)]
+    elif pwsh_path and (ROOT / "scripts" / "zt.ps1").exists():
+        command = [
+            pwsh_path,
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(ROOT / "scripts" / "zt.ps1"),
+            action,
+            "-Config",
+            str(config),
+        ]
+    else:
+        return 127, "", "No supported shell runner found. Install bash, PowerShell, or run the dashboard container image."
+
+    try:
+        completed = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, timeout=300)
+        return completed.returncode, completed.stdout, completed.stderr
+    except subprocess.TimeoutExpired as exc:
+        return 124, exc.stdout or "", (exc.stderr or "") + "\nAction timed out after 300 seconds."
+    except OSError as exc:
+        return 127, "", f"Failed to start action runner: {exc}"
 
 
 def page(title, body):
