@@ -1,0 +1,19 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+## [0.1.0] - 2026-06-04
+
+### Added
+
+- Multi-environment NKP ZeroTouch workflow for `connected`, `proxied`, and `air-gapped` deployments.
+- Phases: `validate`, `prepare`, `generate`, `registry`, `deploy`, `verify`, `secrets`, `backup`, `upgrade`, `destroy`, `runs`, and `ci`.
+- Real YAML parsing helper with custom config validation.
+- Standard and air-gapped NKP bundle discovery.
+- Local `.zt` workspace generation with staged `nkp` and `kubectl`.
+- Guarded dry-run deploy behavior with explicit apply flags.
+- Air-gapped registry plan/script generation.
+- Redacted secrets handling with local untracked environment injection.
+- Local smoke tests and package scripts.
+- GitHub Actions CI and release packaging workflows.
+- Connected, proxied, and air-gapped runbooks.

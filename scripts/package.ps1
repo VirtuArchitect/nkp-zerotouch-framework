@@ -1,5 +1,5 @@
 param(
-    [string]$Version = "dev"
+    [string]$Version = (Get-Content (Join-Path $PSScriptRoot "..\VERSION") -Raw).Trim()
 )
 
 $ErrorActionPreference = "Stop"
@@ -13,7 +13,7 @@ if (Test-Path -LiteralPath $staging) {
 }
 New-Item -ItemType Directory -Path $staging | Out-Null
 
-foreach ($item in @("configs", "docs", "scripts", "templates", "tests", "tools", "README.md", "LICENSE", ".gitignore")) {
+foreach ($item in @("configs", "docs", "scripts", "templates", "tests", "tools", "README.md", "LICENSE", "VERSION", "CHANGELOG.md", "SECURITY.md", ".gitignore")) {
     Copy-Item -LiteralPath (Join-Path $repoRoot $item) -Destination $staging -Recurse -Force
 }
 

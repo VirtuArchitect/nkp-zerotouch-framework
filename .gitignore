@@ -11,10 +11,15 @@ nkp-air-gapped-bundle_*/
 out/
 dist/
 logs/
+*.kubeconfig
+kubeconfig
+*.log
 
 # Real secrets must stay local.
 configs/secrets/*.secrets.yaml
 !configs/secrets/*.secrets.example.yaml
+*.env
+!*.env.example
 
 # Editor and OS files.
 .DS_Store

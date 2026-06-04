@@ -38,3 +38,9 @@ jobs:
         run: |
           $null = [scriptblock]::Create((Get-Content -Raw tests/smoke.ps1))
           bash -n tests/smoke.sh
+
+      - name: Security scan
+        run: ./scripts/security-scan.sh
+
+      - name: Package smoke
+        run: ./scripts/package.sh ci

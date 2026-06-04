@@ -4,6 +4,8 @@ ZeroTouch framework for deploying Nutanix Kubernetes Platform (NKP) across multi
 
 The framework is designed so `air-gapped` is one supported deployment mode, not the only mode.
 
+Unofficial community automation framework. This project is not affiliated with or supported by Nutanix.
+
 ## Supported Environment Types
 
 | Type | Use when | Artifact source |
@@ -78,18 +80,26 @@ Additional operational phases are available for secrets, backup, upgrade plannin
 - `docs/runbook-proxied.md`
 - `docs/runbook-air-gapped.md`
 - `docs/troubleshooting.md`
+- `docs/public-readiness.md`
+- `docs/implementation-status.md`
 
 ## Tests and Packaging
 
 ```powershell
 .\tests\smoke.ps1 -Config .\configs\environments\connected.example.yaml
 .\scripts\package.ps1 -Version dev
+.\scripts\security-scan.ps1
 ```
 
 ```bash
 ./tests/smoke.sh ./configs/environments/connected.example.yaml
 ./scripts/package.sh dev
+./scripts/security-scan.sh
 ```
+
+## Versioning
+
+The current framework version is stored in `VERSION`. Release notes live in `CHANGELOG.md`. Tag releases as `v<version>` to trigger the release packaging workflow.
 
 ## NKP Bundle Note
 
