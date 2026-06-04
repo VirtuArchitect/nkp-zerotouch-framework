@@ -17,3 +17,11 @@ All notable changes to this project will be documented in this file.
 - Local smoke tests and package scripts.
 - GitHub Actions CI and release packaging workflows.
 - Connected, proxied, and air-gapped runbooks.
+- Local dashboard/console with safe phase actions.
+- Kubeconfig capture phase and stronger live verification.
+- Registry push options for CA, insecure TLS skip, concurrency, and existing tag policy.
+- Dockerfile and Containerfile for container runner use.
+- Self-hosted CI guidance.
+- Parser tests, invalid config fixture, and smoke tests.
+- GitHub release workflow.
+- Public-readiness, architecture, security, and contribution docs.

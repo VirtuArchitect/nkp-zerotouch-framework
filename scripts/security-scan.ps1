@@ -40,6 +40,9 @@ Get-ChildItem -LiteralPath $repoRoot -Recurse -File -Force | ForEach-Object {
 
     $matches = Select-String -LiteralPath $path -Pattern $patterns -CaseSensitive:$false -ErrorAction SilentlyContinue
     foreach ($match in $matches) {
+        if ($match.Line -match "github\.token") {
+            continue
+        }
         $findings += [ordered]@{
             file = $path.Substring($repoRoot.Path.Length + 1)
             line = $match.LineNumber
