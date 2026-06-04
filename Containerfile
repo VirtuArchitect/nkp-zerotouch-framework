@@ -4,6 +4,8 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends bash openssh-client ca-certificates git curl \
     && rm -rf /var/lib/apt/lists/*
 
+RUN pip install --no-cache-dir PyYAML
+
 WORKDIR /workspace
 COPY . /workspace
 

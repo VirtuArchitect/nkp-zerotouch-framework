@@ -1,0 +1,14 @@
+services:
+  dashboard:
+    build:
+      context: .
+    image: nkp-zerotouch-framework:dev
+    entrypoint: ["python", "dashboard/app.py", "8080"]
+    environment:
+      ZT_DASHBOARD_HOST: 0.0.0.0
+      PYTHON_BIN: python
+    ports:
+      - "8080:8080"
+    volumes:
+      - .:/workspace
+      - C:/Share:/mnt/c/Share:ro

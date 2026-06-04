@@ -101,6 +101,7 @@ python .\dashboard\app.py 8080
 ./tests/smoke.sh ./configs/environments/connected.example.yaml
 ./scripts/package.sh dev
 ./scripts/security-scan.sh
+docker compose up --build dashboard
 ```
 
 ## Versioning

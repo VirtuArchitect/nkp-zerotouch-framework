@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import html
 import json
+import os
 import subprocess
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -159,7 +160,7 @@ def read_json_from_context(config):
 
 
 def main():
-    host = "127.0.0.1"
+    host = os.environ.get("ZT_DASHBOARD_HOST", "127.0.0.1")
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8080
     server = ThreadingHTTPServer((host, port), Handler)
     print(f"Dashboard listening on http://{host}:{port}")
