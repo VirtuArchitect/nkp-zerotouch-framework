@@ -1,0 +1,9 @@
+# Default review owner for repository-wide changes.
+* @VirtuArchitectVirtuArchitect
+
+# Security-sensitive areas should always be reviewed deliberately.
+/configs/secrets/ @VirtuArchitectVirtuArchitect
+/scripts/ @VirtuArchitectVirtuArchitect
+/tools/ @VirtuArchitectVirtuArchitect
+/.github/workflows/ @VirtuArchitectVirtuArchitect
+
