@@ -298,24 +298,25 @@ def page(title, body, active="environments", user=None):
   <title>{html.escape(title)}</title>
   <style>
     :root {{
-      --bg: #eef1f5;
+      --bg: #f2f5f8;
       --panel: #ffffff;
-      --panel-2: #f8fafc;
-      --ink: #172033;
-      --muted: #647089;
-      --line: #d9e0ea;
-      --line-strong: #c8d2df;
-      --nav: #121826;
-      --nav-2: #1b2435;
-      --accent: #2563eb;
-      --accent-soft: #e7efff;
+      --panel-2: #f7f9fc;
+      --ink: #111827;
+      --muted: #667085;
+      --line: #d7dee8;
+      --line-strong: #c3ccd8;
+      --nav: #0f1724;
+      --nav-2: #182235;
+      --accent: #1a6b6b;
+      --accent-2: #2563eb;
+      --accent-soft: #e6f4f4;
       --good: #057a55;
       --good-soft: #dcfce7;
       --warn: #9a5b05;
       --warn-soft: #fef3c7;
       --bad: #b42318;
       --bad-soft: #fee4e2;
-      --shadow: 0 16px 38px rgba(15, 23, 42, .08);
+      --shadow: 0 12px 30px rgba(16, 24, 40, .07);
     }}
     * {{ box-sizing: border-box; }}
     body {{
@@ -329,10 +330,11 @@ def page(title, body, active="environments", user=None):
     .sidebar {{
       background: linear-gradient(180deg, var(--nav) 0%, var(--nav-2) 100%);
       color: #f8fafc;
-      padding: 22px 18px;
+      padding: 20px 16px;
       border-right: 1px solid rgba(255,255,255,.08);
+      position: sticky; top: 0; height: 100vh; overflow-y: auto;
     }}
-    .brand {{ display: flex; align-items: center; gap: 12px; margin-bottom: 28px; }}
+    .brand {{ display: flex; align-items: center; gap: 12px; margin-bottom: 24px; padding: 2px 2px 14px; border-bottom: 1px solid rgba(255,255,255,.08); }}
     .brand-mark {{
       width: 34px; height: 34px; border-radius: 7px;
       display: grid; place-items: center;
@@ -340,35 +342,46 @@ def page(title, body, active="environments", user=None):
       box-shadow: inset 0 0 0 1px rgba(255,255,255,.16), 0 8px 18px rgba(0,0,0,.22);
     }}
     .brand-mark img {{ width: 34px; height: 34px; display: block; border-radius: 7px; }}
-    .brand-title {{ font-size: 15px; font-weight: 700; letter-spacing: 0; }}
+    .brand-title {{ font-size: 15px; font-weight: 760; letter-spacing: 0; }}
     .brand-subtitle {{ color: #aab4c6; font-size: 12px; margin-top: 2px; }}
-    .nav-label {{ color: #7f8ba3; font-size: 11px; font-weight: 700; text-transform: uppercase; margin: 22px 10px 8px; }}
+    .nav-label {{ color: #8894aa; font-size: 11px; font-weight: 760; text-transform: uppercase; margin: 20px 10px 8px; letter-spacing: .04em; }}
     .nav-item {{
       display: flex; align-items: center; gap: 10px;
-      min-height: 38px; padding: 0 10px; border-radius: 7px;
+      min-height: 36px; padding: 0 10px; border-radius: 6px;
       color: #d9e3f3; font-weight: 600; text-decoration: none;
+      border: 1px solid transparent;
     }}
-    .nav-item:hover {{ background: rgba(255,255,255,.07); color: #fff; }}
-    .nav-item.active {{ background: rgba(255,255,255,.1); color: #fff; }}
+    .nav-item:hover {{ background: rgba(255,255,255,.07); color: #fff; border-color: rgba(255,255,255,.06); }}
+    .nav-item.active {{ background: rgba(255,255,255,.11); color: #fff; border-color: rgba(255,255,255,.1); }}
     .nav-dot {{ width: 8px; height: 8px; border-radius: 50%; background: transparent; }}
     .nav-item.active .nav-dot {{ background: #3dd6a3; }}
     .content {{ min-width: 0; }}
     .topbar {{
-      min-height: 68px; background: var(--panel);
+      min-height: 72px; background: rgba(255,255,255,.96);
       border-bottom: 1px solid var(--line);
       display: flex; align-items: center; justify-content: space-between;
       padding: 0 28px;
+      position: sticky; top: 0; z-index: 5; backdrop-filter: blur(10px);
     }}
-    .topbar h1 {{ margin: 0; font-size: 20px; font-weight: 750; letter-spacing: 0; }}
-    .topbar-meta {{ display: flex; gap: 10px; align-items: center; color: var(--muted); font-size: 12px; }}
-    main {{ max-width: 1280px; margin: 0 auto; padding: 24px 28px 42px; }}
+    .topbar h1 {{ margin: 0; font-size: 20px; font-weight: 780; letter-spacing: 0; }}
+    .topbar-meta {{ display: flex; gap: 10px; align-items: center; color: var(--muted); font-size: 12px; flex-wrap: wrap; justify-content: flex-end; }}
+    .operator-pill {{ display: inline-flex; align-items: center; gap: 8px; min-height: 28px; padding: 0 10px; border: 1px solid var(--line); border-radius: 999px; background: #fff; color: #344054; font-weight: 700; }}
+    .operator-pill::before {{ content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--good); }}
+    main {{ max-width: 1320px; margin: 0 auto; padding: 24px 28px 42px; }}
     h2 {{ margin: 0; font-size: 16px; }}
     .section-head {{ display: flex; align-items: end; justify-content: space-between; gap: 16px; margin: 24px 0 12px; }}
     .section-copy {{ color: var(--muted); font-size: 12px; margin-top: 3px; }}
     .summary-grid {{ display: grid; grid-template-columns: repeat(4, minmax(160px, 1fr)); gap: 14px; }}
+    .ops-strip {{ display: grid; grid-template-columns: repeat(4, minmax(180px, 1fr)); gap: 1px; border: 1px solid var(--line); border-radius: 8px; background: var(--line); overflow: hidden; box-shadow: var(--shadow); margin-bottom: 18px; }}
+    .ops-item {{ background: #fff; padding: 13px 15px; }}
+    .ops-label {{ color: var(--muted); font-size: 11px; font-weight: 760; text-transform: uppercase; letter-spacing: .04em; }}
+    .ops-value {{ margin-top: 5px; font-weight: 780; color: #172033; }}
     .metric {{
-      background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
-      padding: 16px; box-shadow: var(--shadow);
+      background: linear-gradient(180deg, #ffffff 0%, #fbfcfe 100%); border: 1px solid var(--line); border-radius: 8px;
+      padding: 17px; box-shadow: var(--shadow); position: relative; overflow: hidden;
+    }}
+    .metric::after {{ content: ""; position: absolute; left: 0; right: 0; top: 0; height: 3px; background: #d6e3ef; }}
+    .metric-link::after {{ background: var(--accent); }}
     }}
     .metric-link {{
       display: block; color: var(--ink);
@@ -377,7 +390,7 @@ def page(title, body, active="environments", user=None):
     .metric-link:hover {{
       transform: translateY(-1px);
       border-color: #9bb8f5;
-      box-shadow: 0 18px 42px rgba(37, 99, 235, .12);
+      box-shadow: 0 18px 42px rgba(26, 107, 107, .13);
     }}
     .metric.disabled {{ opacity: .72; }}
     .metric-label {{ color: var(--muted); font-size: 12px; font-weight: 650; }}
@@ -388,11 +401,11 @@ def page(title, body, active="environments", user=None):
       box-shadow: var(--shadow); overflow-x: auto;
     }}
     table {{ width: 100%; border-collapse: collapse; }}
-    th, td {{ padding: 14px 16px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; }}
+    th, td {{ padding: 13px 16px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; }}
     tr:last-child td {{ border-bottom: 0; }}
     th {{
-      background: var(--panel-2); color: #3b465a;
-      font-size: 12px; font-weight: 750; text-transform: uppercase;
+      background: var(--panel-2); color: #475467;
+      font-size: 11px; font-weight: 780; text-transform: uppercase; letter-spacing: .035em;
       border-bottom: 1px solid var(--line-strong);
     }}
     tbody tr:hover {{ background: #fbfdff; }}
@@ -419,21 +432,22 @@ def page(title, body, active="environments", user=None):
     .chip.ok::before {{ background: var(--good); }}
     .chip.warn {{ color: var(--warn); }}
     .chip.warn::before {{ background: var(--warn); }}
-    .actions {{ display: flex; flex-wrap: wrap; gap: 7px; min-width: 330px; }}
+    .actions {{ display: flex; flex-wrap: wrap; gap: 7px; min-width: 270px; }}
     .actions form {{ display: inline; }}
+    .manage-actions {{ display: flex; flex-wrap: wrap; gap: 7px; min-width: 128px; }}
     button {{
       min-height: 32px; border: 1px solid var(--line-strong); background: #fff;
-      padding: 0 10px; border-radius: 6px; cursor: pointer;
+      padding: 0 9px; border-radius: 6px; cursor: pointer;
       color: #263449; font-weight: 700; font-size: 12px;
     }}
-    button:hover {{ background: var(--accent-soft); border-color: #9bb8f5; color: #1746a2; }}
+    button:hover {{ background: var(--accent-soft); border-color: #8ababa; color: #155e5e; }}
     .button-link {{
       display: inline-flex; align-items: center; min-height: 32px;
       border: 1px solid var(--line-strong); background: #fff;
-      padding: 0 10px; border-radius: 6px; color: #263449;
+      padding: 0 9px; border-radius: 6px; color: #263449;
       font-weight: 700; font-size: 12px;
     }}
-    .button-link:hover {{ background: var(--accent-soft); border-color: #9bb8f5; color: #1746a2; }}
+    .button-link:hover {{ background: var(--accent-soft); border-color: #8ababa; color: #155e5e; }}
     .button-danger {{ border-color: #f0b4af; color: var(--bad); }}
     .button-danger:hover {{ background: var(--bad-soft); border-color: #f0b4af; color: var(--bad); }}
     .run-list {{ list-style: none; margin: 0; padding: 0; }}
@@ -448,6 +462,8 @@ def page(title, body, active="environments", user=None):
       border: 1px solid #d7e3f8; background: #f5f8ff; color: #40516d;
       font-size: 13px;
     }}
+    .login-panel {{ max-width: 520px; margin: 38px auto 0; }}
+    .login-panel .panel {{ box-shadow: 0 24px 70px rgba(16, 24, 40, .14); }}
     .settings-grid {{ display: grid; grid-template-columns: repeat(2, minmax(260px, 1fr)); gap: 14px; }}
     .settings-card {{ background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 16px; box-shadow: var(--shadow); }}
     .settings-card h3 {{ margin: 0 0 8px; font-size: 15px; }}
@@ -466,8 +482,10 @@ def page(title, body, active="environments", user=None):
       .topbar {{ align-items: flex-start; flex-direction: column; gap: 10px; padding: 16px 20px; }}
       main {{ padding: 18px 16px 32px; }}
       .summary-grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
+      .ops-strip {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
       .settings-grid, .form-grid {{ grid-template-columns: 1fr; }}
-      .actions {{ min-width: 360px; }}
+      .actions {{ min-width: 270px; }}
+      .manage-actions {{ min-width: 128px; }}
     }}
     @media (max-width: 620px) {{
       .summary-grid {{ grid-template-columns: 1fr; }}
@@ -494,7 +512,7 @@ def page(title, body, active="environments", user=None):
       </div>
       <div class="topbar-meta">
         <span class="badge connected">Console Online</span>
-        <span>{html.escape(user.get('username', 'operator session') if user else 'operator session')}</span>
+        <span class="operator-pill">{html.escape(user.get('username', 'operator session') if user else 'operator session')}</span>
         <a class="button-link" href="/logout">Log out</a>
         <span>CLI apply actions disabled</span>
       </div>
@@ -558,6 +576,7 @@ class Handler(BaseHTTPRequestHandler):
             heading = "Sign In" if has_login_accounts else "Create Admin Account"
             hint = "Use a local console account." if has_login_accounts else "No password-enabled accounts exist yet. Create the first local administrator account."
             body = f"""
+<div class="login-panel">
 <div class="section-head">
   <div>
     <h2>{heading}</h2>
@@ -577,6 +596,7 @@ class Handler(BaseHTTPRequestHandler):
   </form>
 </section>
 <div class="notice">This is local console authentication for operator workstations. Production use should move to OIDC/SSO and server-side session storage.</div>
+</div>
 """
             self.send_html(page("Login - NKP ZeroTouch Console", body, "about"))
             return
@@ -604,13 +624,13 @@ class Handler(BaseHTTPRequestHandler):
                 generated_total += 1 if generated else 0
                 report_total += 1 if report else 0
                 buttons = "".join(
-                    f'<form method="post" action="/action"><input type="hidden" name="action" value="{a}"><input type="hidden" name="config" value="{html.escape(str(config))}"><button>{a}</button></form> '
+                    f'<form method="post" action="/action"><input type="hidden" name="action" value="{a}"><input type="hidden" name="config" value="{html.escape(str(config))}"><button title="Run {a}">{a}</button></form> '
                     for a in ACTION_ORDER
                 )
                 config_arg = quote(str(config))
                 manage_buttons = (
-                    f'<a class="button-link" href="/environment/edit?config={config_arg}">edit</a> '
-                    f'<a class="button-link button-danger" href="/environment/delete?config={config_arg}">delete</a>'
+                    f'<a class="button-link" href="/environment/edit?config={config_arg}">Edit</a> '
+                    f'<a class="button-link button-danger" href="/environment/delete?config={config_arg}">Delete</a>'
                 )
                 rows.append(
                     f"<tr><td><div class='env-name'>{html.escape(name)}</div><div class='env-file'>{html.escape(config.name)}</div></td>"
@@ -619,15 +639,23 @@ class Handler(BaseHTTPRequestHandler):
                     f"<td><span class='chip {'ok' if generated else 'warn'}'>{'Generated' if generated else 'Pending'}</span></td>"
                     f"<td><span class='chip {'ok' if report else 'warn'}'>{'Available' if report else 'Missing'}</span></td>"
                     f"<td class='actions'>{buttons}</td>"
-                    f"<td class='actions'>{manage_buttons}</td></tr>"
+                    f"<td class='manage-actions'>{manage_buttons}</td></tr>"
                 )
             runs = sorted((ZT / "runs").glob("*/summary.md")) if (ZT / "runs").exists() else []
             recent_runs = list(reversed(runs[-10:]))
+            rbac = load_rbac()
+            auth_mode = "Local RBAC" if any(account.get("passwordHash") for account in rbac.get("accounts", [])) else "Bootstrap"
             run_rows = "".join(
                 f"<li><code>{html.escape(p.parent.name)}</code><span class='muted'>summary.md</span></li>"
                 for p in recent_runs
             )
             body = f"""
+<section class="ops-strip">
+  <div class="ops-item"><div class="ops-label">Runner</div><div class="ops-value">Docker / Local Shell</div></div>
+  <div class="ops-item"><div class="ops-label">Deployment Modes</div><div class="ops-value">Connected / Proxied / Air-gapped</div></div>
+  <div class="ops-item"><div class="ops-label">Authentication</div><div class="ops-value">{html.escape(auth_mode)}</div></div>
+  <div class="ops-item"><div class="ops-label">Live Apply</div><div class="ops-value">CLI Approval Required</div></div>
+</section>
 <section class="summary-grid">
   {metric_card("Environments", env_total, "configured deployment targets", "/")}
   {metric_card("Prepared", prepared_total, "workspace states available", "/artifacts")}
