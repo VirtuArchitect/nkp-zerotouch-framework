@@ -3,6 +3,7 @@ import html
 import hashlib
 import json
 import os
+import re
 import secrets
 import signal
 import shlex
@@ -25,6 +26,7 @@ ROOT = Path(__file__).resolve().parents[1]
 ZT = ROOT / ".zt"
 SETTINGS = ZT / "settings"
 JOBS = ZT / "jobs"
+AUDIT = ZT / "audit"
 ENV_DIR = ROOT / "configs" / "environments"
 SESSIONS = {}
 SAFE_ACTIONS = {"validate", "prepare", "generate", "verify", "backup", "runs"}
@@ -36,6 +38,7 @@ VIEW_PATHS = {
     "cli": "/cli",
     "runs": "/runs",
     "artifacts": "/artifacts",
+    "health": "/health",
     "sources": "/sources",
     "inventory": "/inventory",
     "network": "/network",
@@ -44,12 +47,14 @@ VIEW_PATHS = {
     "jobs": "/jobs",
     "actions": "/actions",
     "audit": "/audit",
+    "approval-policy": "/approval-policy",
     "connections": "/settings/connections",
     "new-environment": "/settings/new-environment",
     "providers": "/settings/providers",
     "secrets": "/settings/secrets",
     "rbac": "/settings/rbac",
     "database": "/settings/database",
+    "integrations": "/settings/integrations",
     "about": "/about",
 }
 
@@ -66,6 +71,12 @@ def read_json(path):
 def write_json(path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+
+def append_jsonl(path, data):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(data, separators=(",", ":")) + "\n")
 
 
 def env_configs():
@@ -331,6 +342,184 @@ def default_providers():
     }
 
 
+def default_approval_policy():
+    return {
+        "deploy_approvals": "1",
+        "registry_approvals": "1",
+        "upgrade_approvals": "1",
+        "destroy_approvals": "2",
+        "prevent_self_approval": "true",
+        "production_requires_admin": "true",
+    }
+
+
+def default_integrations():
+    return {
+        "session_store": "memory",
+        "postgres_enabled": "false",
+        "postgres_dsn": "",
+        "oidc_enabled": "false",
+        "oidc_issuer": "",
+        "oidc_client_id": "",
+        "oidc_redirect_uri": "http://localhost:18080/login/oidc/callback",
+        "vault_enabled": "false",
+        "vault_addr": "",
+        "vault_mount": "kv",
+        "vault_secret_path": "nkp/zerotouch",
+    }
+
+
+def permission_catalog():
+    return {
+        "Admin": {
+            "settings", "environments", "safe-actions", "audit", "jobs", "approve", "apply",
+            "sources", "inventory", "network", "preflight", "pipeline", "artifacts", "runs",
+            "health", "approval-policy", "integrations", "rbac",
+        },
+        "Operator": {
+            "environments", "safe-actions", "artifacts", "jobs", "sources", "inventory",
+            "network", "preflight", "pipeline", "runs", "health",
+        },
+        "Auditor": {"runs", "artifacts", "audit", "jobs", "preflight", "pipeline", "health"},
+        "Deployment Reviewer": {"runs", "artifacts", "audit", "jobs", "approve", "preflight", "pipeline", "health"},
+    }
+
+
+ROUTE_PERMISSIONS = [
+    ("/settings/rbac", "rbac"),
+    ("/settings/database", "settings"),
+    ("/settings/integrations", "integrations"),
+    ("/settings/providers", "settings"),
+    ("/settings/secrets", "settings"),
+    ("/settings/connections", "settings"),
+    ("/settings/new-environment", "environments"),
+    ("/environment", "environments"),
+    ("/sources", "sources"),
+    ("/inventory", "inventory"),
+    ("/network", "network"),
+    ("/preflight", "preflight"),
+    ("/pipeline", "pipeline"),
+    ("/jobs", "jobs"),
+    ("/artifacts", "artifacts"),
+    ("/runs", "runs"),
+    ("/actions", "safe-actions"),
+    ("/audit", "audit"),
+    ("/approval-policy", "approval-policy"),
+    ("/health", "health"),
+    ("/cli", "apply"),
+    ("/action", "safe-actions"),
+]
+
+
+def route_permission(path):
+    if path in {"/", "/environments", "/about", "/logout", "/assets/veridian-mark-teal.svg"}:
+        return None
+    for prefix, permission in ROUTE_PERMISSIONS:
+        if path.startswith(prefix):
+            return permission
+    return None
+
+
+def csrf_token(user):
+    if not user:
+        return ""
+    token = user.get("csrf")
+    if not token:
+        token = secrets.token_urlsafe(32)
+        user["csrf"] = token
+    return token
+
+
+def csrf_field(user):
+    token = csrf_token(user)
+    return f'<input type="hidden" name="csrf_token" value="{html.escape(token)}">' if token else ""
+
+
+def inject_csrf_fields(body, user):
+    token_field = csrf_field(user)
+    if not token_field:
+        return body
+    return re.sub(r'(<form\b[^>]*method="post"[^>]*>)', r'\1' + token_field, body)
+
+
+def audit_event(event, user=None, target="", status="info", detail=None):
+    entry = {
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "event": event,
+        "status": status,
+        "user": (user or {}).get("username", "anonymous"),
+        "role": (user or {}).get("role", ""),
+        "target": target,
+        "detail": detail or {},
+    }
+    append_jsonl(AUDIT / "events.jsonl", entry)
+
+
+def recent_audit_events(limit=100):
+    path = AUDIT / "events.jsonl"
+    if not path.exists():
+        return []
+    rows = []
+    for line in path.read_text(encoding="utf-8").splitlines()[-limit:]:
+        try:
+            rows.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return list(reversed(rows))
+
+
+def check_tcp_endpoint(endpoint, default_port=443, timeout=2):
+    if not endpoint or ".example.com" in endpoint:
+        return False, "not configured"
+    host = endpoint.replace("https://", "").replace("http://", "").split("/")[0]
+    if ":" in host:
+        name, raw_port = host.rsplit(":", 1)
+        port = int(raw_port) if raw_port.isdigit() else default_port
+    else:
+        name, port = host, default_port
+    try:
+        import socket
+
+        with socket.create_connection((name, port), timeout=timeout):
+            return True, f"reachable {name}:{port}"
+    except Exception as exc:
+        return False, str(exc)
+
+
+def health_checks():
+    sources = load_setting("sources", default_sources())
+    connections = read_json(SETTINGS / "connections.json") or {}
+    checks = []
+    checks.append(("Runner OS", "ok", os.name))
+    checks.append(("Dashboard state", "ok" if ZT.exists() or ROOT.exists() else "warn", str(ZT)))
+    checks.append(("Workspace writable", "ok" if os.access(ROOT, os.W_OK) else "warn", str(ROOT)))
+    for tool in ["docker", "podman", "kubectl", "bash", "pwsh"]:
+        checks.append((f"Tool: {tool}", "ok" if shutil.which(tool) else "warn", shutil.which(tool) or "not found"))
+    for label, path in [("Standard bundle", sources.get("standard_bundle")), ("Air-gapped bundle", sources.get("airgapped_bundle"))]:
+        status, note = path_status(path or "")
+        checks.append((label, status, note))
+    prism_ok, prism_note = check_tcp_endpoint(connections.get("prism", ""), 9440)
+    checks.append(("Prism Central", "ok" if prism_ok else "warn", prism_note))
+    reg_ok, reg_note = check_tcp_endpoint(connections.get("registry", ""), 443)
+    checks.append(("Registry", "ok" if reg_ok else "warn", reg_note))
+    return checks
+
+
+def resolve_artifact(raw_path):
+    if not raw_path:
+        raise ValueError("Missing artifact path.")
+    candidate = Path(raw_path)
+    if not candidate.is_absolute():
+        candidate = ROOT / candidate
+    resolved = candidate.resolve()
+    allowed_roots = [ZT.resolve(), (ROOT / "docs").resolve(), (ROOT / "configs").resolve()]
+    if not any(resolved == root or root in resolved.parents for root in allowed_roots):
+        raise ValueError("Artifact path is outside allowed artifact roots.")
+    if not resolved.exists() or not resolved.is_file():
+        raise ValueError("Artifact file not found.")
+    return resolved
+
+
 def create_environment(name, env_type):
     if not name.replace("-", "").replace("_", "").isalnum():
         return 2, "", "Environment name may contain only letters, numbers, hyphens, and underscores."
@@ -480,13 +669,7 @@ def run_cli_action(action, config, apply=False, confirm_destroy=False):
 
 
 def role_permissions(role_name):
-    defaults = {
-        "Admin": {"settings", "environments", "safe-actions", "audit", "jobs", "approve", "apply"},
-        "Operator": {"environments", "safe-actions", "artifacts", "jobs"},
-        "Auditor": {"runs", "artifacts", "audit", "jobs"},
-        "Deployment Reviewer": {"runs", "artifacts", "audit", "jobs", "approve"},
-    }
-    permissions = set(defaults.get(role_name, set()))
+    permissions = set(permission_catalog().get(role_name, set()))
     rbac = load_rbac()
     for role in rbac.get("roles", []):
         if role.get("name") == role_name:
@@ -594,6 +777,8 @@ def create_job(action, config, command, requested_by, kind="safe", approval_requ
         "requestedBy": requested_by.get("username", "unknown") if requested_by else "unknown",
         "requestedRole": requested_by.get("role", "") if requested_by else "",
         "approvalRequired": approval_required,
+        "requiredApprovals": approval_requirement(action) if approval_required else 0,
+        "approvals": [],
         "createdAt": now,
         "updatedAt": now,
         "command": command,
@@ -608,6 +793,28 @@ def create_job(action, config, command, requested_by, kind="safe", approval_requ
 
 def job_status_chip(status):
     return "ok" if status in {"succeeded", "running"} else "warn"
+
+
+def approval_requirement(action):
+    policy = load_setting("approval-policy", default_approval_policy())
+    key = f"{action}_approvals"
+    try:
+        return max(1, int(policy.get(key, "1")))
+    except ValueError:
+        return 1
+
+
+def approval_policy_allows(user, job):
+    policy = load_setting("approval-policy", default_approval_policy())
+    if policy.get("prevent_self_approval", "true") == "true" and job.get("requestedBy") == user.get("username"):
+        return False, "Requester cannot approve their own apply job."
+    if policy.get("production_requires_admin", "true") == "true" and "prod" in job.get("environment", "").lower() and user.get("role") != "Admin":
+        return False, "Production-like environments require Admin approval."
+    return True, ""
+
+
+def job_approval_count(job):
+    return len({approval.get("user") for approval in job.get("approvals", []) if approval.get("user")})
 
 
 def job_controls(job, user, compact=False, include_open=True):
@@ -625,6 +832,8 @@ def job_controls(job, user, compact=False, include_open=True):
 
 
 def page(title, body, active="environments", user=None):
+    body = inject_csrf_fields(body, user)
+
     def nav_class(key):
         return "nav-item active" if key == active else "nav-item"
 
@@ -634,6 +843,7 @@ def page(title, body, active="environments", user=None):
     <a class="{nav_class('cli')}" href="{VIEW_PATHS['cli']}">CLI</a>
     <a class="{nav_class('runs')}" href="{VIEW_PATHS['runs']}">Runs</a>
     <a class="{nav_class('artifacts')}" href="{VIEW_PATHS['artifacts']}">Artifacts</a>
+    <a class="{nav_class('health')}" href="{VIEW_PATHS['health']}">Health</a>
     <div class="nav-label">Deployment</div>
     <a class="{nav_class('sources')}" href="{VIEW_PATHS['sources']}">Sources</a>
     <a class="{nav_class('inventory')}" href="{VIEW_PATHS['inventory']}">Inventory</a>
@@ -643,6 +853,7 @@ def page(title, body, active="environments", user=None):
     <a class="{nav_class('jobs')}" href="{VIEW_PATHS['jobs']}">Jobs</a>
     <div class="nav-label">Governance</div>
     <a class="{nav_class('actions')}" href="{VIEW_PATHS['actions']}">Safe Actions</a>
+    <a class="{nav_class('approval-policy')}" href="{VIEW_PATHS['approval-policy']}">Approval Policy</a>
     <a class="{nav_class('audit')}" href="{VIEW_PATHS['audit']}">Audit Trail</a>
     <div class="nav-label">Settings</div>
     <a class="{nav_class('connections')}" href="{VIEW_PATHS['connections']}">Connections</a>
@@ -651,6 +862,7 @@ def page(title, body, active="environments", user=None):
     <a class="{nav_class('secrets')}" href="{VIEW_PATHS['secrets']}">Secrets</a>
     <a class="{nav_class('rbac')}" href="{VIEW_PATHS['rbac']}">RBAC</a>
     <a class="{nav_class('database')}" href="{VIEW_PATHS['database']}">Database</a>
+    <a class="{nav_class('integrations')}" href="{VIEW_PATHS['integrations']}">Integrations</a>
     <div class="nav-label">System</div>
     <a class="{nav_class('about')}" href="{VIEW_PATHS['about']}">About</a>
 """
@@ -906,6 +1118,7 @@ def page(title, body, active="environments", user=None):
 
 class Handler(BaseHTTPRequestHandler):
     def send_html(self, content, status=200, headers=None):
+        content = inject_csrf_fields(content, self.current_user())
         encoded = content.encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -934,9 +1147,30 @@ class Handler(BaseHTTPRequestHandler):
         self.send_redirect("/login")
         return False
 
+    def require_permission(self, parsed):
+        permission = route_permission(parsed.path)
+        user = self.current_user()
+        if not permission or has_permission(user, permission):
+            return True
+        audit_event("permission_denied", user, parsed.path, "denied", {"permission": permission})
+        self.send_html(page("Access Denied", f"<h2>Access denied</h2><div class='notice'>Your role does not have <code>{html.escape(permission)}</code> permission for this route.</div><a class='back-link' href='/'>Back to dashboard</a>", "about"), status=403)
+        return False
+
+    def require_csrf(self, form):
+        user = self.current_user()
+        expected = csrf_token(user)
+        provided = form_value(form, "csrf_token")
+        if expected and provided and secrets.compare_digest(expected, provided):
+            return True
+        audit_event("csrf_rejected", user, self.path, "denied")
+        self.send_html(page("Request Rejected", "<h2>Request rejected</h2><div class='notice'>The form security token was missing or invalid. Reload the page and try again.</div><a class='back-link' href='/'>Back to dashboard</a>", "about"), status=403)
+        return False
+
     def do_GET(self):
         parsed = urlparse(self.path)
         if not self.require_login(parsed):
+            return
+        if not self.require_permission(parsed):
             return
         if parsed.path == "/assets/veridian-mark-teal.svg":
             asset = ROOT / "dashboard" / "assets" / "veridian-mark-teal.svg"
@@ -982,6 +1216,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/logout":
             token = cookie_value(self.headers, "zt_session")
+            audit_event("logout", self.current_user(), "session", "success")
             SESSIONS.pop(token, None)
             self.send_redirect("/login", {"Set-Cookie": "zt_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax"})
             return
@@ -1230,12 +1465,18 @@ class Handler(BaseHTTPRequestHandler):
             for env_dir in sorted((ZT / "environments").glob("*")) if (ZT / "environments").exists() else []:
                 if not env_dir.is_dir():
                     continue
+                sample_links = []
+                for artifact in sorted(list((env_dir / "generated").glob("*")) + list((env_dir / "reports").glob("*")) + list((env_dir / "logs").glob("*")))[:4]:
+                    if artifact.is_file():
+                        sample_links.append(f'<a class="button-link" href="/artifacts/view?path={quote(str(artifact))}">{html.escape(artifact.name)}</a>')
+                links_html = "".join(sample_links) or '<span class="muted">No files yet</span>'
                 artifact_rows.append(
                     f"<tr><td><div class='env-name'>{html.escape(env_dir.name)}</div><div class='env-file'>{html.escape(str(env_dir.relative_to(ROOT)))}</div></td>"
                     f"<td>{file_count(env_dir / 'generated')}</td>"
                     f"<td>{file_count(env_dir / 'reports')}</td>"
                     f"<td>{file_count(env_dir / 'state')}</td>"
-                    f"<td>{html.escape(mtime_label(env_dir))}</td></tr>"
+                    f"<td>{html.escape(mtime_label(env_dir))}</td>"
+                    f"<td><div class='actions'>{links_html}</div></td></tr>"
                 )
             body = f"""
 <div class="section-head">
@@ -1246,12 +1487,53 @@ class Handler(BaseHTTPRequestHandler):
 </div>
 <section class="panel">
   <table>
-    <thead><tr><th>Environment</th><th>Generated</th><th>Reports</th><th>State</th><th>Updated</th></tr></thead>
-    <tbody>{''.join(artifact_rows) or '<tr><td colspan="5" class="muted">No environment artifacts found. Run prepare or generate first.</td></tr>'}</tbody>
+    <thead><tr><th>Environment</th><th>Generated</th><th>Reports</th><th>State</th><th>Updated</th><th>Open</th></tr></thead>
+    <tbody>{''.join(artifact_rows) or '<tr><td colspan="6" class="muted">No environment artifacts found. Run prepare or generate first.</td></tr>'}</tbody>
   </table>
 </section>
 """
             self.send_html(page("Artifacts - NKP ZeroTouch Console", body, "artifacts"))
+            return
+        if parsed.path == "/artifacts/view":
+            query = parse_qs(parsed.query)
+            try:
+                artifact = resolve_artifact(query.get("path", [""])[0])
+                text = artifact.read_text(encoding="utf-8", errors="replace")
+            except Exception as exc:
+                self.send_html(page("Artifact Error", f"<h2>Artifact unavailable</h2><div class='notice'>{html.escape(str(exc))}</div><a class='back-link' href='/artifacts'>Back to artifacts</a>", "artifacts"), status=400)
+                return
+            body = f"""
+<div class="section-head">
+  <div>
+    <h2>Artifact Viewer</h2>
+    <div class="section-copy"><code>{html.escape(str(artifact.relative_to(ROOT) if ROOT in artifact.parents else artifact))}</code></div>
+  </div>
+</div>
+<pre>{html.escape(text[:200000])}</pre>
+<a class="back-link" href="/artifacts">Back to artifacts</a>
+"""
+            self.send_html(page("Artifact Viewer - NKP ZeroTouch Console", body, "artifacts"))
+            return
+        if parsed.path == "/health":
+            rows = "".join(f"<tr><td>{html.escape(name)}</td><td><span class='chip {status}'>{html.escape(status)}</span></td><td>{html.escape(note)}</td></tr>" for name, status, note in health_checks())
+            ok_count = sum(1 for _, status, _ in health_checks() if status == "ok")
+            warn_count = len(health_checks()) - ok_count
+            body = f"""
+<section class="summary-grid">
+  {metric_card("Healthy", ok_count, "checks passed", "/health")}
+  {metric_card("Warnings", warn_count, "items to review", "/health")}
+  {metric_card("Jobs", len(list_jobs(200)), "stored executions", "/jobs")}
+  {metric_card("Environments", len(env_configs()), "configured targets", "/")}
+</section>
+<div class="section-head">
+  <div>
+    <h2>Health Checks</h2>
+    <div class="section-copy">Runner, storage, tools, bundle, Prism, and registry readiness from the console host perspective.</div>
+  </div>
+</div>
+<section class="panel"><table><thead><tr><th>Check</th><th>Status</th><th>Detail</th></tr></thead><tbody>{rows}</tbody></table></section>
+"""
+            self.send_html(page("Health - NKP ZeroTouch Console", body, "health"))
             return
         if parsed.path == "/actions":
             action_rows = "".join(
@@ -1281,6 +1563,10 @@ class Handler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/audit":
             audit_rows = []
+            for event in recent_audit_events(50):
+                audit_rows.append(
+                    f"<tr><td><code>{html.escape(event.get('user', ''))}</code></td><td>{html.escape(event.get('event', ''))}</td><td>{html.escape(event.get('timestamp', ''))}</td><td>{html.escape(event.get('target', ''))}</td></tr>"
+                )
             if (ZT / "environments").exists():
                 for p in sorted((ZT / "environments").glob("*/state/*.json"), key=lambda item: item.stat().st_mtime, reverse=True)[:25]:
                     audit_rows.append(
@@ -1492,7 +1778,7 @@ class Handler(BaseHTTPRequestHandler):
   <div class="ops-item"><div class="ops-label">Action</div><div class="ops-value">{html.escape(job.get('action', ''))}</div></div>
   <div class="ops-item"><div class="ops-label">Status</div><div class="ops-value"><span class="chip {job_status_chip(job.get('status', 'queued'))}">{html.escape(job.get('status', 'queued'))}</span></div></div>
   <div class="ops-item"><div class="ops-label">Requested By</div><div class="ops-value">{html.escape(job.get('requestedBy', ''))}</div></div>
-  <div class="ops-item"><div class="ops-label">Exit Code</div><div class="ops-value">{html.escape(str(job.get('exitCode', 'n/a')))}</div></div>
+  <div class="ops-item"><div class="ops-label">Approvals</div><div class="ops-value">{job_approval_count(job)} / {html.escape(str(job.get('requiredApprovals', 0)))}</div></div>
 </section>
 <section class="panel">
   <table>
@@ -1506,6 +1792,35 @@ class Handler(BaseHTTPRequestHandler):
 {refresh}
 """
             self.send_html(page("Job Detail - NKP ZeroTouch Console", body, "jobs"))
+            return
+        if parsed.path == "/approval-policy":
+            policy = load_setting("approval-policy", default_approval_policy())
+            body = f"""
+<div class="section-head">
+  <div>
+    <h2>Approval Policy</h2>
+    <div class="section-copy">Configure how many approvals are required before live apply jobs can run.</div>
+  </div>
+</div>
+<section class="panel">
+  <form method="post" action="/approval-policy/save">
+    <table>
+      <thead><tr><th>Policy</th><th>Value</th></tr></thead>
+      <tbody>
+        <tr><td>Deploy approvals</td><td><div class="field"><input name="deploy_approvals" value="{html.escape(policy.get('deploy_approvals', '1'))}"></div></td></tr>
+        <tr><td>Registry approvals</td><td><div class="field"><input name="registry_approvals" value="{html.escape(policy.get('registry_approvals', '1'))}"></div></td></tr>
+        <tr><td>Upgrade approvals</td><td><div class="field"><input name="upgrade_approvals" value="{html.escape(policy.get('upgrade_approvals', '1'))}"></div></td></tr>
+        <tr><td>Destroy approvals</td><td><div class="field"><input name="destroy_approvals" value="{html.escape(policy.get('destroy_approvals', '2'))}"></div></td></tr>
+        <tr><td>Prevent self approval</td><td><div class="field"><select name="prevent_self_approval"><option value="true" {'selected' if policy.get('prevent_self_approval') == 'true' else ''}>true</option><option value="false" {'selected' if policy.get('prevent_self_approval') == 'false' else ''}>false</option></select></div></td></tr>
+        <tr><td>Production requires Admin</td><td><div class="field"><select name="production_requires_admin"><option value="true" {'selected' if policy.get('production_requires_admin') == 'true' else ''}>true</option><option value="false" {'selected' if policy.get('production_requires_admin') == 'false' else ''}>false</option></select></div></td></tr>
+        <tr><td></td><td><button>Save approval policy</button></td></tr>
+      </tbody>
+    </table>
+  </form>
+</section>
+<div class="notice">Apply jobs remain pending until the configured approval threshold is met. Destroy defaults to two approvals.</div>
+"""
+            self.send_html(page("Approval Policy - NKP ZeroTouch Console", body, "approval-policy"))
             return
         if parsed.path == "/settings/connections":
             settings = read_json(SETTINGS / "connections.json") or {}
@@ -1737,6 +2052,55 @@ class Handler(BaseHTTPRequestHandler):
 """
             self.send_html(page("Database - NKP ZeroTouch Console", body, "database"))
             return
+        if parsed.path == "/settings/integrations":
+            settings = load_setting("integrations", default_integrations())
+            postgres_ok, postgres_note = ("warn", "disabled")
+            if settings.get("postgres_enabled") == "true":
+                postgres_ok, postgres_note = ("ok", "configured") if settings.get("postgres_dsn") else ("warn", "DSN missing")
+            vault_ok, vault_note = ("warn", "disabled")
+            if settings.get("vault_enabled") == "true":
+                vault_ok, vault_note = ("ok", "configured") if settings.get("vault_addr") else ("warn", "Vault address missing")
+            oidc_ok, oidc_note = ("warn", "disabled")
+            if settings.get("oidc_enabled") == "true":
+                oidc_ok, oidc_note = ("ok", "configured") if settings.get("oidc_issuer") and settings.get("oidc_client_id") else ("warn", "Issuer/client ID missing")
+            body = f"""
+<div class="section-head">
+  <div>
+    <h2>Enterprise Integrations</h2>
+    <div class="section-copy">Configure durable sessions, Postgres persistence, Vault secrets, and OIDC identity metadata.</div>
+  </div>
+</div>
+<section class="ops-strip">
+  <div class="ops-item"><div class="ops-label">Postgres</div><div class="ops-value"><span class="chip {postgres_ok}">{html.escape(postgres_note)}</span></div></div>
+  <div class="ops-item"><div class="ops-label">Vault</div><div class="ops-value"><span class="chip {vault_ok}">{html.escape(vault_note)}</span></div></div>
+  <div class="ops-item"><div class="ops-label">OIDC</div><div class="ops-value"><span class="chip {oidc_ok}">{html.escape(oidc_note)}</span></div></div>
+  <div class="ops-item"><div class="ops-label">Session Store</div><div class="ops-value">{html.escape(settings.get('session_store', 'memory'))}</div></div>
+</section>
+<section class="panel">
+  <form method="post" action="/settings/integrations/save">
+    <table>
+      <thead><tr><th>Integration</th><th>Value</th></tr></thead>
+      <tbody>
+        <tr><td>Session store</td><td><div class="field"><select name="session_store"><option value="memory" {'selected' if settings.get('session_store') == 'memory' else ''}>memory</option><option value="file" {'selected' if settings.get('session_store') == 'file' else ''}>file</option><option value="postgres" {'selected' if settings.get('session_store') == 'postgres' else ''}>postgres</option></select></div></td></tr>
+        <tr><td>Enable Postgres</td><td><div class="field"><select name="postgres_enabled"><option value="false" {'selected' if settings.get('postgres_enabled') != 'true' else ''}>false</option><option value="true" {'selected' if settings.get('postgres_enabled') == 'true' else ''}>true</option></select></div></td></tr>
+        <tr><td>Postgres DSN</td><td><div class="field"><input name="postgres_dsn" value="{html.escape(settings.get('postgres_dsn', ''))}" placeholder="postgresql://zt_console@db/nkp_zerotouch"></div></td></tr>
+        <tr><td>Enable OIDC</td><td><div class="field"><select name="oidc_enabled"><option value="false" {'selected' if settings.get('oidc_enabled') != 'true' else ''}>false</option><option value="true" {'selected' if settings.get('oidc_enabled') == 'true' else ''}>true</option></select></div></td></tr>
+        <tr><td>OIDC issuer</td><td><div class="field"><input name="oidc_issuer" value="{html.escape(settings.get('oidc_issuer', ''))}"></div></td></tr>
+        <tr><td>OIDC client ID</td><td><div class="field"><input name="oidc_client_id" value="{html.escape(settings.get('oidc_client_id', ''))}"></div></td></tr>
+        <tr><td>OIDC redirect URI</td><td><div class="field"><input name="oidc_redirect_uri" value="{html.escape(settings.get('oidc_redirect_uri', ''))}"></div></td></tr>
+        <tr><td>Enable Vault</td><td><div class="field"><select name="vault_enabled"><option value="false" {'selected' if settings.get('vault_enabled') != 'true' else ''}>false</option><option value="true" {'selected' if settings.get('vault_enabled') == 'true' else ''}>true</option></select></div></td></tr>
+        <tr><td>Vault address</td><td><div class="field"><input name="vault_addr" value="{html.escape(settings.get('vault_addr', ''))}" placeholder="https://vault.example.com"></div></td></tr>
+        <tr><td>Vault mount</td><td><div class="field"><input name="vault_mount" value="{html.escape(settings.get('vault_mount', 'kv'))}"></div></td></tr>
+        <tr><td>Vault secret path</td><td><div class="field"><input name="vault_secret_path" value="{html.escape(settings.get('vault_secret_path', 'nkp/zerotouch'))}"></div></td></tr>
+        <tr><td></td><td><button>Save integrations</button></td></tr>
+      </tbody>
+    </table>
+  </form>
+</section>
+<div class="notice">These settings provide concrete integration contracts. External Postgres, Vault, and OIDC services must still be deployed and connected in the target environment.</div>
+"""
+            self.send_html(page("Integrations - NKP ZeroTouch Console", body, "integrations"))
+            return
         if parsed.path == "/about":
             version = (ROOT / "VERSION").read_text(encoding="utf-8").strip() if (ROOT / "VERSION").exists() else "dev"
             body = f"""
@@ -1791,16 +2155,38 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_html(page("Login Failed", "<h2>Login failed</h2><div class='notice'>Invalid username, password, or account status.</div><a class='back-link' href='/login'>Back to login</a>", "about"), status=403)
                     return
             token = secrets.token_urlsafe(32)
-            SESSIONS[token] = {"username": username, "role": account.get("role", "Operator"), "loginAt": time.time()}
+            SESSIONS[token] = {"username": username, "role": account.get("role", "Operator"), "loginAt": time.time(), "csrf": secrets.token_urlsafe(32)}
+            audit_event("login", SESSIONS[token], username, "success")
             self.send_redirect("/", {"Set-Cookie": f"zt_session={token}; Path=/; HttpOnly; SameSite=Lax"})
             return
 
         if not self.require_login(parsed):
             return
+        if not self.require_permission(parsed):
+            return
+        if not self.require_csrf(form):
+            return
+
+        if parsed.path == "/approval-policy/save":
+            data = {key: form_value(form, key) for key in ["deploy_approvals", "registry_approvals", "upgrade_approvals", "destroy_approvals", "prevent_self_approval", "production_requires_admin"]}
+            save_setting("approval-policy", data)
+            audit_event("approval_policy_saved", self.current_user(), "approval-policy", "success")
+            body = "<section class='metric'><div class='metric-label'>Settings Saved</div><div class='metric-value'>Approval Policy</div><div class='metric-foot'><span class='chip ok'>Saved locally</span></div></section><a class='back-link' href='/approval-policy'>Back to approval policy</a>"
+            self.send_html(page("Approval Policy Saved", body, "approval-policy"))
+            return
+
+        if parsed.path == "/settings/integrations/save":
+            data = {key: form_value(form, key) for key in ["session_store", "postgres_enabled", "postgres_dsn", "oidc_enabled", "oidc_issuer", "oidc_client_id", "oidc_redirect_uri", "vault_enabled", "vault_addr", "vault_mount", "vault_secret_path"]}
+            save_setting("integrations", data)
+            audit_event("integrations_saved", self.current_user(), "integrations", "success")
+            body = "<section class='metric'><div class='metric-label'>Settings Saved</div><div class='metric-value'>Integrations</div><div class='metric-foot'><span class='chip ok'>Saved locally</span></div></section><a class='back-link' href='/settings/integrations'>Back to integrations</a>"
+            self.send_html(page("Integrations Saved", body, "integrations"))
+            return
 
         if parsed.path == "/sources/save":
             data = {key: form_value(form, key) for key in ["version", "standard_bundle", "airgapped_bundle", "source_path", "git_url", "git_ref", "checksum"]}
             save_setting("sources", data)
+            audit_event("sources_saved", self.current_user(), "sources", "success")
             body = "<section class='metric'><div class='metric-label'>Settings Saved</div><div class='metric-value'>Sources</div><div class='metric-foot'><span class='chip ok'>Saved locally</span></div></section><a class='back-link' href='/sources'>Back to sources</a>"
             self.send_html(page("Sources Saved", body, "sources"))
             return
@@ -1808,6 +2194,7 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/inventory/save":
             data = {key: form_value(form, key) for key in ["mode", "nodes", "bmc_network", "bmc_provider", "boot_mode", "os_image", "notes"]}
             save_setting("inventory", data)
+            audit_event("inventory_saved", self.current_user(), "inventory", "success")
             body = "<section class='metric'><div class='metric-label'>Settings Saved</div><div class='metric-value'>Inventory</div><div class='metric-foot'><span class='chip ok'>Saved locally</span></div></section><a class='back-link' href='/inventory'>Back to inventory</a>"
             self.send_html(page("Inventory Saved", body, "inventory"))
             return
@@ -1815,6 +2202,7 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/network/save":
             data = {key: form_value(form, key) for key in ["management_cidr", "workload_cidr", "api_vip", "ingress_range", "dns_servers", "ntp_servers", "proxy", "ip_mode"]}
             save_setting("network", data)
+            audit_event("network_saved", self.current_user(), "network", "success")
             body = "<section class='metric'><div class='metric-label'>Settings Saved</div><div class='metric-value'>Network</div><div class='metric-foot'><span class='chip ok'>Saved locally</span></div></section><a class='back-link' href='/network'>Back to network</a>"
             self.send_html(page("Network Saved", body, "network"))
             return
@@ -1822,6 +2210,7 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/settings/providers/save":
             data = {key: form_value(form, key) for key in ["default_provider", "enabled_providers", "runner_type", "runner_notes"]}
             save_setting("providers", data)
+            audit_event("providers_saved", self.current_user(), "providers", "success")
             body = "<section class='metric'><div class='metric-label'>Settings Saved</div><div class='metric-value'>Providers</div><div class='metric-foot'><span class='chip ok'>Saved locally</span></div></section><a class='back-link' href='/settings/providers'>Back to providers</a>"
             self.send_html(page("Providers Saved", body, "providers"))
             return
@@ -1829,6 +2218,7 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/settings/secrets/save":
             data = {key: form_value(form, key) for key in ["backend", "vault_url", "namespace", "secret_path", "rotation_policy"]}
             save_setting("secrets", data)
+            audit_event("secrets_saved", self.current_user(), "secrets", "success")
             body = "<section class='metric'><div class='metric-label'>Settings Saved</div><div class='metric-value'>Secrets</div><div class='metric-foot'><span class='chip ok'>Saved locally</span></div></section><a class='back-link' href='/settings/secrets'>Back to secrets</a>"
             self.send_html(page("Secrets Saved", body, "secrets"))
             return
@@ -1843,6 +2233,7 @@ class Handler(BaseHTTPRequestHandler):
                 "savedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             }
             write_json(SETTINGS / "connections.json", data)
+            audit_event("connections_saved", self.current_user(), "connections", "success")
             body = "<section class='metric'><div class='metric-label'>Settings Saved</div><div class='metric-value'>Connections</div><div class='metric-foot'><span class='chip ok'>Saved locally</span></div></section><a class='back-link' href='/settings/connections'>Back to connections</a>"
             self.send_html(page("Connections Saved", body, "connections"))
             return
@@ -1862,6 +2253,7 @@ class Handler(BaseHTTPRequestHandler):
                     code = 1
                     err += f"\nEnvironment was created, but provider metadata could not be saved: {exc}"
             status_class = "ok" if code == 0 else "warn"
+            audit_event("environment_created", self.current_user(), name, "success" if code == 0 else "failed", {"type": env_type, "provider": provider})
             body = (
                 "<div class='result-layout'>"
                 f"<section class='metric'><div class='metric-label'>Environment Creation</div><div class='metric-value'>{html.escape(name or 'unnamed')}</div>"
@@ -1883,6 +2275,7 @@ class Handler(BaseHTTPRequestHandler):
             }
             rbac["settings"] = data
             write_json(SETTINGS / "rbac.json", rbac)
+            audit_event("rbac_saved", self.current_user(), "rbac", "success")
             body = "<section class='metric'><div class='metric-label'>Settings Saved</div><div class='metric-value'>RBAC</div><div class='metric-foot'><span class='chip ok'>Saved locally</span></div></section><a class='back-link' href='/settings/rbac'>Back to RBAC</a>"
             self.send_html(page("RBAC Saved", body, "rbac"))
             return
@@ -1899,6 +2292,7 @@ class Handler(BaseHTTPRequestHandler):
             if key not in existing:
                 rbac["roles"].append({"name": name, "permissions": permissions, "createdAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
                 write_json(SETTINGS / "rbac.json", rbac)
+            audit_event("role_saved", self.current_user(), name, "success")
             body = f"<section class='metric'><div class='metric-label'>Role Saved</div><div class='metric-value'>{html.escape(name)}</div><div class='metric-foot'><span class='chip ok'>Configured</span></div></section><a class='back-link' href='/settings/rbac'>Back to RBAC</a>"
             self.send_html(page("Role Saved", body, "rbac"))
             return
@@ -1934,6 +2328,7 @@ class Handler(BaseHTTPRequestHandler):
             accounts.append(account_record)
             rbac["accounts"] = accounts
             write_json(SETTINGS / "rbac.json", rbac)
+            audit_event("account_saved", self.current_user(), username, "success", {"role": role, "status": status})
             body = f"<section class='metric'><div class='metric-label'>Account Saved</div><div class='metric-value'>{html.escape(username)}</div><div class='metric-foot'><span class='chip ok'>Mapped to {html.escape(role)}</span></div></section><a class='back-link' href='/settings/rbac'>Back to RBAC</a>"
             self.send_html(page("Account Saved", body, "rbac"))
             return
@@ -1947,6 +2342,7 @@ class Handler(BaseHTTPRequestHandler):
                 "savedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             }
             write_json(SETTINGS / "database.json", data)
+            audit_event("database_saved", self.current_user(), "database", "success")
             body = "<section class='metric'><div class='metric-label'>Settings Saved</div><div class='metric-value'>Database</div><div class='metric-foot'><span class='chip ok'>Saved locally</span></div></section><a class='back-link' href='/settings/database'>Back to database</a>"
             self.send_html(page("Database Saved", body, "database"))
             return
@@ -1961,9 +2357,20 @@ class Handler(BaseHTTPRequestHandler):
             if not job or job.get("status") != "pending_approval":
                 self.send_html(page("Approval Error", "<h2>Job is not pending approval.</h2><a class='back-link' href='/jobs'>Back to jobs</a>", "jobs"), status=400)
                 return
-            update_job(job_id, status="queued", approvedBy=user.get("username", "unknown"), approvedAt=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
-            append_job_log(job_id, f"[approved by {user.get('username', 'unknown')}]\n")
-            start_job(job_id)
+            allowed, reason = approval_policy_allows(user, job)
+            if not allowed:
+                audit_event("approval_denied", user, job_id, "denied", {"reason": reason})
+                self.send_html(page("Approval Blocked", f"<h2>Approval blocked</h2><div class='notice'>{html.escape(reason)}</div><a class='back-link' href='/jobs'>Back to jobs</a>", "jobs"), status=403)
+                return
+            approvals = [approval for approval in job.get("approvals", []) if approval.get("user") != user.get("username")]
+            approvals.append({"user": user.get("username", "unknown"), "role": user.get("role", ""), "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
+            required = int(job.get("requiredApprovals", approval_requirement(job.get("action", ""))))
+            status = "queued" if len({item["user"] for item in approvals}) >= required else "pending_approval"
+            update_job(job_id, status=status, approvals=approvals, approvedBy=user.get("username", "unknown"), approvedAt=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+            audit_event("job_approved", user, job_id, "success", {"approvals": len(approvals), "required": required})
+            append_job_log(job_id, f"[approved by {user.get('username', 'unknown')} ({len(approvals)}/{required})]\n")
+            if status == "queued":
+                start_job(job_id)
             self.send_redirect(f"/jobs/view?id={quote(job_id)}")
             return
 
@@ -1978,6 +2385,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_html(page("Rejection Error", "<h2>Job is not pending approval.</h2><a class='back-link' href='/jobs'>Back to jobs</a>", "jobs"), status=400)
                 return
             update_job(job_id, status="rejected", rejectedBy=user.get("username", "unknown"), rejectedAt=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+            audit_event("job_rejected", user, job_id, "success")
             append_job_log(job_id, f"[rejected by {user.get('username', 'unknown')}]\n")
             self.send_redirect(f"/jobs/view?id={quote(job_id)}")
             return
@@ -1993,6 +2401,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_html(page("Cancel Error", "<h2>Job cannot be cancelled.</h2><a class='back-link' href='/jobs'>Back to jobs</a>", "jobs"), status=400)
                 return
             update_job(job_id, status="cancel_requested" if job.get("status") == "running" else "cancelled", cancelledBy=user.get("username", "unknown"), cancelledAt=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+            audit_event("job_cancelled", user, job_id, "success")
             append_job_log(job_id, f"[cancel requested by {user.get('username', 'unknown')}]\n")
             if job.get("status") == "running" and job.get("pid"):
                 try:
@@ -2020,6 +2429,7 @@ class Handler(BaseHTTPRequestHandler):
                 approval_required=original.get("kind") == "apply",
             )
             append_job_log(retry["id"], f"[retry of {original.get('id')}]\n")
+            audit_event("job_retried", user, retry["id"], "success", {"sourceJob": original.get("id")})
             self.send_redirect(f"/jobs/view?id={quote(retry['id'])}")
             return
 
@@ -2035,6 +2445,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_html(page("CLI Error", "<h2>Runner unavailable</h2><div class='notice'>No supported shell runner found.</div><a class='back-link' href='/cli'>Back to CLI</a>", "cli"), status=500)
                 return
             job = create_job(action, config, command, self.current_user(), kind="apply", approval_required=True)
+            audit_event("apply_requested", self.current_user(), job["id"], "pending", {"action": action, "config": str(config)})
             self.send_redirect(f"/jobs/view?id={quote(job['id'])}")
             return
 
@@ -2063,6 +2474,7 @@ class Handler(BaseHTTPRequestHandler):
                 for key, (path, converter) in field_map.items():
                     nested_set(data, path, converter(form_value(form, key)))
                 write_env_yaml(config, data)
+                audit_event("environment_saved", self.current_user(), config.name, "success")
             except Exception as exc:
                 self.send_html(page("Environment Save Error", f"<h2>Save failed</h2><div class='notice'>{html.escape(str(exc))}</div><a class='back-link' href='/'>Back to environments</a>", "environments"), status=400)
                 return
@@ -2091,6 +2503,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             state_note = "Config and local state removed" if removed_state else "Config removed"
             body = f"<section class='metric'><div class='metric-label'>Environment Deleted</div><div class='metric-value'>{html.escape(env_name)}</div><div class='metric-foot'><span class='chip ok'>{html.escape(state_note)}</span></div></section><a class='back-link' href='/'>Back to environments</a>"
+            audit_event("environment_deleted", self.current_user(), env_name, "success", {"stateRemoved": removed_state})
             self.send_html(page("Environment Deleted", body, "environments"))
             return
 
@@ -2115,6 +2528,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_html(page("Action Error", "<h2>Runner unavailable</h2><div class='notice'>No supported shell runner found.</div><a class='back-link' href='/'>Back to dashboard</a>", "actions"), status=500)
             return
         job = create_job(action, config, command, self.current_user(), kind="safe", approval_required=False)
+        audit_event("safe_job_created", self.current_user(), job["id"], "queued", {"action": action, "config": str(config)})
         self.send_redirect(f"/jobs/view?id={quote(job['id'])}")
 
 

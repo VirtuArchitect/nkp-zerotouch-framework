@@ -38,6 +38,10 @@ Job and approval model:
 - Job detail pages show the validated command, status, approval metadata, and captured log output.
 - Active job detail pages auto-refresh while queued, running, or waiting for approval.
 - Running jobs can be cancelled; failed, rejected, cancelled, or completed jobs can be retried.
+- Approval thresholds are configured under `Approval Policy`.
+- Authenticated POST forms include CSRF protection.
+- Route access is RBAC-gated by role permissions.
+- Mutations are written to an append-only audit log under `.zt/audit/events.jsonl`.
 
 Deployment readiness sections:
 
@@ -47,8 +51,11 @@ Deployment readiness sections:
 - `Preflight`: console-level readiness matrix across sources, inventory, network, connections, secrets, and provider.
 - `Pipeline`: visual ZeroTouch flow from source intake through validation, preparation, generation, registry, deploy, verify, and operate.
 - `Jobs`: execution queue, approval controls, job detail pages, and captured live logs.
+- `Health`: runner, tool, bundle, Prism, registry, and state-path readiness.
+- `Artifacts`: generated file browser and viewer for plans, logs, reports, and configs.
 
 Settings sections:
 
 - `Providers`: default provider intent and runner type.
 - `Secrets`: metadata for local-file or external secret backends. Secret values are not stored by the dashboard.
+- `Integrations`: Postgres, Vault, OIDC, and session-store integration metadata.

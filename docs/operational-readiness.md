@@ -21,24 +21,28 @@ Before live deployment, operations teams must provide:
 - Local login/logout with password-hashed RBAC accounts.
 - Local account and role management.
 - Environment create, edit, and delete.
-- Safe action execution: validate, prepare, generate, verify, backup, runs.
-- Runs, artifacts, and audit visibility from `.zt`.
-- Local connection, RBAC, and database settings.
+- CSRF protection on authenticated POST forms.
+- Route-level RBAC for operations, settings, jobs, approvals, artifacts, audit, and health.
+- Safe action execution through background jobs: validate, prepare, generate, verify, backup, runs.
+- Apply action requests through approval-gated jobs.
+- Job approval, reject, cancel, retry, detail, and captured log views.
+- Runs, artifacts, health checks, and append-only audit visibility from `.zt`.
+- Artifact viewer for generated plans, reports, logs, and configs.
+- Local connection, RBAC, database, integration, approval policy, source, inventory, network, provider, and secret-backend settings.
+- Enterprise integration contracts for Postgres, Vault, and OIDC metadata.
 
 ## Required Production Hardening
 
 Before exposing this console beyond a trusted operator workstation:
 
-- Replace local sessions with durable server-side session storage.
-- Add CSRF protection to all POST forms.
-- Enforce RBAC permissions on routes and actions.
-- Add OIDC/SAML or enterprise SSO integration.
-- Move console state to Postgres if multi-user operation is required.
+- Move from memory sessions to file or Postgres-backed durable session storage.
+- Connect OIDC/SAML or enterprise SSO to a real identity provider.
+- Connect console state to Postgres if multi-user operation is required.
 - Encrypt or externalize all secrets; do not store raw credentials in the repo or database.
-- Add per-action audit events with user identity, timestamp, target environment, and result.
-- Add role separation for authoring, approving, and executing deployment changes.
+- Connect Vault or an equivalent external secret backend.
+- Review and tune role separation for authoring, approving, and executing deployment changes.
 - Add backup/restore procedures for `.zt` state and future database state.
-- Add health checks for Prism Central, registry, bundle mount, DNS, NTP, proxy, and disk space.
+- Extend health checks with authenticated Prism Central and registry API validation.
 
 ## Recommended Operating Model
 
@@ -51,17 +55,17 @@ Keep live apply operations deliberate and controlled:
 4. Run `generate`.
 5. Review generated artifacts and runbooks.
 6. For air-gapped environments, run registry planning and approved image push.
-7. Execute live deploy from a prepared runner with approved credentials.
-8. Capture kubeconfig.
-9. Run `verify`.
-10. Capture a run summary and archive artifacts.
+7. Request live deploy from the controlled CLI window.
+8. Obtain required approval under the configured approval policy.
+9. Let the approved job run from the prepared runner with approved credentials.
+10. Capture kubeconfig.
+11. Run `verify`.
+12. Capture a run summary and archive artifacts.
 
 ## Current Gaps
 
-- No enforced route-level RBAC yet.
-- No production SSO integration yet.
-- No Postgres persistence yet.
+- No production SSO provider connected yet.
+- No external Postgres service connected yet.
+- No external Vault service connected yet.
 - No live Prism Central authentication validation yet.
 - No end-to-end deployment proof against a real NKP lab yet.
-- No approval workflow for destructive or live apply actions yet.
-

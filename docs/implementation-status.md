@@ -17,6 +17,13 @@ This maps the public-readiness and real-deployment tasks to the repository featu
 | Add real CI strategy | Implemented baseline | GitHub Actions syntax/helper/security/package checks |
 | Create first real profile | Supported | `scripts/new-env.*` |
 | Dashboard / console | Implemented | `dashboard/app.py`, `docs/dashboard.md` |
+| CSRF protection | Implemented | authenticated POST forms receive and validate CSRF tokens |
+| Route-level RBAC | Implemented baseline | routes are mapped to permissions and enforced for local roles |
+| Audit events | Implemented baseline | append-only `.zt/audit/events.jsonl` for logins, settings, jobs, approvals, and environment changes |
+| Health checks | Implemented baseline | console health page for runner, tools, bundles, Prism, and registry |
+| Artifact viewer | Implemented | generated plans, reports, logs, and allowed config/docs files can be opened from the console |
+| Approval policy | Implemented baseline | per-action approval thresholds, self-approval prevention, production Admin option |
+| Enterprise integrations | Configured baseline | Postgres, Vault, OIDC, and session-store metadata under Settings > Integrations |
 | Kubeconfig capture | Implemented | `kubeconfig` phase |
 | Registry push enhancements | Implemented | CA, insecure, concurrency, existing-tag behavior |
 | Containerized runner | Implemented | `Dockerfile`, `Containerfile`, `docs/container-runner.md` |
