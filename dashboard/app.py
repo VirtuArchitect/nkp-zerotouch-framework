@@ -4,10 +4,12 @@ import hashlib
 import json
 import os
 import secrets
+import signal
 import shlex
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -22,6 +24,7 @@ except ImportError:
 ROOT = Path(__file__).resolve().parents[1]
 ZT = ROOT / ".zt"
 SETTINGS = ZT / "settings"
+JOBS = ZT / "jobs"
 ENV_DIR = ROOT / "configs" / "environments"
 SESSIONS = {}
 SAFE_ACTIONS = {"validate", "prepare", "generate", "verify", "backup", "runs"}
@@ -361,14 +364,14 @@ def create_environment(name, env_type):
         return 127, "", f"Failed to create environment: {exc}"
 
 
-def run_action(action, config):
+def action_command(action, config):
     bash_path = shutil.which("bash")
     pwsh_path = shutil.which("pwsh") or shutil.which("powershell")
 
     if bash_path and (ROOT / "scripts" / "zt.sh").exists():
-        command = [bash_path, str(ROOT / "scripts" / "zt.sh"), action, "--config", str(config)]
-    elif pwsh_path and (ROOT / "scripts" / "zt.ps1").exists():
-        command = [
+        return [bash_path, str(ROOT / "scripts" / "zt.sh"), action, "--config", str(config)]
+    if pwsh_path and (ROOT / "scripts" / "zt.ps1").exists():
+        return [
             pwsh_path,
             "-NoProfile",
             "-ExecutionPolicy",
@@ -379,7 +382,35 @@ def run_action(action, config):
             "-Config",
             str(config),
         ]
+    return None
+
+
+def cli_command(action, config, apply=False, confirm_destroy=False):
+    command = action_command(action, config)
+    if not command:
+        return None
+    if command[0] == shutil.which("bash"):
+        if apply:
+            command.append("--apply")
+        if confirm_destroy:
+            command.append("--confirm-destroy")
     else:
+        if apply:
+            command.append("-Apply")
+        if confirm_destroy:
+            command.append("-ConfirmDestroy")
+    return command
+
+
+def command_label(command):
+    if not command:
+        return "runner unavailable"
+    return " ".join(shlex.quote(str(part)) for part in command)
+
+
+def run_action(action, config):
+    command = action_command(action, config)
+    if not command:
         return 127, "", "No supported shell runner found. Install bash, PowerShell, or run the dashboard container image."
 
     try:
@@ -435,32 +466,8 @@ def parse_cli_command(command_text, fallback_config):
 
 
 def run_cli_action(action, config, apply=False, confirm_destroy=False):
-    bash_path = shutil.which("bash")
-    pwsh_path = shutil.which("pwsh") or shutil.which("powershell")
-
-    if bash_path and (ROOT / "scripts" / "zt.sh").exists():
-        command = [bash_path, str(ROOT / "scripts" / "zt.sh"), action, "--config", str(config)]
-        if apply:
-            command.append("--apply")
-        if confirm_destroy:
-            command.append("--confirm-destroy")
-    elif pwsh_path and (ROOT / "scripts" / "zt.ps1").exists():
-        command = [
-            pwsh_path,
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            str(ROOT / "scripts" / "zt.ps1"),
-            action,
-            "-Config",
-            str(config),
-        ]
-        if apply:
-            command.append("-Apply")
-        if confirm_destroy:
-            command.append("-ConfirmDestroy")
-    else:
+    command = cli_command(action, config, apply=apply, confirm_destroy=confirm_destroy)
+    if not command:
         return 127, "", "No supported shell runner found."
 
     try:
@@ -470,6 +477,151 @@ def run_cli_action(action, config, apply=False, confirm_destroy=False):
         return 124, exc.stdout or "", (exc.stderr or "") + "\nCLI command timed out after 600 seconds."
     except OSError as exc:
         return 127, "", f"Failed to start CLI runner: {exc}"
+
+
+def role_permissions(role_name):
+    defaults = {
+        "Admin": {"settings", "environments", "safe-actions", "audit", "jobs", "approve", "apply"},
+        "Operator": {"environments", "safe-actions", "artifacts", "jobs"},
+        "Auditor": {"runs", "artifacts", "audit", "jobs"},
+        "Deployment Reviewer": {"runs", "artifacts", "audit", "jobs", "approve"},
+    }
+    permissions = set(defaults.get(role_name, set()))
+    rbac = load_rbac()
+    for role in rbac.get("roles", []):
+        if role.get("name") == role_name:
+            permissions.update(safe_key(item) for item in role.get("permissions", "").replace(";", ",").split(",") if item.strip())
+    return permissions
+
+
+def has_permission(user, permission):
+    if not user:
+        return False
+    return permission in role_permissions(user.get("role", "Operator"))
+
+
+def job_dir(job_id):
+    return JOBS / job_id
+
+
+def job_meta_path(job_id):
+    return job_dir(job_id) / "job.json"
+
+
+def job_log_path(job_id):
+    return job_dir(job_id) / "output.log"
+
+
+def read_job(job_id):
+    safe_id = safe_key(job_id)
+    if not safe_id or safe_id != job_id:
+        return None
+    return read_json(job_meta_path(safe_id))
+
+
+def write_job(job):
+    path = job_meta_path(job["id"])
+    path.parent.mkdir(parents=True, exist_ok=True)
+    write_json(path, job)
+
+
+def list_jobs(limit=50):
+    if not JOBS.exists():
+        return []
+    jobs = []
+    for meta in JOBS.glob("*/job.json"):
+        job = read_json(meta)
+        if job:
+            jobs.append(job)
+    return sorted(jobs, key=lambda item: item.get("createdAt", ""), reverse=True)[:limit]
+
+
+def update_job(job_id, **updates):
+    job = read_job(job_id)
+    if not job:
+        return None
+    job.update(updates)
+    job["updatedAt"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    write_job(job)
+    return job
+
+
+def append_job_log(job_id, text):
+    path = job_log_path(job_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(text)
+
+
+def run_job_background(job_id):
+    job = read_job(job_id)
+    if not job:
+        return
+    command = job.get("command", [])
+    update_job(job_id, status="running", startedAt=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+    append_job_log(job_id, f"$ {job.get('commandLabel', command_label(command))}\n")
+    try:
+        process = subprocess.Popen(command, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        update_job(job_id, pid=process.pid)
+        assert process.stdout is not None
+        for line in process.stdout:
+            append_job_log(job_id, line)
+        code = process.wait(timeout=10)
+        latest = read_job(job_id) or {}
+        status = "cancelled" if latest.get("status") == "cancel_requested" else ("succeeded" if code == 0 else "failed")
+        update_job(job_id, status=status, exitCode=code, finishedAt=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+        append_job_log(job_id, f"\n[exit code {code}]\n")
+    except Exception as exc:
+        update_job(job_id, status="failed", exitCode=127, finishedAt=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+        append_job_log(job_id, f"\n[job runner error] {exc}\n")
+
+
+def start_job(job_id):
+    thread = threading.Thread(target=run_job_background, args=(job_id,), daemon=True)
+    thread.start()
+
+
+def create_job(action, config, command, requested_by, kind="safe", approval_required=False):
+    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    job_id = f"{time.strftime('%Y%m%d-%H%M%S', time.gmtime())}-{secrets.token_hex(3)}"
+    job = {
+        "id": job_id,
+        "kind": kind,
+        "action": action,
+        "config": str(config),
+        "environment": Path(config).stem if config else "",
+        "status": "pending_approval" if approval_required else "queued",
+        "requestedBy": requested_by.get("username", "unknown") if requested_by else "unknown",
+        "requestedRole": requested_by.get("role", "") if requested_by else "",
+        "approvalRequired": approval_required,
+        "createdAt": now,
+        "updatedAt": now,
+        "command": command,
+        "commandLabel": command_label(command),
+    }
+    write_job(job)
+    append_job_log(job_id, "[pending approval]\n" if approval_required else "[queued]\n")
+    if not approval_required:
+        start_job(job_id)
+    return job
+
+
+def job_status_chip(status):
+    return "ok" if status in {"succeeded", "running"} else "warn"
+
+
+def job_controls(job, user, compact=False, include_open=True):
+    controls = []
+    if include_open:
+        controls.append(f'<a class="button-link" href="/jobs/view?id={html.escape(job["id"])}">Open</a>')
+    if job.get("status") == "pending_approval" and has_permission(user, "approve"):
+        controls.append(f'<form method="post" action="/jobs/approve"><input type="hidden" name="job_id" value="{html.escape(job["id"])}"><button>{"Approve" if compact else "Approve and run"}</button></form>')
+        controls.append(f'<form method="post" action="/jobs/reject"><input type="hidden" name="job_id" value="{html.escape(job["id"])}"><button class="button-danger">Reject</button></form>')
+    if job.get("status") in {"running", "queued", "pending_approval"}:
+        controls.append(f'<form method="post" action="/jobs/cancel"><input type="hidden" name="job_id" value="{html.escape(job["id"])}"><button class="button-danger">Cancel</button></form>')
+    if job.get("status") in {"failed", "cancelled", "rejected", "succeeded"} and has_permission(user, "jobs"):
+        controls.append(f'<form method="post" action="/jobs/retry"><input type="hidden" name="job_id" value="{html.escape(job["id"])}"><button>Retry</button></form>')
+    return " ".join(controls)
 
 
 def page(title, body, active="environments", user=None):
@@ -742,7 +894,7 @@ def page(title, body, active="environments", user=None):
         <span class="badge connected">Console Online</span>
         <span class="operator-pill">{html.escape(user.get('username', 'operator session') if user else 'operator session')}</span>
         <a class="button-link" href="/logout">Log out</a>
-        <span>CLI apply actions disabled</span>
+        <span>CLI apply requires approval</span>
       </div>
     </div>
     <main>{body}</main>
@@ -1289,20 +1441,71 @@ class Handler(BaseHTTPRequestHandler):
             self.send_html(page("Pipeline - NKP ZeroTouch Console", body, "pipeline"))
             return
         if parsed.path == "/jobs":
-            run_rows = ""
-            for summary in recent_run_summaries(20):
-                run_rows += f"<tr><td><code>{html.escape(summary.parent.name)}</code></td><td>{html.escape(mtime_label(summary))}</td><td><a href='/runs'>summary.md</a></td></tr>"
+            pending = sum(1 for job in list_jobs(200) if job.get("status") == "pending_approval")
+            running = sum(1 for job in list_jobs(200) if job.get("status") == "running")
+            failed = sum(1 for job in list_jobs(200) if job.get("status") == "failed")
+            job_rows = ""
+            for job in list_jobs(30):
+                job_rows += (
+                    f"<tr><td><code>{html.escape(job['id'])}</code><div class='env-file'>{html.escape(job.get('environment', ''))}</div></td>"
+                    f"<td>{html.escape(job.get('action', ''))}</td>"
+                    f"<td><span class='chip {job_status_chip(job.get('status', 'queued'))}'>{html.escape(job.get('status', 'queued'))}</span></td>"
+                    f"<td>{html.escape(job.get('requestedBy', ''))}</td>"
+                    f"<td>{html.escape(job.get('createdAt', ''))}</td>"
+                    f"<td><div class='actions'>{job_controls(job, self.current_user(), compact=True)}</div></td></tr>"
+                )
             body = f"""
+<section class="summary-grid">
+  {metric_card("Pending Approval", pending, "apply jobs waiting", "/jobs")}
+  {metric_card("Running", running, "active jobs", "/jobs")}
+  {metric_card("Failed", failed, "jobs requiring review", "/jobs")}
+  {metric_card("Total Jobs", len(list_jobs(200)), "stored executions", "/jobs")}
+</section>
 <div class="section-head">
   <div>
     <h2>Jobs</h2>
-    <div class="section-copy">Execution history and future home for live logs, retry, cancellation, and job approvals.</div>
+    <div class="section-copy">Execution queue with approval-gated apply requests and captured runner logs.</div>
   </div>
 </div>
-<section class="panel"><table><thead><tr><th>Run</th><th>Updated</th><th>Artifact</th></tr></thead><tbody>{run_rows or '<tr><td colspan="3" class="muted">No jobs have run yet.</td></tr>'}</tbody></table></section>
-<div class="notice">Current jobs are file-backed under <code>.zt/runs</code>. Real-time streaming and background workers are the next implementation layer.</div>
+<section class="panel"><table><thead><tr><th>Job</th><th>Action</th><th>Status</th><th>Requested By</th><th>Created</th><th>Controls</th></tr></thead><tbody>{job_rows or '<tr><td colspan="6" class="muted">No jobs have run yet.</td></tr>'}</tbody></table></section>
+<div class="notice">Safe jobs start immediately. Apply jobs are created as approval requests and must be approved by a role with approval permission.</div>
 """
             self.send_html(page("Jobs - NKP ZeroTouch Console", body, "jobs"))
+            return
+        if parsed.path == "/jobs/view":
+            query = parse_qs(parsed.query)
+            job = read_job(query.get("id", [""])[0])
+            if not job:
+                self.send_html(page("Job Not Found", "<h2>Job not found</h2><a class='back-link' href='/jobs'>Back to jobs</a>", "jobs"), status=404)
+                return
+            log_text = job_log_path(job["id"]).read_text(encoding="utf-8") if job_log_path(job["id"]).exists() else ""
+            refresh = "<script>setTimeout(() => location.reload(), 5000);</script>" if job.get("status") in {"queued", "running", "pending_approval", "cancel_requested"} else ""
+            body = f"""
+<div class="section-head">
+  <div>
+    <h2>Job Detail</h2>
+    <div class="section-copy">Live runner output and approval metadata for <code>{html.escape(job['id'])}</code>.</div>
+  </div>
+  <div class="actions">{job_controls(job, self.current_user(), include_open=False)}</div>
+</div>
+<section class="ops-strip">
+  <div class="ops-item"><div class="ops-label">Action</div><div class="ops-value">{html.escape(job.get('action', ''))}</div></div>
+  <div class="ops-item"><div class="ops-label">Status</div><div class="ops-value"><span class="chip {job_status_chip(job.get('status', 'queued'))}">{html.escape(job.get('status', 'queued'))}</span></div></div>
+  <div class="ops-item"><div class="ops-label">Requested By</div><div class="ops-value">{html.escape(job.get('requestedBy', ''))}</div></div>
+  <div class="ops-item"><div class="ops-label">Exit Code</div><div class="ops-value">{html.escape(str(job.get('exitCode', 'n/a')))}</div></div>
+</section>
+<section class="panel">
+  <table>
+    <thead><tr><th>Validated Command</th></tr></thead>
+    <tbody><tr><td><pre>{html.escape(job.get('commandLabel', ''))}</pre></td></tr></tbody>
+  </table>
+</section>
+<div class="section-head"><div><h2>Live Log</h2><div class="section-copy">This page auto-refreshes while the job is active or waiting for approval.</div></div></div>
+<pre>{html.escape(log_text or '[no output yet]')}</pre>
+<a class="back-link" href="/jobs">Back to jobs</a>
+{refresh}
+"""
+            self.send_html(page("Job Detail - NKP ZeroTouch Console", body, "jobs"))
             return
         if parsed.path == "/settings/connections":
             settings = read_json(SETTINGS / "connections.json") or {}
@@ -1748,6 +1951,78 @@ class Handler(BaseHTTPRequestHandler):
             self.send_html(page("Database Saved", body, "database"))
             return
 
+        if parsed.path == "/jobs/approve":
+            user = self.current_user()
+            if not has_permission(user, "approve"):
+                self.send_html(page("Approval Blocked", "<h2>Approval blocked</h2><div class='notice'>Your role does not have approval permission.</div><a class='back-link' href='/jobs'>Back to jobs</a>", "jobs"), status=403)
+                return
+            job_id = form_value(form, "job_id")
+            job = read_job(job_id)
+            if not job or job.get("status") != "pending_approval":
+                self.send_html(page("Approval Error", "<h2>Job is not pending approval.</h2><a class='back-link' href='/jobs'>Back to jobs</a>", "jobs"), status=400)
+                return
+            update_job(job_id, status="queued", approvedBy=user.get("username", "unknown"), approvedAt=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+            append_job_log(job_id, f"[approved by {user.get('username', 'unknown')}]\n")
+            start_job(job_id)
+            self.send_redirect(f"/jobs/view?id={quote(job_id)}")
+            return
+
+        if parsed.path == "/jobs/reject":
+            user = self.current_user()
+            if not has_permission(user, "approve"):
+                self.send_html(page("Rejection Blocked", "<h2>Rejection blocked</h2><div class='notice'>Your role does not have approval permission.</div><a class='back-link' href='/jobs'>Back to jobs</a>", "jobs"), status=403)
+                return
+            job_id = form_value(form, "job_id")
+            job = read_job(job_id)
+            if not job or job.get("status") != "pending_approval":
+                self.send_html(page("Rejection Error", "<h2>Job is not pending approval.</h2><a class='back-link' href='/jobs'>Back to jobs</a>", "jobs"), status=400)
+                return
+            update_job(job_id, status="rejected", rejectedBy=user.get("username", "unknown"), rejectedAt=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+            append_job_log(job_id, f"[rejected by {user.get('username', 'unknown')}]\n")
+            self.send_redirect(f"/jobs/view?id={quote(job_id)}")
+            return
+
+        if parsed.path == "/jobs/cancel":
+            user = self.current_user()
+            if not has_permission(user, "jobs"):
+                self.send_html(page("Cancel Blocked", "<h2>Cancel blocked</h2><div class='notice'>Your role does not have job permission.</div><a class='back-link' href='/jobs'>Back to jobs</a>", "jobs"), status=403)
+                return
+            job_id = form_value(form, "job_id")
+            job = read_job(job_id)
+            if not job or job.get("status") not in {"queued", "running", "pending_approval"}:
+                self.send_html(page("Cancel Error", "<h2>Job cannot be cancelled.</h2><a class='back-link' href='/jobs'>Back to jobs</a>", "jobs"), status=400)
+                return
+            update_job(job_id, status="cancel_requested" if job.get("status") == "running" else "cancelled", cancelledBy=user.get("username", "unknown"), cancelledAt=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+            append_job_log(job_id, f"[cancel requested by {user.get('username', 'unknown')}]\n")
+            if job.get("status") == "running" and job.get("pid"):
+                try:
+                    os.kill(int(job["pid"]), signal.SIGTERM)
+                except OSError as exc:
+                    append_job_log(job_id, f"[cancel signal failed] {exc}\n")
+            self.send_redirect(f"/jobs/view?id={quote(job_id)}")
+            return
+
+        if parsed.path == "/jobs/retry":
+            user = self.current_user()
+            if not has_permission(user, "jobs"):
+                self.send_html(page("Retry Blocked", "<h2>Retry blocked</h2><div class='notice'>Your role does not have job permission.</div><a class='back-link' href='/jobs'>Back to jobs</a>", "jobs"), status=403)
+                return
+            original = read_job(form_value(form, "job_id"))
+            if not original or original.get("status") not in {"failed", "cancelled", "rejected", "succeeded"}:
+                self.send_html(page("Retry Error", "<h2>Job cannot be retried from its current state.</h2><a class='back-link' href='/jobs'>Back to jobs</a>", "jobs"), status=400)
+                return
+            retry = create_job(
+                original.get("action", ""),
+                original.get("config", ""),
+                original.get("command", []),
+                user,
+                kind=original.get("kind", "safe"),
+                approval_required=original.get("kind") == "apply",
+            )
+            append_job_log(retry["id"], f"[retry of {original.get('id')}]\n")
+            self.send_redirect(f"/jobs/view?id={quote(retry['id'])}")
+            return
+
         if parsed.path == "/cli/run":
             try:
                 command_text = form_value(form, "command")
@@ -1755,33 +2030,12 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as exc:
                 self.send_html(page("CLI Error", f"<h2>Command rejected</h2><div class='notice'>{html.escape(str(exc))}</div><a class='back-link' href='/cli'>Back to CLI</a>", "cli"), status=400)
                 return
-            code, out, err = run_cli_action(action, config, apply=apply, confirm_destroy=confirm_destroy)
-            status_class = "ok" if code == 0 else "warn"
-            runner_hint = "bash scripts/zt.sh" if shutil.which("bash") else "powershell scripts/zt.ps1"
-            body = f"""
-<div class="section-head">
-  <div>
-    <h2>CLI Result</h2>
-    <div class="section-copy">Controlled command output for <code>{html.escape(config.name)}</code>.</div>
-  </div>
-</div>
-<section class="ops-strip">
-  <div class="ops-item"><div class="ops-label">Command</div><div class="ops-value">{html.escape(action)}</div></div>
-  <div class="ops-item"><div class="ops-label">Environment</div><div class="ops-value">{html.escape(config.stem)}</div></div>
-  <div class="ops-item"><div class="ops-label">Exit Code</div><div class="ops-value"><span class="chip {status_class}">{code}</span></div></div>
-  <div class="ops-item"><div class="ops-label">Runner</div><div class="ops-value">{html.escape(runner_hint)}</div></div>
-</section>
-<section class="panel">
-  <table>
-    <thead><tr><th>Validated Command</th></tr></thead>
-    <tbody><tr><td><pre>{html.escape(runner_hint)} {html.escape(action)} --config {html.escape(str(config))}{' --apply' if apply else ''}{' --confirm-destroy' if confirm_destroy else ''}</pre></td></tr></tbody>
-  </table>
-</section>
-<div class="section-head"><div><h2>Output</h2><div class="section-copy">Captured stdout and stderr.</div></div></div>
-<pre>{html.escape(out + err)}</pre>
-<a class="back-link" href="/cli">Back to CLI</a>
-"""
-            self.send_html(page("CLI Result - NKP ZeroTouch Console", body, "cli"), status=200 if code == 0 else 500)
+            command = cli_command(action, config, apply=apply, confirm_destroy=confirm_destroy)
+            if not command:
+                self.send_html(page("CLI Error", "<h2>Runner unavailable</h2><div class='notice'>No supported shell runner found.</div><a class='back-link' href='/cli'>Back to CLI</a>", "cli"), status=500)
+                return
+            job = create_job(action, config, command, self.current_user(), kind="apply", approval_required=True)
+            self.send_redirect(f"/jobs/view?id={quote(job['id'])}")
             return
 
         if parsed.path == "/environment/edit/save":
@@ -1845,21 +2099,23 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         action = form.get("action", [""])[0]
-        config = Path(form.get("config", [""])[0])
+        try:
+            config = resolve_env_config(form.get("config", [""])[0])
+        except Exception as exc:
+            self.send_html(page("Action Error", f"<h2>Invalid environment</h2><div class='notice'>{html.escape(str(exc))}</div><a class='back-link' href='/'>Back to environments</a>", "actions"), status=400)
+            return
         if action not in SAFE_ACTIONS:
             self.send_html(page("Blocked", "<h2>Action is not dashboard-safe.</h2>"), status=403)
             return
-        code, out, err = run_action(action, config)
-        status_class = "ok" if code == 0 else "warn"
-        body = (
-            "<div class='result-layout'>"
-            f"<section class='metric'><div class='metric-label'>Action Result</div><div class='metric-value'>{html.escape(action)}</div>"
-            f"<div class='metric-foot'><span class='chip {status_class}'>Exit code {code}</span></div></section>"
-            f"<pre>{html.escape(out + err)}</pre>"
-            "<a class='back-link' href='/'>Back to dashboard</a>"
-            "</div>"
-        )
-        self.send_html(page("Action Result", body, "actions"), status=200 if code == 0 else 500)
+        if not has_permission(self.current_user(), "safe-actions"):
+            self.send_html(page("Blocked", "<h2>Action blocked</h2><div class='notice'>Your role does not have safe-action permission.</div><a class='back-link' href='/'>Back to dashboard</a>", "actions"), status=403)
+            return
+        command = action_command(action, config)
+        if not command:
+            self.send_html(page("Action Error", "<h2>Runner unavailable</h2><div class='notice'>No supported shell runner found.</div><a class='back-link' href='/'>Back to dashboard</a>", "actions"), status=500)
+            return
+        job = create_job(action, config, command, self.current_user(), kind="safe", approval_required=False)
+        self.send_redirect(f"/jobs/view?id={quote(job['id'])}")
 
 
 def read_json_from_context(config):

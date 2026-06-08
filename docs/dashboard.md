@@ -1,6 +1,6 @@
 # Dashboard
 
-The dashboard is a local console for inspecting `.zt` state and running safe phases.
+The dashboard is a local console for inspecting `.zt` state, creating deployment jobs, and approval-gating live apply phases.
 
 Run:
 
@@ -16,18 +16,28 @@ http://127.0.0.1:8080
 
 Dashboard-safe actions:
 
-- `validate`
-- `prepare`
-- `generate`
-- `verify`
-- `backup`
-- `runs`
+- `validate`: creates and immediately starts a safe job
+- `prepare`: creates and immediately starts a safe job
+- `generate`: creates and immediately starts a safe job
+- `verify`: creates and immediately starts a safe job
+- `backup`: creates and immediately starts a safe job
+- `runs`: creates and immediately starts a safe job
 
-Apply/destructive actions remain CLI-only:
+Apply/destructive actions use the controlled CLI window and require approval:
 
 - `registry -Apply`
 - `deploy -Apply`
+- `upgrade -Apply`
 - `destroy -Apply -ConfirmDestroy`
+
+Job and approval model:
+
+- Safe jobs are written under `.zt/jobs/<job-id>/` and start immediately.
+- Apply jobs are written with `pending_approval` status.
+- Users with approval permission can approve or reject apply jobs from `Jobs`.
+- Job detail pages show the validated command, status, approval metadata, and captured log output.
+- Active job detail pages auto-refresh while queued, running, or waiting for approval.
+- Running jobs can be cancelled; failed, rejected, cancelled, or completed jobs can be retried.
 
 Deployment readiness sections:
 
@@ -36,7 +46,7 @@ Deployment readiness sections:
 - `Network`: management/workload CIDRs, API VIP, ingress range, DNS, NTP, proxy, and IP assignment mode.
 - `Preflight`: console-level readiness matrix across sources, inventory, network, connections, secrets, and provider.
 - `Pipeline`: visual ZeroTouch flow from source intake through validation, preparation, generation, registry, deploy, verify, and operate.
-- `Jobs`: run history and the future live-log/retry/cancel surface.
+- `Jobs`: execution queue, approval controls, job detail pages, and captured live logs.
 
 Settings sections:
 
