@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import secrets
+import shlex
 import shutil
 import subprocess
 import sys
@@ -25,6 +26,8 @@ ENV_DIR = ROOT / "configs" / "environments"
 SESSIONS = {}
 SAFE_ACTIONS = {"validate", "prepare", "generate", "verify", "backup", "runs"}
 ACTION_ORDER = ["validate", "prepare", "generate", "verify", "backup", "runs"]
+CLI_APPLY_ACTIONS = {"registry", "deploy", "upgrade", "destroy"}
+CLI_ALLOWED_ACTIONS = CLI_APPLY_ACTIONS
 VIEW_PATHS = {
     "environments": "/",
     "cli": "/cli",
@@ -271,6 +274,87 @@ def run_action(action, config):
         return 127, "", f"Failed to start action runner: {exc}"
 
 
+def parse_cli_command(command_text, fallback_config):
+    tokens = shlex.split(command_text, posix=os.name != "nt")
+    if not tokens:
+        raise ValueError("Enter a ZeroTouch command.")
+
+    script_index = next((idx for idx, token in enumerate(tokens) if token.endswith("zt.sh") or token.endswith("zt.ps1")), None)
+    if script_index is not None:
+        tokens = tokens[script_index + 1 :]
+
+    action = tokens[0] if tokens else ""
+    if action not in CLI_ALLOWED_ACTIONS:
+        raise ValueError(f"Unsupported CLI apply action: {action}.")
+
+    config = fallback_config
+    apply = False
+    confirm_destroy = False
+    idx = 1
+    while idx < len(tokens):
+        token = tokens[idx]
+        if token in {"--config", "-c", "-Config"}:
+            if idx + 1 >= len(tokens):
+                raise ValueError(f"{token} requires a config path.")
+            config = tokens[idx + 1]
+            idx += 2
+            continue
+        if token in {"--apply", "-Apply"}:
+            apply = True
+            idx += 1
+            continue
+        if token in {"--confirm-destroy", "-ConfirmDestroy"}:
+            confirm_destroy = True
+            idx += 1
+            continue
+        raise ValueError(f"Unsupported CLI argument: {token}.")
+
+    if action in CLI_APPLY_ACTIONS and not apply:
+        raise ValueError(f"{action} requires --apply in the CLI window.")
+    if action == "destroy" and not confirm_destroy:
+        raise ValueError("destroy requires --confirm-destroy in the CLI window.")
+
+    return action, resolve_env_config(config), apply, confirm_destroy
+
+
+def run_cli_action(action, config, apply=False, confirm_destroy=False):
+    bash_path = shutil.which("bash")
+    pwsh_path = shutil.which("pwsh") or shutil.which("powershell")
+
+    if bash_path and (ROOT / "scripts" / "zt.sh").exists():
+        command = [bash_path, str(ROOT / "scripts" / "zt.sh"), action, "--config", str(config)]
+        if apply:
+            command.append("--apply")
+        if confirm_destroy:
+            command.append("--confirm-destroy")
+    elif pwsh_path and (ROOT / "scripts" / "zt.ps1").exists():
+        command = [
+            pwsh_path,
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(ROOT / "scripts" / "zt.ps1"),
+            action,
+            "-Config",
+            str(config),
+        ]
+        if apply:
+            command.append("-Apply")
+        if confirm_destroy:
+            command.append("-ConfirmDestroy")
+    else:
+        return 127, "", "No supported shell runner found."
+
+    try:
+        completed = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, timeout=600)
+        return completed.returncode, completed.stdout, completed.stderr
+    except subprocess.TimeoutExpired as exc:
+        return 124, exc.stdout or "", (exc.stderr or "") + "\nCLI command timed out after 600 seconds."
+    except OSError as exc:
+        return 127, "", f"Failed to start CLI runner: {exc}"
+
+
 def page(title, body, active="environments", user=None):
     def nav_class(key):
         return "nav-item active" if key == active else "nav-item"
@@ -476,6 +560,17 @@ def page(title, body, active="environments", user=None):
       width: 100%; min-height: 36px; border: 1px solid var(--line-strong); border-radius: 6px;
       padding: 0 10px; color: var(--ink); background: #fff;
     }}
+    .terminal-window {{ background: #0b1220; color: #dbeafe; border-radius: 8px; border: 1px solid #253149; overflow: hidden; }}
+    .terminal-bar {{ min-height: 36px; display: flex; align-items: center; gap: 8px; padding: 0 12px; background: #111827; border-bottom: 1px solid #253149; color: #93a4bd; font-size: 12px; font-weight: 700; }}
+    .terminal-dot {{ width: 9px; height: 9px; border-radius: 50%; background: #64748b; }}
+    .terminal-body {{ padding: 14px; }}
+    .terminal-prompt {{ color: #5eead4; font-family: "Cascadia Mono", "SFMono-Regular", Consolas, monospace; margin-bottom: 8px; }}
+    .terminal-input {{
+      width: 100%; min-height: 160px; resize: vertical; border: 1px solid #334155; border-radius: 6px;
+      background: #0f172a; color: #e5f0ff; padding: 12px;
+      font-family: "Cascadia Mono", "SFMono-Regular", Consolas, monospace; font-size: 13px; line-height: 1.5;
+    }}
+    .terminal-help {{ color: #9fb1c8; margin-top: 10px; font-size: 12px; }}
     .result-layout {{ display: grid; gap: 16px; }}
     .back-link {{ display: inline-flex; align-items: center; margin-top: 16px; font-weight: 700; }}
     @media (max-width: 980px) {{
@@ -697,37 +792,36 @@ class Handler(BaseHTTPRequestHandler):
                 data = read_json_from_context(config)
                 label = data.get("environmentName") or config.stem
                 config_options.append(f'<option value="{html.escape(str(config))}">{html.escape(label)} - {html.escape(config.name)}</option>')
-            action_options = "".join(f'<option value="{html.escape(action)}">{html.escape(action)}</option>' for action in ACTION_ORDER)
             default_config = str(env_configs()[0]) if env_configs() else ""
-            default_action = ACTION_ORDER[0]
             runner_hint = "bash scripts/zt.sh" if shutil.which("bash") else "powershell scripts/zt.ps1"
+            example_command = f"deploy --apply --config {default_config}"
             body = f"""
 <div class="section-head">
   <div>
     <h2>CLI</h2>
-    <div class="section-copy">Run approved ZeroTouch commands from inside the console.</div>
+    <div class="section-copy">Run approved ZeroTouch apply commands from inside a controlled console window.</div>
   </div>
 </div>
 <section class="ops-strip">
-  <div class="ops-item"><div class="ops-label">Command Mode</div><div class="ops-value">Controlled Runner</div></div>
-  <div class="ops-item"><div class="ops-label">Allowed Commands</div><div class="ops-value">{len(ACTION_ORDER)} safe actions</div></div>
-  <div class="ops-item"><div class="ops-label">Apply Commands</div><div class="ops-value">Blocked</div></div>
+  <div class="ops-item"><div class="ops-label">Command Mode</div><div class="ops-value">Controlled CLI</div></div>
+  <div class="ops-item"><div class="ops-label">Apply Commands</div><div class="ops-value">registry / deploy / upgrade / destroy</div></div>
+  <div class="ops-item"><div class="ops-label">Guardrails</div><div class="ops-value">Validated arguments only</div></div>
   <div class="ops-item"><div class="ops-label">Runner</div><div class="ops-value">{html.escape(runner_hint)}</div></div>
 </section>
-<section class="panel">
+<section class="terminal-window">
   <form method="post" action="/cli/run">
-    <table>
-      <thead><tr><th>Control</th><th>Selection</th></tr></thead>
-      <tbody>
-        <tr><td>Environment</td><td><div class="field"><select name="config">{''.join(config_options)}</select></div></td></tr>
-        <tr><td>Command</td><td><div class="field"><select name="action">{action_options}</select></div></td></tr>
-        <tr><td>Preview</td><td><pre>{html.escape(runner_hint)} {html.escape(default_action)} --config {html.escape(default_config)}</pre></td></tr>
-        <tr><td></td><td><button>Run command</button></td></tr>
-      </tbody>
-    </table>
+    <div class="terminal-bar"><span class="terminal-dot"></span><span class="terminal-dot"></span><span class="terminal-dot"></span><span>ZeroTouch CLI</span></div>
+    <div class="terminal-body">
+      <div class="terminal-prompt">$ {html.escape(runner_hint)}</div>
+      <textarea class="terminal-input" name="command" rows="6" spellcheck="false" aria-label="ZeroTouch apply command" autofocus>{html.escape(example_command)}</textarea>
+      <div class="terminal-help">Allowed apply examples: <code>registry --apply --config &lt;file&gt;</code>, <code>deploy --apply --config &lt;file&gt;</code>, <code>upgrade --apply --config &lt;file&gt;</code>, <code>destroy --apply --confirm-destroy --config &lt;file&gt;</code>.</div>
+      <div class="terminal-help">Fallback environment if <code>--config</code> is omitted:</div>
+      <div class="field"><select name="config">{''.join(config_options)}</select></div>
+      <div style="margin-top: 12px;"><button>Run apply command</button></div>
+    </div>
   </form>
 </section>
-<div class="notice">This is not an unrestricted shell. It only runs dashboard-safe framework commands and captures output inline.</div>
+<div class="notice">This is a command window, but not an unrestricted shell. The server only executes approved ZeroTouch apply actions after parsing and validating the command.</div>
 """
             self.send_html(page("CLI - NKP ZeroTouch Console", body, "cli"))
             return
@@ -1265,17 +1359,13 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if parsed.path == "/cli/run":
-            action = form_value(form, "action")
-            config_raw = form_value(form, "config")
-            if action not in SAFE_ACTIONS:
-                self.send_html(page("CLI Blocked", "<h2>Command blocked</h2><div class='notice'>Only dashboard-safe CLI actions can run from the console.</div><a class='back-link' href='/cli'>Back to CLI</a>", "cli"), status=403)
-                return
             try:
-                config = resolve_env_config(config_raw)
+                command_text = form_value(form, "command")
+                action, config, apply, confirm_destroy = parse_cli_command(command_text, form_value(form, "config"))
             except Exception as exc:
-                self.send_html(page("CLI Error", f"<h2>Invalid environment</h2><div class='notice'>{html.escape(str(exc))}</div><a class='back-link' href='/cli'>Back to CLI</a>", "cli"), status=400)
+                self.send_html(page("CLI Error", f"<h2>Command rejected</h2><div class='notice'>{html.escape(str(exc))}</div><a class='back-link' href='/cli'>Back to CLI</a>", "cli"), status=400)
                 return
-            code, out, err = run_action(action, config)
+            code, out, err = run_cli_action(action, config, apply=apply, confirm_destroy=confirm_destroy)
             status_class = "ok" if code == 0 else "warn"
             runner_hint = "bash scripts/zt.sh" if shutil.which("bash") else "powershell scripts/zt.ps1"
             body = f"""
@@ -1293,8 +1383,8 @@ class Handler(BaseHTTPRequestHandler):
 </section>
 <section class="panel">
   <table>
-    <thead><tr><th>Command Preview</th></tr></thead>
-    <tbody><tr><td><pre>{html.escape(runner_hint)} {html.escape(action)} --config {html.escape(str(config))}</pre></td></tr></tbody>
+    <thead><tr><th>Validated Command</th></tr></thead>
+    <tbody><tr><td><pre>{html.escape(runner_hint)} {html.escape(action)} --config {html.escape(str(config))}{' --apply' if apply else ''}{' --confirm-destroy' if confirm_destroy else ''}</pre></td></tr></tbody>
   </table>
 </section>
 <div class="section-head"><div><h2>Output</h2><div class="section-copy">Captured stdout and stderr.</div></div></div>
