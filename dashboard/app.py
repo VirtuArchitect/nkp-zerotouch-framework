@@ -1119,6 +1119,10 @@ def page(title, body, active="environments", user=None):
 class Handler(BaseHTTPRequestHandler):
     def send_html(self, content, status=200, headers=None):
         content = inject_csrf_fields(content, self.current_user())
+        user = self.current_user()
+        if user:
+            label = f"{user.get('username', 'operator')} ({user.get('role', 'Operator')})"
+            content = content.replace('<span class="operator-pill">operator session</span>', f'<span class="operator-pill">{html.escape(label)}</span>')
         encoded = content.encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "text/html; charset=utf-8")
