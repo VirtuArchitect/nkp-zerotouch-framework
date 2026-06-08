@@ -1090,7 +1090,7 @@ def page(title, body, active="environments", user=None):
     <div class="brand">
       <div class="brand-mark"><img src="/assets/veridian-mark-teal.svg" alt="Veridian"></div>
       <div>
-        <div class="brand-title">Veridian ZeroTouch</div>
+        <div class="brand-title">NKP ZeroTouch</div>
         <div class="brand-subtitle">Deployment Console</div>
       </div>
     </div>
