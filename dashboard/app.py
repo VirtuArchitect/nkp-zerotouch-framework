@@ -27,6 +27,7 @@ SAFE_ACTIONS = {"validate", "prepare", "generate", "verify", "backup", "runs"}
 ACTION_ORDER = ["validate", "prepare", "generate", "verify", "backup", "runs"]
 VIEW_PATHS = {
     "environments": "/",
+    "cli": "/cli",
     "runs": "/runs",
     "artifacts": "/artifacts",
     "actions": "/actions",
@@ -277,6 +278,7 @@ def page(title, body, active="environments", user=None):
     nav = f"""
     <div class="nav-label">Operations</div>
     <a class="{nav_class('environments')}" href="{VIEW_PATHS['environments']}"><span class="nav-dot"></span>Environments</a>
+    <a class="{nav_class('cli')}" href="{VIEW_PATHS['cli']}">CLI</a>
     <a class="{nav_class('runs')}" href="{VIEW_PATHS['runs']}">Runs</a>
     <a class="{nav_class('artifacts')}" href="{VIEW_PATHS['artifacts']}">Artifacts</a>
     <div class="nav-label">Governance</div>
@@ -688,6 +690,46 @@ class Handler(BaseHTTPRequestHandler):
 <div class="notice">Destructive and apply actions are intentionally CLI-only. This console exposes validation, preparation, generation, verification, backup, and run inspection workflows.</div>
 """
             self.send_html(page("NKP ZeroTouch Console", body, "environments"))
+            return
+        if parsed.path == "/cli":
+            config_options = []
+            for config in env_configs():
+                data = read_json_from_context(config)
+                label = data.get("environmentName") or config.stem
+                config_options.append(f'<option value="{html.escape(str(config))}">{html.escape(label)} - {html.escape(config.name)}</option>')
+            action_options = "".join(f'<option value="{html.escape(action)}">{html.escape(action)}</option>' for action in ACTION_ORDER)
+            default_config = str(env_configs()[0]) if env_configs() else ""
+            default_action = ACTION_ORDER[0]
+            runner_hint = "bash scripts/zt.sh" if shutil.which("bash") else "powershell scripts/zt.ps1"
+            body = f"""
+<div class="section-head">
+  <div>
+    <h2>CLI</h2>
+    <div class="section-copy">Run approved ZeroTouch commands from inside the console.</div>
+  </div>
+</div>
+<section class="ops-strip">
+  <div class="ops-item"><div class="ops-label">Command Mode</div><div class="ops-value">Controlled Runner</div></div>
+  <div class="ops-item"><div class="ops-label">Allowed Commands</div><div class="ops-value">{len(ACTION_ORDER)} safe actions</div></div>
+  <div class="ops-item"><div class="ops-label">Apply Commands</div><div class="ops-value">Blocked</div></div>
+  <div class="ops-item"><div class="ops-label">Runner</div><div class="ops-value">{html.escape(runner_hint)}</div></div>
+</section>
+<section class="panel">
+  <form method="post" action="/cli/run">
+    <table>
+      <thead><tr><th>Control</th><th>Selection</th></tr></thead>
+      <tbody>
+        <tr><td>Environment</td><td><div class="field"><select name="config">{''.join(config_options)}</select></div></td></tr>
+        <tr><td>Command</td><td><div class="field"><select name="action">{action_options}</select></div></td></tr>
+        <tr><td>Preview</td><td><pre>{html.escape(runner_hint)} {html.escape(default_action)} --config {html.escape(default_config)}</pre></td></tr>
+        <tr><td></td><td><button>Run command</button></td></tr>
+      </tbody>
+    </table>
+  </form>
+</section>
+<div class="notice">This is not an unrestricted shell. It only runs dashboard-safe framework commands and captures output inline.</div>
+"""
+            self.send_html(page("CLI - NKP ZeroTouch Console", body, "cli"))
             return
         if parsed.path == "/environment/edit":
             query = parse_qs(parsed.query)
@@ -1220,6 +1262,46 @@ class Handler(BaseHTTPRequestHandler):
             write_json(SETTINGS / "database.json", data)
             body = "<section class='metric'><div class='metric-label'>Settings Saved</div><div class='metric-value'>Database</div><div class='metric-foot'><span class='chip ok'>Saved locally</span></div></section><a class='back-link' href='/settings/database'>Back to database</a>"
             self.send_html(page("Database Saved", body, "database"))
+            return
+
+        if parsed.path == "/cli/run":
+            action = form_value(form, "action")
+            config_raw = form_value(form, "config")
+            if action not in SAFE_ACTIONS:
+                self.send_html(page("CLI Blocked", "<h2>Command blocked</h2><div class='notice'>Only dashboard-safe CLI actions can run from the console.</div><a class='back-link' href='/cli'>Back to CLI</a>", "cli"), status=403)
+                return
+            try:
+                config = resolve_env_config(config_raw)
+            except Exception as exc:
+                self.send_html(page("CLI Error", f"<h2>Invalid environment</h2><div class='notice'>{html.escape(str(exc))}</div><a class='back-link' href='/cli'>Back to CLI</a>", "cli"), status=400)
+                return
+            code, out, err = run_action(action, config)
+            status_class = "ok" if code == 0 else "warn"
+            runner_hint = "bash scripts/zt.sh" if shutil.which("bash") else "powershell scripts/zt.ps1"
+            body = f"""
+<div class="section-head">
+  <div>
+    <h2>CLI Result</h2>
+    <div class="section-copy">Controlled command output for <code>{html.escape(config.name)}</code>.</div>
+  </div>
+</div>
+<section class="ops-strip">
+  <div class="ops-item"><div class="ops-label">Command</div><div class="ops-value">{html.escape(action)}</div></div>
+  <div class="ops-item"><div class="ops-label">Environment</div><div class="ops-value">{html.escape(config.stem)}</div></div>
+  <div class="ops-item"><div class="ops-label">Exit Code</div><div class="ops-value"><span class="chip {status_class}">{code}</span></div></div>
+  <div class="ops-item"><div class="ops-label">Runner</div><div class="ops-value">{html.escape(runner_hint)}</div></div>
+</section>
+<section class="panel">
+  <table>
+    <thead><tr><th>Command Preview</th></tr></thead>
+    <tbody><tr><td><pre>{html.escape(runner_hint)} {html.escape(action)} --config {html.escape(str(config))}</pre></td></tr></tbody>
+  </table>
+</section>
+<div class="section-head"><div><h2>Output</h2><div class="section-copy">Captured stdout and stderr.</div></div></div>
+<pre>{html.escape(out + err)}</pre>
+<a class="back-link" href="/cli">Back to CLI</a>
+"""
+            self.send_html(page("CLI Result - NKP ZeroTouch Console", body, "cli"), status=200 if code == 0 else 500)
             return
 
         if parsed.path == "/environment/edit/save":
