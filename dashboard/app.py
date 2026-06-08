@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 import html
+import hashlib
 import json
 import os
+import secrets
 import shutil
 import subprocess
 import sys
@@ -20,6 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 ZT = ROOT / ".zt"
 SETTINGS = ZT / "settings"
 ENV_DIR = ROOT / "configs" / "environments"
+SESSIONS = {}
 SAFE_ACTIONS = {"validate", "prepare", "generate", "verify", "backup", "runs"}
 ACTION_ORDER = ["validate", "prepare", "generate", "verify", "backup", "runs"]
 VIEW_PATHS = {
@@ -158,6 +161,30 @@ def safe_key(value):
     return "".join(ch for ch in key if ch.isalnum() or ch in {"-", "_"})
 
 
+def password_record(password):
+    salt = secrets.token_hex(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), 120000).hex()
+    return {"salt": salt, "passwordHash": digest, "algorithm": "pbkdf2_sha256", "iterations": 120000}
+
+
+def verify_password(password, account):
+    salt = account.get("salt", "")
+    expected = account.get("passwordHash", "")
+    if not salt or not expected:
+        return False
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), int(account.get("iterations", 120000))).hex()
+    return secrets.compare_digest(digest, expected)
+
+
+def cookie_value(headers, name):
+    raw = headers.get("Cookie", "")
+    for part in raw.split(";"):
+        key, _, value = part.strip().partition("=")
+        if key == name:
+            return value
+    return ""
+
+
 def default_rbac():
     return {
         "settings": {"enabled": "false", "provider": "local", "admin": "admin"},
@@ -243,7 +270,7 @@ def run_action(action, config):
         return 127, "", f"Failed to start action runner: {exc}"
 
 
-def page(title, body, active="environments"):
+def page(title, body, active="environments", user=None):
     def nav_class(key):
         return "nav-item active" if key == active else "nav-item"
 
@@ -467,6 +494,8 @@ def page(title, body, active="environments"):
       </div>
       <div class="topbar-meta">
         <span class="badge connected">Console Online</span>
+        <span>{html.escape(user.get('username', 'operator session') if user else 'operator session')}</span>
+        <a class="button-link" href="/logout">Log out</a>
         <span>CLI apply actions disabled</span>
       </div>
     </div>
@@ -478,16 +507,39 @@ def page(title, body, active="environments"):
 
 
 class Handler(BaseHTTPRequestHandler):
-    def send_html(self, content, status=200):
+    def send_html(self, content, status=200, headers=None):
         encoded = content.encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(encoded)))
+        for key, value in (headers or {}).items():
+            self.send_header(key, value)
         self.end_headers()
         self.wfile.write(encoded)
 
+    def send_redirect(self, location, headers=None):
+        self.send_response(303)
+        self.send_header("Location", location)
+        for key, value in (headers or {}).items():
+            self.send_header(key, value)
+        self.end_headers()
+
+    def current_user(self):
+        token = cookie_value(self.headers, "zt_session")
+        return SESSIONS.get(token)
+
+    def require_login(self, parsed):
+        if parsed.path in {"/login", "/assets/veridian-mark-teal.svg"}:
+            return True
+        if self.current_user():
+            return True
+        self.send_redirect("/login")
+        return False
+
     def do_GET(self):
         parsed = urlparse(self.path)
+        if not self.require_login(parsed):
+            return
         if parsed.path == "/assets/veridian-mark-teal.svg":
             asset = ROOT / "dashboard" / "assets" / "veridian-mark-teal.svg"
             if not asset.exists():
@@ -499,6 +551,39 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(encoded)))
             self.end_headers()
             self.wfile.write(encoded)
+            return
+        if parsed.path == "/login":
+            rbac = load_rbac()
+            has_login_accounts = any(account.get("passwordHash") for account in rbac.get("accounts", []))
+            heading = "Sign In" if has_login_accounts else "Create Admin Account"
+            hint = "Use a local console account." if has_login_accounts else "No password-enabled accounts exist yet. Create the first local administrator account."
+            body = f"""
+<div class="section-head">
+  <div>
+    <h2>{heading}</h2>
+    <div class="section-copy">{hint}</div>
+  </div>
+</div>
+<section class="panel">
+  <form method="post" action="/login">
+    <table>
+      <thead><tr><th>Field</th><th>Value</th></tr></thead>
+      <tbody>
+        <tr><td>Username</td><td><div class="field"><input name="username" value="admin"></div></td></tr>
+        <tr><td>Password</td><td><div class="field"><input name="password" type="password"></div></td></tr>
+        <tr><td></td><td><button>{'Sign in' if has_login_accounts else 'Create admin and sign in'}</button></td></tr>
+      </tbody>
+    </table>
+  </form>
+</section>
+<div class="notice">This is local console authentication for operator workstations. Production use should move to OIDC/SSO and server-side session storage.</div>
+"""
+            self.send_html(page("Login - NKP ZeroTouch Console", body, "about"))
+            return
+        if parsed.path == "/logout":
+            token = cookie_value(self.headers, "zt_session")
+            SESSIONS.pop(token, None)
+            self.send_redirect("/login", {"Set-Cookie": "zt_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax"})
             return
         if parsed.path in ("/", "/environments"):
             rows = []
@@ -891,11 +976,12 @@ class Handler(BaseHTTPRequestHandler):
 <section class="panel">
   <form method="post" action="/settings/rbac/account/create">
     <table>
-      <thead><tr><th>Username</th><th>Display Name</th><th>Role</th><th>Status</th><th>Create</th></tr></thead>
+      <thead><tr><th>Username</th><th>Display Name</th><th>Password</th><th>Role</th><th>Status</th><th>Create</th></tr></thead>
       <tbody>
         <tr>
           <td><div class="field"><input name="username" value="operator"></div></td>
           <td><div class="field"><input name="display_name" value="NKP Operator"></div></td>
+          <td><div class="field"><input name="password" type="password"></div></td>
           <td><div class="field"><select name="role">{role_options}</select></div></td>
           <td><div class="field"><select name="status"><option value="active">active</option><option value="disabled">disabled</option></select></div></td>
           <td><button>Create account</button></td>
@@ -965,6 +1051,41 @@ class Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", "0"))
         form = parse_qs(self.rfile.read(length).decode("utf-8"))
 
+        if parsed.path == "/login":
+            username = safe_key(form_value(form, "username"))
+            password = form_value(form, "password")
+            rbac = load_rbac()
+            login_accounts = [account for account in rbac.get("accounts", []) if account.get("passwordHash")]
+            if not username or not password:
+                self.send_html(page("Login Failed", "<h2>Login failed</h2><div class='notice'>Username and password are required.</div><a class='back-link' href='/login'>Back to login</a>", "about"), status=400)
+                return
+            if not login_accounts:
+                account = {
+                    "username": username,
+                    "displayName": "Console Administrator",
+                    "role": "Admin",
+                    "status": "active",
+                    "createdAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                }
+                account.update(password_record(password))
+                rbac["accounts"] = [acct for acct in rbac.get("accounts", []) if safe_key(acct.get("username", "")) != username]
+                rbac["accounts"].append(account)
+                rbac.setdefault("settings", default_rbac()["settings"])
+                rbac["settings"]["admin"] = username
+                write_json(SETTINGS / "rbac.json", rbac)
+            else:
+                account = next((acct for acct in login_accounts if safe_key(acct.get("username", "")) == username and acct.get("status") == "active"), None)
+                if not account or not verify_password(password, account):
+                    self.send_html(page("Login Failed", "<h2>Login failed</h2><div class='notice'>Invalid username, password, or account status.</div><a class='back-link' href='/login'>Back to login</a>", "about"), status=403)
+                    return
+            token = secrets.token_urlsafe(32)
+            SESSIONS[token] = {"username": username, "role": account.get("role", "Operator"), "loginAt": time.time()}
+            self.send_redirect("/", {"Set-Cookie": f"zt_session={token}; Path=/; HttpOnly; SameSite=Lax"})
+            return
+
+        if not self.require_login(parsed):
+            return
+
         if parsed.path == "/settings/connections/save":
             data = {
                 "prism": form_value(form, "prism"),
@@ -1029,19 +1150,31 @@ class Handler(BaseHTTPRequestHandler):
             rbac = load_rbac()
             username = safe_key(form_value(form, "username"))
             display_name = form_value(form, "display_name")
+            password = form_value(form, "password")
             role = form_value(form, "role")
             status = form_value(form, "status", "active")
             if not username:
                 self.send_html(page("Account Error", "<h2>Username is required.</h2><a class='back-link' href='/settings/rbac'>Back to RBAC</a>", "rbac"), status=400)
                 return
+            existing_account = next((account for account in rbac["accounts"] if safe_key(account.get("username", "")) == username), None)
+            if not password and not existing_account:
+                self.send_html(page("Account Error", "<h2>Password is required for new accounts.</h2><a class='back-link' href='/settings/rbac'>Back to RBAC</a>", "rbac"), status=400)
+                return
             accounts = [account for account in rbac["accounts"] if safe_key(account.get("username", "")) != username]
-            accounts.append({
+            account_record = {
                 "username": username,
                 "displayName": display_name,
                 "role": role,
                 "status": status,
                 "createdAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            })
+            }
+            if existing_account and not password:
+                for key in ["salt", "passwordHash", "algorithm", "iterations"]:
+                    if key in existing_account:
+                        account_record[key] = existing_account[key]
+            else:
+                account_record.update(password_record(password))
+            accounts.append(account_record)
             rbac["accounts"] = accounts
             write_json(SETTINGS / "rbac.json", rbac)
             body = f"<section class='metric'><div class='metric-label'>Account Saved</div><div class='metric-value'>{html.escape(username)}</div><div class='metric-foot'><span class='chip ok'>Mapped to {html.escape(role)}</span></div></section><a class='back-link' href='/settings/rbac'>Back to RBAC</a>"

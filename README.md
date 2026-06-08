@@ -100,6 +100,7 @@ Additional operational phases are available for secrets, backup, upgrade plannin
 - `docs/dashboard.md`
 - `docs/architecture.md`
 - `docs/container-runner.md`
+- `docs/operational-readiness.md`
 - `docs/self-hosted-ci.md`
 - `docs/upgrade-destroy-policy.md`
 
