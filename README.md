@@ -6,6 +6,21 @@ The framework is designed so `air-gapped` is one supported deployment mode, not 
 
 Unofficial community automation framework. This project is not affiliated with or supported by Nutanix.
 
+## Engineering Quality
+
+This project follows a production-grade quality bar. Changes are expected to
+include relevant tests, smoke-test evidence, and security review when sensitive
+code is touched. CI checks should pass before merge.
+
+Quality gates include:
+
+- Unit, integration, or end-to-end tests as appropriate.
+- Linting and type checks where supported.
+- Build verification.
+- Manual or automated smoke testing for changed workflows.
+- Security review for auth, user data, permissions, file handling,
+  dependencies, and external input.
+
 ## Supported Environment Types
 
 | Type | Use when | Artifact source |
