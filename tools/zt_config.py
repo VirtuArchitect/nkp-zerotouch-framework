@@ -9,6 +9,7 @@ import yaml
 
 ENV_TYPES = {"connected", "proxied", "air-gapped"}
 BUNDLE_TYPES = {"standard", "air-gapped"}
+PROVIDER_TYPES = {"nutanix-ahv", "air-gapped-ahv", "proxied-ahv", "bare-metal"}
 
 
 def load_yaml(path):
@@ -44,6 +45,7 @@ def validate_config(data):
     warnings = []
 
     env_type = require(errors, data, "environment.type")
+    provider = dotted_get(data, "environment.provider", "nutanix-ahv")
     require(errors, data, "environment.name")
     version = require(errors, data, "nkp.version")
     bundle_type = dotted_get(data, "nkp.bundleType")
@@ -53,6 +55,8 @@ def validate_config(data):
         errors.append(f"environment.type must be one of: {', '.join(sorted(ENV_TYPES))}")
     if bundle_type and bundle_type not in BUNDLE_TYPES:
         errors.append(f"nkp.bundleType must be one of: {', '.join(sorted(BUNDLE_TYPES))}")
+    if provider and provider not in PROVIDER_TYPES:
+        errors.append(f"environment.provider must be one of: {', '.join(sorted(PROVIDER_TYPES))}")
 
     require(errors, data, "nutanix.prismCentralEndpoint")
     require(errors, data, "nutanix.clusterName")
@@ -82,6 +86,7 @@ def context(data, config_path):
     root = {
         "environmentName": dotted_get(data, "environment.name"),
         "environmentType": dotted_get(data, "environment.type"),
+        "environmentProvider": dotted_get(data, "environment.provider", "nutanix-ahv"),
         "bundleType": dotted_get(data, "nkp.bundleType"),
         "bundlePath": dotted_get(data, "nkp.bundlePath"),
         "nkpVersion": dotted_get(data, "nkp.version"),

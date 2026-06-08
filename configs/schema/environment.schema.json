@@ -17,6 +17,10 @@
           "type": "string",
           "enum": ["connected", "proxied", "air-gapped"]
         },
+        "provider": {
+          "type": "string",
+          "enum": ["nutanix-ahv", "air-gapped-ahv", "proxied-ahv", "bare-metal"]
+        },
         "proxy": {
           "type": "object",
           "properties": {

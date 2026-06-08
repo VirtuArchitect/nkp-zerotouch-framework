@@ -1,6 +1,7 @@
 environment:
   name: lab-proxied
   type: proxied
+  provider: proxied-ahv
   proxy:
     httpProxy: http://proxy.example.com:8080
     httpsProxy: http://proxy.example.com:8080

@@ -6,6 +6,7 @@ The environment YAML is the source of truth for ZeroTouch.
 
 - `name`: local environment name used under `.zt/environments/`
 - `type`: one of `connected`, `proxied`, or `air-gapped`
+- `provider`: deployment provider intent, such as `nutanix-ahv`, `air-gapped-ahv`, `proxied-ahv`, or `bare-metal`
 - `proxy`: required for `proxied`
 
 ## nkp

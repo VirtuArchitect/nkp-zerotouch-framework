@@ -33,10 +33,18 @@ VIEW_PATHS = {
     "cli": "/cli",
     "runs": "/runs",
     "artifacts": "/artifacts",
+    "sources": "/sources",
+    "inventory": "/inventory",
+    "network": "/network",
+    "preflight": "/preflight",
+    "pipeline": "/pipeline",
+    "jobs": "/jobs",
     "actions": "/actions",
     "audit": "/audit",
     "connections": "/settings/connections",
     "new-environment": "/settings/new-environment",
+    "providers": "/settings/providers",
+    "secrets": "/settings/secrets",
     "rbac": "/settings/rbac",
     "database": "/settings/database",
     "about": "/about",
@@ -211,6 +219,115 @@ def load_rbac():
     return data
 
 
+def load_setting(name, defaults):
+    data = read_json(SETTINGS / f"{name}.json") or {}
+    merged = dict(defaults)
+    merged.update(data)
+    return merged
+
+
+def save_setting(name, data):
+    data["savedAt"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    write_json(SETTINGS / f"{name}.json", data)
+
+
+def bool_label(value):
+    return "yes" if str(value).lower() in {"1", "true", "yes", "on"} else "no"
+
+
+def path_status(raw_path):
+    if not raw_path:
+        return "warn", "not configured"
+    candidate = Path(raw_path)
+    return ("ok", "available") if candidate.exists() else ("warn", "not found")
+
+
+def preflight_checks():
+    sources = load_setting("sources", default_sources())
+    inventory = load_setting("inventory", default_inventory())
+    network = load_setting("network", default_network())
+    secrets_cfg = load_setting("secrets", default_secrets())
+    providers = load_setting("providers", default_providers())
+    connections = read_json(SETTINGS / "connections.json") or {}
+    checks = []
+
+    for label, raw_path in [
+        ("Standard NKP bundle", sources.get("standard_bundle")),
+        ("Air-gapped NKP bundle", sources.get("airgapped_bundle")),
+        ("NKP source path", sources.get("source_path")),
+    ]:
+        status, note = path_status(raw_path)
+        checks.append({"area": "Sources", "check": label, "status": status, "note": note})
+
+    checks.append({"area": "Sources", "check": "Pinned version", "status": "ok" if sources.get("version") else "warn", "note": sources.get("version") or "not pinned"})
+    checks.append({"area": "Inventory", "check": "Node inventory", "status": "ok" if inventory.get("nodes") else "warn", "note": inventory.get("nodes") or "not configured"})
+    checks.append({"area": "Inventory", "check": "BMC access", "status": "ok" if inventory.get("bmc_network") else "warn", "note": inventory.get("bmc_network") or "not configured"})
+    checks.append({"area": "Network", "check": "API endpoint VIP", "status": "ok" if network.get("api_vip") else "warn", "note": network.get("api_vip") or "not configured"})
+    checks.append({"area": "Network", "check": "DNS servers", "status": "ok" if network.get("dns_servers") else "warn", "note": network.get("dns_servers") or "not configured"})
+    checks.append({"area": "Network", "check": "NTP servers", "status": "ok" if network.get("ntp_servers") else "warn", "note": network.get("ntp_servers") or "not configured"})
+    checks.append({"area": "Connections", "check": "Prism Central", "status": "ok" if connections.get("prism") and ".example.com" not in connections.get("prism", "") else "warn", "note": connections.get("prism", "not configured")})
+    checks.append({"area": "Connections", "check": "Registry", "status": "ok" if connections.get("registry") and ".example.com" not in connections.get("registry", "") else "warn", "note": connections.get("registry", "not configured")})
+    checks.append({"area": "Secrets", "check": "Secrets backend", "status": "ok" if secrets_cfg.get("backend") not in {"local-file", ""} else "warn", "note": secrets_cfg.get("backend", "local-file")})
+    checks.append({"area": "Provider", "check": "Default provider", "status": "ok", "note": providers.get("default_provider", "nutanix-ahv")})
+    return checks
+
+
+def default_sources():
+    return {
+        "version": "v2.17.1",
+        "standard_bundle": "/mnt/c/Share/nkp-bundle_v2.17.1_linux_amd64/nkp-v2.17.1",
+        "airgapped_bundle": "/mnt/c/Share/nkp-air-gapped-bundle_v2.17.1_linux_amd64/nkp-v2.17.1",
+        "source_path": "/mnt/c/Share/nkp-bundle_v2.17.1_linux_amd64/nkp-v2.17.1",
+        "git_url": "",
+        "git_ref": "v2.17.1",
+        "checksum": "",
+    }
+
+
+def default_inventory():
+    return {
+        "mode": "nutanix-ahv",
+        "nodes": "",
+        "bmc_network": "",
+        "bmc_provider": "ipmi",
+        "boot_mode": "uefi",
+        "os_image": "",
+        "notes": "",
+    }
+
+
+def default_network():
+    return {
+        "management_cidr": "",
+        "workload_cidr": "",
+        "api_vip": "",
+        "ingress_range": "",
+        "dns_servers": "",
+        "ntp_servers": "",
+        "proxy": "",
+        "ip_mode": "static",
+    }
+
+
+def default_secrets():
+    return {
+        "backend": "local-file",
+        "vault_url": "",
+        "namespace": "",
+        "secret_path": "kv/nkp/zerotouch",
+        "rotation_policy": "manual",
+    }
+
+
+def default_providers():
+    return {
+        "default_provider": "nutanix-ahv",
+        "enabled_providers": "nutanix-ahv, air-gapped-ahv, proxied-ahv",
+        "runner_type": "container",
+        "runner_notes": "Use WSL or Linux VM for live NKP binaries.",
+    }
+
+
 def create_environment(name, env_type):
     if not name.replace("-", "").replace("_", "").isalnum():
         return 2, "", "Environment name may contain only letters, numbers, hyphens, and underscores."
@@ -365,12 +482,21 @@ def page(title, body, active="environments", user=None):
     <a class="{nav_class('cli')}" href="{VIEW_PATHS['cli']}">CLI</a>
     <a class="{nav_class('runs')}" href="{VIEW_PATHS['runs']}">Runs</a>
     <a class="{nav_class('artifacts')}" href="{VIEW_PATHS['artifacts']}">Artifacts</a>
+    <div class="nav-label">Deployment</div>
+    <a class="{nav_class('sources')}" href="{VIEW_PATHS['sources']}">Sources</a>
+    <a class="{nav_class('inventory')}" href="{VIEW_PATHS['inventory']}">Inventory</a>
+    <a class="{nav_class('network')}" href="{VIEW_PATHS['network']}">Network</a>
+    <a class="{nav_class('preflight')}" href="{VIEW_PATHS['preflight']}">Preflight</a>
+    <a class="{nav_class('pipeline')}" href="{VIEW_PATHS['pipeline']}">Pipeline</a>
+    <a class="{nav_class('jobs')}" href="{VIEW_PATHS['jobs']}">Jobs</a>
     <div class="nav-label">Governance</div>
     <a class="{nav_class('actions')}" href="{VIEW_PATHS['actions']}">Safe Actions</a>
     <a class="{nav_class('audit')}" href="{VIEW_PATHS['audit']}">Audit Trail</a>
     <div class="nav-label">Settings</div>
     <a class="{nav_class('connections')}" href="{VIEW_PATHS['connections']}">Connections</a>
     <a class="{nav_class('new-environment')}" href="{VIEW_PATHS['new-environment']}">New Environment</a>
+    <a class="{nav_class('providers')}" href="{VIEW_PATHS['providers']}">Providers</a>
+    <a class="{nav_class('secrets')}" href="{VIEW_PATHS['secrets']}">Secrets</a>
     <a class="{nav_class('rbac')}" href="{VIEW_PATHS['rbac']}">RBAC</a>
     <a class="{nav_class('database')}" href="{VIEW_PATHS['database']}">Database</a>
     <div class="nav-label">System</div>
@@ -556,10 +682,15 @@ def page(title, body, active="environments", user=None):
     .settings-card p {{ margin: 0; color: var(--muted); }}
     .form-grid {{ display: grid; grid-template-columns: repeat(2, minmax(220px, 1fr)); gap: 14px; }}
     .field label {{ display: block; color: #3b465a; font-size: 12px; font-weight: 750; margin-bottom: 6px; text-transform: uppercase; }}
-    .field input, .field select {{
+    .field input, .field select, .field textarea {{
       width: 100%; min-height: 36px; border: 1px solid var(--line-strong); border-radius: 6px;
       padding: 0 10px; color: var(--ink); background: #fff;
     }}
+    .field textarea {{ min-height: 96px; padding: 10px; resize: vertical; font: inherit; }}
+    .pipeline {{ display: grid; grid-template-columns: repeat(6, minmax(120px, 1fr)); gap: 10px; }}
+    .pipeline-step {{ background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 14px; box-shadow: var(--shadow); }}
+    .pipeline-step strong {{ display: block; margin-bottom: 6px; }}
+    .pipeline-step .chip {{ font-size: 12px; }}
     .terminal-window {{ background: #0b1220; color: #dbeafe; border-radius: 8px; border: 1px solid #253149; overflow: hidden; }}
     .terminal-bar {{ min-height: 36px; display: flex; align-items: center; gap: 8px; padding: 0 12px; background: #111827; border-bottom: 1px solid #253149; color: #93a4bd; font-size: 12px; font-weight: 700; }}
     .terminal-dot {{ width: 9px; height: 9px; border-radius: 50%; background: #64748b; }}
@@ -852,6 +983,12 @@ class Handler(BaseHTTPRequestHandler):
           <option value="proxied" {'selected' if nested_get(data, ['environment', 'type']) == 'proxied' else ''}>proxied</option>
           <option value="air-gapped" {'selected' if nested_get(data, ['environment', 'type']) == 'air-gapped' else ''}>air-gapped</option>
         </select></div></td></tr>
+        <tr><td>Provider</td><td><div class="field"><select name="environment_provider">
+          <option value="nutanix-ahv" {'selected' if nested_get(data, ['environment', 'provider'], 'nutanix-ahv') == 'nutanix-ahv' else ''}>nutanix-ahv</option>
+          <option value="air-gapped-ahv" {'selected' if nested_get(data, ['environment', 'provider']) == 'air-gapped-ahv' else ''}>air-gapped-ahv</option>
+          <option value="proxied-ahv" {'selected' if nested_get(data, ['environment', 'provider']) == 'proxied-ahv' else ''}>proxied-ahv</option>
+          <option value="bare-metal" {'selected' if nested_get(data, ['environment', 'provider']) == 'bare-metal' else ''}>bare-metal</option>
+        </select></div></td></tr>
         <tr><td>NKP version</td><td><div class="field"><input name="nkp_version" value="{html.escape(str(nested_get(data, ['nkp', 'version'])))}"></div></td></tr>
         <tr><td>Bundle type</td><td><div class="field"><select name="bundle_type">
           <option value="standard" {'selected' if nested_get(data, ['nkp', 'bundleType']) == 'standard' else ''}>standard</option>
@@ -1017,6 +1154,156 @@ class Handler(BaseHTTPRequestHandler):
 """
             self.send_html(page("Audit Trail - NKP ZeroTouch Console", body, "audit"))
             return
+        if parsed.path == "/sources":
+            settings = load_setting("sources", default_sources())
+            rows = []
+            for label, key in [("Standard bundle", "standard_bundle"), ("Air-gapped bundle", "airgapped_bundle"), ("NKP source path", "source_path")]:
+                status, note = path_status(settings.get(key, ""))
+                rows.append(f"<tr><td>{html.escape(label)}</td><td><code>{html.escape(settings.get(key, ''))}</code></td><td><span class='chip {status}'>{html.escape(note)}</span></td></tr>")
+            body = f"""
+<div class="section-head">
+  <div>
+    <h2>Sources</h2>
+    <div class="section-copy">Register NKP bundles, source code locations, Git refs, and checksum metadata used by deployment workflows.</div>
+  </div>
+</div>
+<section class="panel">
+  <form method="post" action="/sources/save">
+    <table>
+      <thead><tr><th>Source</th><th>Value</th></tr></thead>
+      <tbody>
+        <tr><td>NKP version</td><td><div class="field"><input name="version" value="{html.escape(settings.get('version', ''))}"></div></td></tr>
+        <tr><td>Standard bundle path</td><td><div class="field"><input name="standard_bundle" value="{html.escape(settings.get('standard_bundle', ''))}"></div></td></tr>
+        <tr><td>Air-gapped bundle path</td><td><div class="field"><input name="airgapped_bundle" value="{html.escape(settings.get('airgapped_bundle', ''))}"></div></td></tr>
+        <tr><td>NKP source path</td><td><div class="field"><input name="source_path" value="{html.escape(settings.get('source_path', ''))}"></div></td></tr>
+        <tr><td>Git URL</td><td><div class="field"><input name="git_url" value="{html.escape(settings.get('git_url', ''))}"></div></td></tr>
+        <tr><td>Git ref / tag</td><td><div class="field"><input name="git_ref" value="{html.escape(settings.get('git_ref', ''))}"></div></td></tr>
+        <tr><td>SHA256 checksum</td><td><div class="field"><input name="checksum" value="{html.escape(settings.get('checksum', ''))}"></div></td></tr>
+        <tr><td></td><td><button>Save sources</button></td></tr>
+      </tbody>
+    </table>
+  </form>
+</section>
+<div class="section-head"><div><h2>Discovery</h2><div class="section-copy">Path availability from the console runner perspective.</div></div></div>
+<section class="panel"><table><thead><tr><th>Item</th><th>Path</th><th>Status</th></tr></thead><tbody>{''.join(rows)}</tbody></table></section>
+<div class="notice">Sources are saved under <code>.zt/settings/sources.json</code>. Environment YAML can still override bundle paths per target.</div>
+"""
+            self.send_html(page("Sources - NKP ZeroTouch Console", body, "sources"))
+            return
+        if parsed.path == "/inventory":
+            settings = load_setting("inventory", default_inventory())
+            body = f"""
+<div class="section-head">
+  <div>
+    <h2>Infrastructure Inventory</h2>
+    <div class="section-copy">Capture physical node, BMC, image, and boot-mode inputs needed before bare-metal or AHV deployment gates.</div>
+  </div>
+</div>
+<section class="panel">
+  <form method="post" action="/inventory/save">
+    <table>
+      <thead><tr><th>Inventory Field</th><th>Value</th></tr></thead>
+      <tbody>
+        <tr><td>Deployment mode</td><td><div class="field"><select name="mode"><option value="nutanix-ahv" {'selected' if settings.get('mode') == 'nutanix-ahv' else ''}>nutanix-ahv</option><option value="bare-metal" {'selected' if settings.get('mode') == 'bare-metal' else ''}>bare-metal</option></select></div></td></tr>
+        <tr><td>Node inventory</td><td><div class="field"><textarea name="nodes" placeholder="node01, role=control-plane, ip=10.10.10.11, bmc=10.10.1.11">{html.escape(settings.get('nodes', ''))}</textarea></div></td></tr>
+        <tr><td>BMC network</td><td><div class="field"><input name="bmc_network" value="{html.escape(settings.get('bmc_network', ''))}"></div></td></tr>
+        <tr><td>BMC provider</td><td><div class="field"><select name="bmc_provider"><option value="ipmi" {'selected' if settings.get('bmc_provider') == 'ipmi' else ''}>ipmi</option><option value="idrac" {'selected' if settings.get('bmc_provider') == 'idrac' else ''}>idrac</option><option value="ilo" {'selected' if settings.get('bmc_provider') == 'ilo' else ''}>ilo</option><option value="redfish" {'selected' if settings.get('bmc_provider') == 'redfish' else ''}>redfish</option></select></div></td></tr>
+        <tr><td>Boot mode</td><td><div class="field"><select name="boot_mode"><option value="uefi" {'selected' if settings.get('boot_mode') == 'uefi' else ''}>uefi</option><option value="bios" {'selected' if settings.get('boot_mode') == 'bios' else ''}>bios</option></select></div></td></tr>
+        <tr><td>OS / node image</td><td><div class="field"><input name="os_image" value="{html.escape(settings.get('os_image', ''))}"></div></td></tr>
+        <tr><td>Notes</td><td><div class="field"><textarea name="notes">{html.escape(settings.get('notes', ''))}</textarea></div></td></tr>
+        <tr><td></td><td><button>Save inventory</button></td></tr>
+      </tbody>
+    </table>
+  </form>
+</section>
+<div class="notice">For AHV deployments this inventory documents dependencies. For future bare-metal support it becomes the node admission and power-control source.</div>
+"""
+            self.send_html(page("Inventory - NKP ZeroTouch Console", body, "inventory"))
+            return
+        if parsed.path == "/network":
+            settings = load_setting("network", default_network())
+            body = f"""
+<div class="section-head">
+  <div>
+    <h2>Network Plan</h2>
+    <div class="section-copy">Define VIPs, CIDRs, DNS, NTP, proxy, and address allocation assumptions before generation and apply phases.</div>
+  </div>
+</div>
+<section class="panel">
+  <form method="post" action="/network/save">
+    <table>
+      <thead><tr><th>Network Field</th><th>Value</th></tr></thead>
+      <tbody>
+        <tr><td>Management CIDR</td><td><div class="field"><input name="management_cidr" value="{html.escape(settings.get('management_cidr', ''))}"></div></td></tr>
+        <tr><td>Workload CIDR</td><td><div class="field"><input name="workload_cidr" value="{html.escape(settings.get('workload_cidr', ''))}"></div></td></tr>
+        <tr><td>API endpoint VIP</td><td><div class="field"><input name="api_vip" value="{html.escape(settings.get('api_vip', ''))}"></div></td></tr>
+        <tr><td>Ingress / load balancer range</td><td><div class="field"><input name="ingress_range" value="{html.escape(settings.get('ingress_range', ''))}"></div></td></tr>
+        <tr><td>DNS servers</td><td><div class="field"><input name="dns_servers" value="{html.escape(settings.get('dns_servers', ''))}"></div></td></tr>
+        <tr><td>NTP servers</td><td><div class="field"><input name="ntp_servers" value="{html.escape(settings.get('ntp_servers', ''))}"></div></td></tr>
+        <tr><td>Proxy</td><td><div class="field"><input name="proxy" value="{html.escape(settings.get('proxy', ''))}"></div></td></tr>
+        <tr><td>IP assignment</td><td><div class="field"><select name="ip_mode"><option value="static" {'selected' if settings.get('ip_mode') == 'static' else ''}>static</option><option value="dhcp" {'selected' if settings.get('ip_mode') == 'dhcp' else ''}>dhcp</option><option value="pxe" {'selected' if settings.get('ip_mode') == 'pxe' else ''}>pxe</option></select></div></td></tr>
+        <tr><td></td><td><button>Save network plan</button></td></tr>
+      </tbody>
+    </table>
+  </form>
+</section>
+"""
+            self.send_html(page("Network - NKP ZeroTouch Console", body, "network"))
+            return
+        if parsed.path == "/preflight":
+            checks = preflight_checks()
+            ok_count = sum(1 for item in checks if item["status"] == "ok")
+            warn_count = len(checks) - ok_count
+            rows = "".join(f"<tr><td>{html.escape(item['area'])}</td><td>{html.escape(item['check'])}</td><td><span class='chip {item['status']}'>{html.escape(item['status'])}</span></td><td>{html.escape(item['note'])}</td></tr>" for item in checks)
+            body = f"""
+<section class="summary-grid">
+  {metric_card("Passed", ok_count, "readiness checks", "/preflight")}
+  {metric_card("Warnings", warn_count, "items requiring attention", "/preflight")}
+  {metric_card("Environments", len(env_configs()), "deployment targets", "/")}
+  {metric_card("Sources", 1, "source intake configured", "/sources")}
+</section>
+<div class="section-head">
+  <div>
+    <h2>Preflight Matrix</h2>
+    <div class="section-copy">Operational readiness checks for source, runner, registry, provider, network, inventory, and secrets.</div>
+  </div>
+</div>
+<section class="panel"><table><thead><tr><th>Area</th><th>Check</th><th>Status</th><th>Detail</th></tr></thead><tbody>{rows}</tbody></table></section>
+<div class="notice">This matrix is a console-level readiness gate. Environment-specific validation still runs through the <code>validate</code> phase.</div>
+"""
+            self.send_html(page("Preflight - NKP ZeroTouch Console", body, "preflight"))
+            return
+        if parsed.path == "/pipeline":
+            steps = [("Source", "sources", "ok"), ("Validate", "actions", "warn"), ("Prepare", "actions", "warn"), ("Generate", "actions", "warn"), ("Registry", "cli", "warn"), ("Deploy", "cli", "warn"), ("Verify", "actions", "warn"), ("Operate", "runs", "warn")]
+            cards = "".join(f"<a class='pipeline-step' href='{VIEW_PATHS[href]}'><strong>{html.escape(label)}</strong><span class='chip {status}'>{'configured' if status == 'ok' else 'pending'}</span></a>" for label, href, status in steps)
+            body = f"""
+<div class="section-head">
+  <div>
+    <h2>Deployment Pipeline</h2>
+    <div class="section-copy">ZeroTouch flow from source intake through deployment, verification, and day-2 operations.</div>
+  </div>
+</div>
+<section class="pipeline">{cards}</section>
+<div class="notice">Apply stages remain gated through the controlled CLI window. Safe stages can be run from Environments or Safe Actions.</div>
+"""
+            self.send_html(page("Pipeline - NKP ZeroTouch Console", body, "pipeline"))
+            return
+        if parsed.path == "/jobs":
+            run_rows = ""
+            for summary in recent_run_summaries(20):
+                run_rows += f"<tr><td><code>{html.escape(summary.parent.name)}</code></td><td>{html.escape(mtime_label(summary))}</td><td><a href='/runs'>summary.md</a></td></tr>"
+            body = f"""
+<div class="section-head">
+  <div>
+    <h2>Jobs</h2>
+    <div class="section-copy">Execution history and future home for live logs, retry, cancellation, and job approvals.</div>
+  </div>
+</div>
+<section class="panel"><table><thead><tr><th>Run</th><th>Updated</th><th>Artifact</th></tr></thead><tbody>{run_rows or '<tr><td colspan="3" class="muted">No jobs have run yet.</td></tr>'}</tbody></table></section>
+<div class="notice">Current jobs are file-backed under <code>.zt/runs</code>. Real-time streaming and background workers are the next implementation layer.</div>
+"""
+            self.send_html(page("Jobs - NKP ZeroTouch Console", body, "jobs"))
+            return
         if parsed.path == "/settings/connections":
             settings = read_json(SETTINGS / "connections.json") or {}
             body = f"""
@@ -1046,11 +1333,13 @@ class Handler(BaseHTTPRequestHandler):
             self.send_html(page("Connections - NKP ZeroTouch Console", body, "connections"))
             return
         if parsed.path == "/settings/new-environment":
-            body = """
+            providers = load_setting("providers", default_providers())
+            default_provider = providers.get("default_provider", "nutanix-ahv")
+            body = f"""
 <div class="section-head">
   <div>
     <h2>New Environment</h2>
-    <div class="section-copy">Create a deployment profile from the connected, proxied, or air-gapped templates.</div>
+    <div class="section-copy">Create a deployment profile from the connected, proxied, or air-gapped templates and assign its provider intent.</div>
   </div>
 </div>
 <section class="panel">
@@ -1060,6 +1349,7 @@ class Handler(BaseHTTPRequestHandler):
       <tbody>
         <tr><td>Environment name</td><td><div class="field"><input name="name" value="lab-new" aria-label="Environment name"></div></td></tr>
         <tr><td>Environment type</td><td><div class="field"><select name="type" aria-label="Environment type"><option>connected</option><option>proxied</option><option>air-gapped</option></select></div></td></tr>
+        <tr><td>Provider</td><td><div class="field"><select name="provider" aria-label="Provider"><option value="nutanix-ahv" {'selected' if default_provider == 'nutanix-ahv' else ''}>nutanix-ahv</option><option value="air-gapped-ahv" {'selected' if default_provider == 'air-gapped-ahv' else ''}>air-gapped-ahv</option><option value="proxied-ahv" {'selected' if default_provider == 'proxied-ahv' else ''}>proxied-ahv</option><option value="bare-metal" {'selected' if default_provider == 'bare-metal' else ''}>bare-metal</option></select></div></td></tr>
         <tr><td></td><td><button>Create environment</button></td></tr>
       </tbody>
     </table>
@@ -1068,6 +1358,61 @@ class Handler(BaseHTTPRequestHandler):
 <div class="notice">This creates a config under <code>configs/environments/</code> using the same framework helper as <code>scripts/new-env.*</code>.</div>
 """
             self.send_html(page("New Environment - NKP ZeroTouch Console", body, "new-environment"))
+            return
+        if parsed.path == "/settings/providers":
+            settings = load_setting("providers", default_providers())
+            body = f"""
+<div class="section-head">
+  <div>
+    <h2>Providers</h2>
+    <div class="section-copy">Select deployment provider intent and runner placement for NKP operations.</div>
+  </div>
+</div>
+<section class="panel">
+  <form method="post" action="/settings/providers/save">
+    <table>
+      <thead><tr><th>Provider Setting</th><th>Value</th></tr></thead>
+      <tbody>
+        <tr><td>Default provider</td><td><div class="field"><select name="default_provider"><option value="nutanix-ahv" {'selected' if settings.get('default_provider') == 'nutanix-ahv' else ''}>nutanix-ahv</option><option value="air-gapped-ahv" {'selected' if settings.get('default_provider') == 'air-gapped-ahv' else ''}>air-gapped-ahv</option><option value="proxied-ahv" {'selected' if settings.get('default_provider') == 'proxied-ahv' else ''}>proxied-ahv</option><option value="bare-metal" {'selected' if settings.get('default_provider') == 'bare-metal' else ''}>bare-metal</option></select></div></td></tr>
+        <tr><td>Enabled providers</td><td><div class="field"><input name="enabled_providers" value="{html.escape(settings.get('enabled_providers', ''))}"></div></td></tr>
+        <tr><td>Runner type</td><td><div class="field"><select name="runner_type"><option value="container" {'selected' if settings.get('runner_type') == 'container' else ''}>container</option><option value="wsl" {'selected' if settings.get('runner_type') == 'wsl' else ''}>wsl</option><option value="linux-vm" {'selected' if settings.get('runner_type') == 'linux-vm' else ''}>linux-vm</option><option value="appliance" {'selected' if settings.get('runner_type') == 'appliance' else ''}>appliance</option></select></div></td></tr>
+        <tr><td>Runner notes</td><td><div class="field"><textarea name="runner_notes">{html.escape(settings.get('runner_notes', ''))}</textarea></div></td></tr>
+        <tr><td></td><td><button>Save providers</button></td></tr>
+      </tbody>
+    </table>
+  </form>
+</section>
+<div class="notice">The current live deployment generator targets Nutanix AHV. Bare-metal is modeled as provider intent until a supported NKP bare-metal command path is wired into generation.</div>
+"""
+            self.send_html(page("Providers - NKP ZeroTouch Console", body, "providers"))
+            return
+        if parsed.path == "/settings/secrets":
+            settings = load_setting("secrets", default_secrets())
+            body = f"""
+<div class="section-head">
+  <div>
+    <h2>Secrets</h2>
+    <div class="section-copy">Configure where Prism, registry, proxy, BMC, SSH, and Git credentials should be sourced from.</div>
+  </div>
+</div>
+<section class="panel">
+  <form method="post" action="/settings/secrets/save">
+    <table>
+      <thead><tr><th>Secrets Setting</th><th>Value</th></tr></thead>
+      <tbody>
+        <tr><td>Backend</td><td><div class="field"><select name="backend"><option value="local-file" {'selected' if settings.get('backend') == 'local-file' else ''}>local-file</option><option value="hashicorp-vault" {'selected' if settings.get('backend') == 'hashicorp-vault' else ''}>hashicorp-vault</option><option value="cyberark" {'selected' if settings.get('backend') == 'cyberark' else ''}>cyberark</option><option value="azure-key-vault" {'selected' if settings.get('backend') == 'azure-key-vault' else ''}>azure-key-vault</option><option value="onepassword" {'selected' if settings.get('backend') == 'onepassword' else ''}>onepassword</option></select></div></td></tr>
+        <tr><td>Vault / service URL</td><td><div class="field"><input name="vault_url" value="{html.escape(settings.get('vault_url', ''))}"></div></td></tr>
+        <tr><td>Namespace / tenant</td><td><div class="field"><input name="namespace" value="{html.escape(settings.get('namespace', ''))}"></div></td></tr>
+        <tr><td>Secret path</td><td><div class="field"><input name="secret_path" value="{html.escape(settings.get('secret_path', ''))}"></div></td></tr>
+        <tr><td>Rotation policy</td><td><div class="field"><select name="rotation_policy"><option value="manual" {'selected' if settings.get('rotation_policy') == 'manual' else ''}>manual</option><option value="90-days" {'selected' if settings.get('rotation_policy') == '90-days' else ''}>90-days</option><option value="external" {'selected' if settings.get('rotation_policy') == 'external' else ''}>external</option></select></div></td></tr>
+        <tr><td></td><td><button>Save secrets settings</button></td></tr>
+      </tbody>
+    </table>
+  </form>
+</section>
+<div class="notice">This records backend metadata only. Secret values are not stored by the console.</div>
+"""
+            self.send_html(page("Secrets - NKP ZeroTouch Console", body, "secrets"))
             return
         if parsed.path == "/settings/rbac":
             rbac = load_rbac()
@@ -1250,6 +1595,41 @@ class Handler(BaseHTTPRequestHandler):
         if not self.require_login(parsed):
             return
 
+        if parsed.path == "/sources/save":
+            data = {key: form_value(form, key) for key in ["version", "standard_bundle", "airgapped_bundle", "source_path", "git_url", "git_ref", "checksum"]}
+            save_setting("sources", data)
+            body = "<section class='metric'><div class='metric-label'>Settings Saved</div><div class='metric-value'>Sources</div><div class='metric-foot'><span class='chip ok'>Saved locally</span></div></section><a class='back-link' href='/sources'>Back to sources</a>"
+            self.send_html(page("Sources Saved", body, "sources"))
+            return
+
+        if parsed.path == "/inventory/save":
+            data = {key: form_value(form, key) for key in ["mode", "nodes", "bmc_network", "bmc_provider", "boot_mode", "os_image", "notes"]}
+            save_setting("inventory", data)
+            body = "<section class='metric'><div class='metric-label'>Settings Saved</div><div class='metric-value'>Inventory</div><div class='metric-foot'><span class='chip ok'>Saved locally</span></div></section><a class='back-link' href='/inventory'>Back to inventory</a>"
+            self.send_html(page("Inventory Saved", body, "inventory"))
+            return
+
+        if parsed.path == "/network/save":
+            data = {key: form_value(form, key) for key in ["management_cidr", "workload_cidr", "api_vip", "ingress_range", "dns_servers", "ntp_servers", "proxy", "ip_mode"]}
+            save_setting("network", data)
+            body = "<section class='metric'><div class='metric-label'>Settings Saved</div><div class='metric-value'>Network</div><div class='metric-foot'><span class='chip ok'>Saved locally</span></div></section><a class='back-link' href='/network'>Back to network</a>"
+            self.send_html(page("Network Saved", body, "network"))
+            return
+
+        if parsed.path == "/settings/providers/save":
+            data = {key: form_value(form, key) for key in ["default_provider", "enabled_providers", "runner_type", "runner_notes"]}
+            save_setting("providers", data)
+            body = "<section class='metric'><div class='metric-label'>Settings Saved</div><div class='metric-value'>Providers</div><div class='metric-foot'><span class='chip ok'>Saved locally</span></div></section><a class='back-link' href='/settings/providers'>Back to providers</a>"
+            self.send_html(page("Providers Saved", body, "providers"))
+            return
+
+        if parsed.path == "/settings/secrets/save":
+            data = {key: form_value(form, key) for key in ["backend", "vault_url", "namespace", "secret_path", "rotation_policy"]}
+            save_setting("secrets", data)
+            body = "<section class='metric'><div class='metric-label'>Settings Saved</div><div class='metric-value'>Secrets</div><div class='metric-foot'><span class='chip ok'>Saved locally</span></div></section><a class='back-link' href='/settings/secrets'>Back to secrets</a>"
+            self.send_html(page("Secrets Saved", body, "secrets"))
+            return
+
         if parsed.path == "/settings/connections/save":
             data = {
                 "prism": form_value(form, "prism"),
@@ -1267,7 +1647,17 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/settings/new-environment/create":
             name = form_value(form, "name")
             env_type = form_value(form, "type", "connected")
+            provider = form_value(form, "provider", "nutanix-ahv")
             code, out, err = create_environment(name, env_type)
+            if code == 0:
+                try:
+                    new_config = resolve_env_config(str(ENV_DIR / f"{safe_key(name)}.yaml"))
+                    data = load_env_yaml(new_config)
+                    nested_set(data, ["environment", "provider"], provider)
+                    write_env_yaml(new_config, data)
+                except Exception as exc:
+                    code = 1
+                    err += f"\nEnvironment was created, but provider metadata could not be saved: {exc}"
             status_class = "ok" if code == 0 else "warn"
             body = (
                 "<div class='result-layout'>"
@@ -1401,6 +1791,7 @@ class Handler(BaseHTTPRequestHandler):
                 field_map = {
                     "environment_name": (["environment", "name"], str),
                     "environment_type": (["environment", "type"], str),
+                    "environment_provider": (["environment", "provider"], str),
                     "nkp_version": (["nkp", "version"], str),
                     "bundle_type": (["nkp", "bundleType"], str),
                     "bundle_path": (["nkp", "bundlePath"], str),

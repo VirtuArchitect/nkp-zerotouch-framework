@@ -1,6 +1,7 @@
 environment:
   name: lab-connected
   type: connected
+  provider: nutanix-ahv
 
 nkp:
   version: v2.17.1

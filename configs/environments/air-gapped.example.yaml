@@ -1,6 +1,7 @@
 environment:
   name: lab-airgapped
   type: air-gapped
+  provider: air-gapped-ahv
 
 nkp:
   version: v2.17.1
