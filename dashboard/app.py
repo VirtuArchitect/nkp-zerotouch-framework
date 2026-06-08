@@ -13,6 +13,7 @@ from urllib.parse import parse_qs, urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
 ZT = ROOT / ".zt"
+SETTINGS = ZT / "settings"
 SAFE_ACTIONS = {"validate", "prepare", "generate", "verify", "backup", "runs"}
 ACTION_ORDER = ["validate", "prepare", "generate", "verify", "backup", "runs"]
 VIEW_PATHS = {
@@ -21,6 +22,11 @@ VIEW_PATHS = {
     "artifacts": "/artifacts",
     "actions": "/actions",
     "audit": "/audit",
+    "connections": "/settings/connections",
+    "new-environment": "/settings/new-environment",
+    "rbac": "/settings/rbac",
+    "database": "/settings/database",
+    "about": "/about",
 }
 
 
@@ -31,6 +37,11 @@ def read_json(path):
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return None
+
+
+def write_json(path, data):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
 
 def env_configs():
@@ -64,6 +75,81 @@ def mtime_label(path):
     if not path.exists():
         return "n/a"
     return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(path.stat().st_mtime))
+
+
+def metric_card(label, value, foot, href=None):
+    content = (
+        f'<div class="metric-label">{html.escape(label)}</div>'
+        f'<div class="metric-value">{value}</div>'
+        f'<div class="metric-foot">{html.escape(foot)}</div>'
+    )
+    if href and value > 0:
+        return f'<a class="metric metric-link" href="{html.escape(href)}">{content}</a>'
+    return f'<div class="metric disabled">{content}</div>'
+
+
+def form_value(form, name, default=""):
+    return form.get(name, [default])[0].strip()
+
+
+def safe_key(value):
+    key = value.strip().lower().replace(" ", "-")
+    return "".join(ch for ch in key if ch.isalnum() or ch in {"-", "_"})
+
+
+def default_rbac():
+    return {
+        "settings": {"enabled": "false", "provider": "local", "admin": "admin"},
+        "roles": [
+            {"name": "Admin", "permissions": "settings, environments, safe-actions, audit"},
+            {"name": "Operator", "permissions": "environments, safe-actions, artifacts"},
+            {"name": "Auditor", "permissions": "runs, artifacts, audit"},
+        ],
+        "accounts": [],
+    }
+
+
+def load_rbac():
+    data = read_json(SETTINGS / "rbac.json") or default_rbac()
+    if "settings" not in data:
+        data = {"settings": data, "roles": default_rbac()["roles"], "accounts": []}
+    data.setdefault("settings", default_rbac()["settings"])
+    data.setdefault("roles", default_rbac()["roles"])
+    data.setdefault("accounts", [])
+    return data
+
+
+def create_environment(name, env_type):
+    if not name.replace("-", "").replace("_", "").isalnum():
+        return 2, "", "Environment name may contain only letters, numbers, hyphens, and underscores."
+    if env_type not in {"connected", "proxied", "air-gapped"}:
+        return 2, "", "Unsupported environment type."
+
+    bash_path = shutil.which("bash")
+    pwsh_path = shutil.which("pwsh") or shutil.which("powershell")
+    if bash_path and (ROOT / "scripts" / "new-env.sh").exists():
+        command = [bash_path, str(ROOT / "scripts" / "new-env.sh"), name, env_type]
+    elif pwsh_path and (ROOT / "scripts" / "new-env.ps1").exists():
+        command = [
+            pwsh_path,
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(ROOT / "scripts" / "new-env.ps1"),
+            "-Name",
+            name,
+            "-Type",
+            env_type,
+        ]
+    else:
+        return 127, "", "No supported shell runner found for environment creation."
+
+    try:
+        completed = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, timeout=60)
+        return completed.returncode, completed.stdout, completed.stderr
+    except OSError as exc:
+        return 127, "", f"Failed to create environment: {exc}"
 
 
 def run_action(action, config):
@@ -108,6 +194,13 @@ def page(title, body, active="environments"):
     <div class="nav-label">Governance</div>
     <a class="{nav_class('actions')}" href="{VIEW_PATHS['actions']}">Safe Actions</a>
     <a class="{nav_class('audit')}" href="{VIEW_PATHS['audit']}">Audit Trail</a>
+    <div class="nav-label">Settings</div>
+    <a class="{nav_class('connections')}" href="{VIEW_PATHS['connections']}">Connections</a>
+    <a class="{nav_class('new-environment')}" href="{VIEW_PATHS['new-environment']}">New Environment</a>
+    <a class="{nav_class('rbac')}" href="{VIEW_PATHS['rbac']}">RBAC</a>
+    <a class="{nav_class('database')}" href="{VIEW_PATHS['database']}">Database</a>
+    <div class="nav-label">System</div>
+    <a class="{nav_class('about')}" href="{VIEW_PATHS['about']}">About</a>
 """
     return f"""<!doctype html>
 <html lang="en">
@@ -155,9 +248,10 @@ def page(title, body, active="environments"):
     .brand-mark {{
       width: 34px; height: 34px; border-radius: 7px;
       display: grid; place-items: center;
-      background: #2f6fed; color: #fff; font-weight: 800;
-      box-shadow: inset 0 0 0 1px rgba(255,255,255,.16);
+      background: #1a6b6b;
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,.16), 0 8px 18px rgba(0,0,0,.22);
     }}
+    .brand-mark img {{ width: 34px; height: 34px; display: block; border-radius: 7px; }}
     .brand-title {{ font-size: 15px; font-weight: 700; letter-spacing: 0; }}
     .brand-subtitle {{ color: #aab4c6; font-size: 12px; margin-top: 2px; }}
     .nav-label {{ color: #7f8ba3; font-size: 11px; font-weight: 700; text-transform: uppercase; margin: 22px 10px 8px; }}
@@ -188,6 +282,16 @@ def page(title, body, active="environments"):
       background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
       padding: 16px; box-shadow: var(--shadow);
     }}
+    .metric-link {{
+      display: block; color: var(--ink);
+      transition: transform .12s ease, border-color .12s ease, box-shadow .12s ease;
+    }}
+    .metric-link:hover {{
+      transform: translateY(-1px);
+      border-color: #9bb8f5;
+      box-shadow: 0 18px 42px rgba(37, 99, 235, .12);
+    }}
+    .metric.disabled {{ opacity: .72; }}
     .metric-label {{ color: var(--muted); font-size: 12px; font-weight: 650; }}
     .metric-value {{ margin-top: 8px; font-size: 28px; font-weight: 780; }}
     .metric-foot {{ margin-top: 4px; color: var(--muted); font-size: 12px; }}
@@ -247,6 +351,16 @@ def page(title, body, active="environments"):
       border: 1px solid #d7e3f8; background: #f5f8ff; color: #40516d;
       font-size: 13px;
     }}
+    .settings-grid {{ display: grid; grid-template-columns: repeat(2, minmax(260px, 1fr)); gap: 14px; }}
+    .settings-card {{ background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 16px; box-shadow: var(--shadow); }}
+    .settings-card h3 {{ margin: 0 0 8px; font-size: 15px; }}
+    .settings-card p {{ margin: 0; color: var(--muted); }}
+    .form-grid {{ display: grid; grid-template-columns: repeat(2, minmax(220px, 1fr)); gap: 14px; }}
+    .field label {{ display: block; color: #3b465a; font-size: 12px; font-weight: 750; margin-bottom: 6px; text-transform: uppercase; }}
+    .field input, .field select {{
+      width: 100%; min-height: 36px; border: 1px solid var(--line-strong); border-radius: 6px;
+      padding: 0 10px; color: var(--ink); background: #fff;
+    }}
     .result-layout {{ display: grid; gap: 16px; }}
     .back-link {{ display: inline-flex; align-items: center; margin-top: 16px; font-weight: 700; }}
     @media (max-width: 980px) {{
@@ -255,6 +369,7 @@ def page(title, body, active="environments"):
       .topbar {{ align-items: flex-start; flex-direction: column; gap: 10px; padding: 16px 20px; }}
       main {{ padding: 18px 16px 32px; }}
       .summary-grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
+      .settings-grid, .form-grid {{ grid-template-columns: 1fr; }}
       .actions {{ min-width: 360px; }}
     }}
     @media (max-width: 620px) {{
@@ -266,9 +381,9 @@ def page(title, body, active="environments"):
 <div class="shell">
   <aside class="sidebar">
     <div class="brand">
-      <div class="brand-mark">NKP</div>
+      <div class="brand-mark"><img src="/assets/veridian-mark-teal.svg" alt="Veridian"></div>
       <div>
-        <div class="brand-title">ZeroTouch</div>
+        <div class="brand-title">Veridian ZeroTouch</div>
         <div class="brand-subtitle">Deployment Console</div>
       </div>
     </div>
@@ -303,6 +418,18 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         parsed = urlparse(self.path)
+        if parsed.path == "/assets/veridian-mark-teal.svg":
+            asset = ROOT / "dashboard" / "assets" / "veridian-mark-teal.svg"
+            if not asset.exists():
+                self.send_html(page("Not Found", "<h2>Asset not found</h2>"), status=404)
+                return
+            encoded = asset.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "image/svg+xml")
+            self.send_header("Content-Length", str(len(encoded)))
+            self.end_headers()
+            self.wfile.write(encoded)
+            return
         if parsed.path in ("/", "/environments"):
             rows = []
             env_total = 0
@@ -341,10 +468,10 @@ class Handler(BaseHTTPRequestHandler):
             )
             body = f"""
 <section class="summary-grid">
-  <div class="metric"><div class="metric-label">Environments</div><div class="metric-value">{env_total}</div><div class="metric-foot">configured deployment targets</div></div>
-  <div class="metric"><div class="metric-label">Prepared</div><div class="metric-value">{prepared_total}</div><div class="metric-foot">workspace states available</div></div>
-  <div class="metric"><div class="metric-label">Generated</div><div class="metric-value">{generated_total}</div><div class="metric-foot">artifact sets created</div></div>
-  <div class="metric"><div class="metric-label">Reports</div><div class="metric-value">{report_total}</div><div class="metric-foot">verification summaries present</div></div>
+  {metric_card("Environments", env_total, "configured deployment targets", "/")}
+  {metric_card("Prepared", prepared_total, "workspace states available", "/artifacts")}
+  {metric_card("Generated", generated_total, "artifact sets created", "/artifacts")}
+  {metric_card("Reports", report_total, "verification summaries present", "/artifacts")}
 </section>
 
 <div class="section-head">
@@ -475,15 +602,303 @@ class Handler(BaseHTTPRequestHandler):
 """
             self.send_html(page("Audit Trail - NKP ZeroTouch Console", body, "audit"))
             return
+        if parsed.path == "/settings/connections":
+            settings = read_json(SETTINGS / "connections.json") or {}
+            body = f"""
+<div class="section-head">
+  <div>
+    <h2>Connections</h2>
+    <div class="section-copy">Connection profiles required for Prism Central, registries, proxies, and bundle sources.</div>
+  </div>
+</div>
+<section class="panel">
+  <form method="post" action="/settings/connections/save">
+    <table>
+      <thead><tr><th>Connection</th><th>Value</th></tr></thead>
+      <tbody>
+        <tr><td>Prism Central endpoint</td><td><div class="field"><input name="prism" value="{html.escape(settings.get('prism', 'https://prism-central.example.com:9440'))}"></div></td></tr>
+        <tr><td>Registry endpoint</td><td><div class="field"><input name="registry" value="{html.escape(settings.get('registry', 'registry.example.com'))}"></div></td></tr>
+        <tr><td>HTTP proxy</td><td><div class="field"><input name="http_proxy" value="{html.escape(settings.get('http_proxy', ''))}"></div></td></tr>
+        <tr><td>Standard bundle path</td><td><div class="field"><input name="standard_bundle" value="{html.escape(settings.get('standard_bundle', '/mnt/c/Share/nkp-bundle_v2.17.1_linux_amd64/nkp-v2.17.1'))}"></div></td></tr>
+        <tr><td>Air-gapped bundle path</td><td><div class="field"><input name="airgapped_bundle" value="{html.escape(settings.get('airgapped_bundle', '/mnt/c/Share/nkp-air-gapped-bundle_v2.17.1_linux_amd64/nkp-v2.17.1'))}"></div></td></tr>
+        <tr><td></td><td><button>Save connections</button></td></tr>
+      </tbody>
+    </table>
+  </form>
+</section>
+<div class="notice">Connection profiles are saved locally under <code>.zt/settings/connections.json</code>. Environment YAML remains the deployment source of truth.</div>
+"""
+            self.send_html(page("Connections - NKP ZeroTouch Console", body, "connections"))
+            return
+        if parsed.path == "/settings/new-environment":
+            body = """
+<div class="section-head">
+  <div>
+    <h2>New Environment</h2>
+    <div class="section-copy">Create a deployment profile from the connected, proxied, or air-gapped templates.</div>
+  </div>
+</div>
+<section class="panel">
+  <form method="post" action="/settings/new-environment/create">
+    <table>
+      <thead><tr><th>Field</th><th>Input</th></tr></thead>
+      <tbody>
+        <tr><td>Environment name</td><td><div class="field"><input name="name" value="lab-new" aria-label="Environment name"></div></td></tr>
+        <tr><td>Environment type</td><td><div class="field"><select name="type" aria-label="Environment type"><option>connected</option><option>proxied</option><option>air-gapped</option></select></div></td></tr>
+        <tr><td></td><td><button>Create environment</button></td></tr>
+      </tbody>
+    </table>
+  </form>
+</section>
+<div class="notice">This creates a config under <code>configs/environments/</code> using the same framework helper as <code>scripts/new-env.*</code>.</div>
+"""
+            self.send_html(page("New Environment - NKP ZeroTouch Console", body, "new-environment"))
+            return
+        if parsed.path == "/settings/rbac":
+            rbac = load_rbac()
+            settings = rbac["settings"]
+            roles = rbac["roles"]
+            accounts = rbac["accounts"]
+            enabled_selected = "selected" if settings.get("enabled") == "true" else ""
+            disabled_selected = "selected" if settings.get("enabled") != "true" else ""
+            provider = settings.get("provider", "local")
+            local_selected = "selected" if provider == "local" else ""
+            oidc_selected = "selected" if provider == "oidc" else ""
+            role_options = "".join(
+                f'<option value="{html.escape(role["name"])}">{html.escape(role["name"])}</option>'
+                for role in roles
+            )
+            role_rows = "".join(
+                f"<tr><td><code>{html.escape(role['name'])}</code></td><td>{html.escape(role.get('permissions', ''))}</td><td><span class='chip ok'>Configured</span></td></tr>"
+                for role in roles
+            )
+            account_rows = "".join(
+                f"<tr><td><code>{html.escape(account['username'])}</code></td><td>{html.escape(account.get('displayName', ''))}</td><td>{html.escape(account.get('role', ''))}</td><td><span class='chip {'ok' if account.get('status') == 'active' else 'warn'}'>{html.escape(account.get('status', 'pending'))}</span></td></tr>"
+                for account in accounts
+            )
+            body = f"""
+<div class="section-head">
+  <div>
+    <h2>RBAC</h2>
+    <div class="section-copy">Create local console accounts and roles for future enforcement.</div>
+  </div>
+</div>
+<section class="panel">
+  <form method="post" action="/settings/rbac/save">
+    <table>
+      <thead><tr><th>Setting</th><th>Value</th></tr></thead>
+      <tbody>
+        <tr><td>RBAC enforcement</td><td><div class="field"><select name="enabled"><option value="false" {disabled_selected}>disabled</option><option value="true" {enabled_selected}>enabled</option></select></div></td></tr>
+        <tr><td>Identity provider</td><td><div class="field"><select name="provider"><option value="local" {local_selected}>local</option><option value="oidc" {oidc_selected}>oidc</option></select></div></td></tr>
+        <tr><td>Default admin</td><td><div class="field"><input name="admin" value="{html.escape(settings.get('admin', 'admin'))}"></div></td></tr>
+        <tr><td></td><td><button>Save RBAC settings</button></td></tr>
+      </tbody>
+    </table>
+  </form>
+</section>
+<div class="section-head">
+  <div>
+    <h2>Roles</h2>
+    <div class="section-copy">Define permission bundles for console users.</div>
+  </div>
+</div>
+<section class="panel">
+  <form method="post" action="/settings/rbac/role/create">
+    <table>
+      <thead><tr><th>Role</th><th>Permissions</th><th>Create</th></tr></thead>
+      <tbody>
+        <tr><td><div class="field"><input name="name" value="Deployment Reviewer"></div></td><td><div class="field"><input name="permissions" value="runs, artifacts, audit"></div></td><td><button>Create role</button></td></tr>
+      </tbody>
+    </table>
+  </form>
+  <table>
+    <thead><tr><th>Role</th><th>Permissions</th><th>Status</th></tr></thead>
+    <tbody>{role_rows}</tbody>
+  </table>
+</section>
+<div class="section-head">
+  <div>
+    <h2>Accounts</h2>
+    <div class="section-copy">Create local bootstrap accounts and map them to roles.</div>
+  </div>
+</div>
+<section class="panel">
+  <form method="post" action="/settings/rbac/account/create">
+    <table>
+      <thead><tr><th>Username</th><th>Display Name</th><th>Role</th><th>Status</th><th>Create</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><div class="field"><input name="username" value="operator"></div></td>
+          <td><div class="field"><input name="display_name" value="NKP Operator"></div></td>
+          <td><div class="field"><select name="role">{role_options}</select></div></td>
+          <td><div class="field"><select name="status"><option value="active">active</option><option value="disabled">disabled</option></select></div></td>
+          <td><button>Create account</button></td>
+        </tr>
+      </tbody>
+    </table>
+  </form>
+  <table>
+    <thead><tr><th>Username</th><th>Display Name</th><th>Role</th><th>Status</th></tr></thead>
+    <tbody>{account_rows or '<tr><td colspan="4" class="muted">No local accounts configured yet.</td></tr>'}</tbody>
+  </table>
+</section>
+<div class="notice">Accounts and roles are saved to <code>.zt/settings/rbac.json</code>. Passwords and login enforcement are intentionally not implemented yet.</div>
+"""
+            self.send_html(page("RBAC - NKP ZeroTouch Console", body, "rbac"))
+            return
+        if parsed.path == "/settings/database":
+            settings = read_json(SETTINGS / "database.json") or {}
+            body = f"""
+<div class="section-head">
+  <div>
+    <h2>Database</h2>
+    <div class="section-copy">Persistence backend for future multi-user console state, audit records, and connection profiles.</div>
+  </div>
+</div>
+<section class="panel">
+  <form method="post" action="/settings/database/save">
+    <table>
+      <thead><tr><th>Postgres Setting</th><th>Value</th></tr></thead>
+      <tbody>
+        <tr><td>Host</td><td><div class="field"><input name="host" value="{html.escape(settings.get('host', 'localhost'))}"></div></td></tr>
+        <tr><td>Port</td><td><div class="field"><input name="port" value="{html.escape(settings.get('port', '5432'))}"></div></td></tr>
+        <tr><td>Database</td><td><div class="field"><input name="database" value="{html.escape(settings.get('database', 'nkp_zerotouch'))}"></div></td></tr>
+        <tr><td>Username</td><td><div class="field"><input name="username" value="{html.escape(settings.get('username', 'zt_console'))}"></div></td></tr>
+        <tr><td></td><td><button>Save database settings</button></td></tr>
+      </tbody>
+    </table>
+  </form>
+</section>
+<div class="notice">Database settings are saved locally under <code>.zt/settings/database.json</code>. Raw database passwords are intentionally not stored here.</div>
+"""
+            self.send_html(page("Database - NKP ZeroTouch Console", body, "database"))
+            return
+        if parsed.path == "/about":
+            version = (ROOT / "VERSION").read_text(encoding="utf-8").strip() if (ROOT / "VERSION").exists() else "dev"
+            body = f"""
+<div class="section-head">
+  <div>
+    <h2>About</h2>
+    <div class="section-copy">Veridian ZeroTouch console for Nutanix Kubernetes Platform deployment orchestration.</div>
+  </div>
+</div>
+<section class="settings-grid">
+  <div class="settings-card"><h3>Framework</h3><p>Version <code>{html.escape(version)}</code>. Supports connected, proxied, and air-gapped NKP deployment workflows.</p></div>
+  <div class="settings-card"><h3>Console</h3><p>Local operator interface for safe actions, generated artifacts, settings, accounts, roles, and audit visibility.</p></div>
+  <div class="settings-card"><h3>Safety Model</h3><p>Apply and destructive actions remain CLI-only. The dashboard exposes non-destructive operations and local bootstrap settings.</p></div>
+  <div class="settings-card"><h3>Project Status</h3><p>Community automation framework baseline. Not affiliated with or supported by Nutanix.</p></div>
+</section>
+<div class="notice">RBAC, database, and connection settings are currently local bootstrap configuration. Production authentication, authorization, and database-backed persistence are planned next steps.</div>
+"""
+            self.send_html(page("About - NKP ZeroTouch Console", body, "about"))
+            return
         self.send_html(page("Not Found", "<h2>Not found</h2>"), status=404)
 
     def do_POST(self):
         parsed = urlparse(self.path)
+        length = int(self.headers.get("Content-Length", "0"))
+        form = parse_qs(self.rfile.read(length).decode("utf-8"))
+
+        if parsed.path == "/settings/connections/save":
+            data = {
+                "prism": form_value(form, "prism"),
+                "registry": form_value(form, "registry"),
+                "http_proxy": form_value(form, "http_proxy"),
+                "standard_bundle": form_value(form, "standard_bundle"),
+                "airgapped_bundle": form_value(form, "airgapped_bundle"),
+                "savedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            }
+            write_json(SETTINGS / "connections.json", data)
+            body = "<section class='metric'><div class='metric-label'>Settings Saved</div><div class='metric-value'>Connections</div><div class='metric-foot'><span class='chip ok'>Saved locally</span></div></section><a class='back-link' href='/settings/connections'>Back to connections</a>"
+            self.send_html(page("Connections Saved", body, "connections"))
+            return
+
+        if parsed.path == "/settings/new-environment/create":
+            name = form_value(form, "name")
+            env_type = form_value(form, "type", "connected")
+            code, out, err = create_environment(name, env_type)
+            status_class = "ok" if code == 0 else "warn"
+            body = (
+                "<div class='result-layout'>"
+                f"<section class='metric'><div class='metric-label'>Environment Creation</div><div class='metric-value'>{html.escape(name or 'unnamed')}</div>"
+                f"<div class='metric-foot'><span class='chip {status_class}'>Exit code {code}</span></div></section>"
+                f"<pre>{html.escape(out + err)}</pre>"
+                "<a class='back-link' href='/settings/new-environment'>Back to new environment</a>"
+                "</div>"
+            )
+            self.send_html(page("Environment Creation", body, "new-environment"), status=200 if code == 0 else 500)
+            return
+
+        if parsed.path == "/settings/rbac/save":
+            rbac = load_rbac()
+            data = {
+                "enabled": form_value(form, "enabled", "false"),
+                "provider": form_value(form, "provider", "local"),
+                "admin": form_value(form, "admin", "admin"),
+                "savedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            }
+            rbac["settings"] = data
+            write_json(SETTINGS / "rbac.json", rbac)
+            body = "<section class='metric'><div class='metric-label'>Settings Saved</div><div class='metric-value'>RBAC</div><div class='metric-foot'><span class='chip ok'>Saved locally</span></div></section><a class='back-link' href='/settings/rbac'>Back to RBAC</a>"
+            self.send_html(page("RBAC Saved", body, "rbac"))
+            return
+
+        if parsed.path == "/settings/rbac/role/create":
+            rbac = load_rbac()
+            name = form_value(form, "name")
+            permissions = form_value(form, "permissions")
+            key = safe_key(name)
+            if not key:
+                self.send_html(page("Role Error", "<h2>Role name is required.</h2><a class='back-link' href='/settings/rbac'>Back to RBAC</a>", "rbac"), status=400)
+                return
+            existing = {safe_key(role.get("name", "")) for role in rbac["roles"]}
+            if key not in existing:
+                rbac["roles"].append({"name": name, "permissions": permissions, "createdAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
+                write_json(SETTINGS / "rbac.json", rbac)
+            body = f"<section class='metric'><div class='metric-label'>Role Saved</div><div class='metric-value'>{html.escape(name)}</div><div class='metric-foot'><span class='chip ok'>Configured</span></div></section><a class='back-link' href='/settings/rbac'>Back to RBAC</a>"
+            self.send_html(page("Role Saved", body, "rbac"))
+            return
+
+        if parsed.path == "/settings/rbac/account/create":
+            rbac = load_rbac()
+            username = safe_key(form_value(form, "username"))
+            display_name = form_value(form, "display_name")
+            role = form_value(form, "role")
+            status = form_value(form, "status", "active")
+            if not username:
+                self.send_html(page("Account Error", "<h2>Username is required.</h2><a class='back-link' href='/settings/rbac'>Back to RBAC</a>", "rbac"), status=400)
+                return
+            accounts = [account for account in rbac["accounts"] if safe_key(account.get("username", "")) != username]
+            accounts.append({
+                "username": username,
+                "displayName": display_name,
+                "role": role,
+                "status": status,
+                "createdAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            })
+            rbac["accounts"] = accounts
+            write_json(SETTINGS / "rbac.json", rbac)
+            body = f"<section class='metric'><div class='metric-label'>Account Saved</div><div class='metric-value'>{html.escape(username)}</div><div class='metric-foot'><span class='chip ok'>Mapped to {html.escape(role)}</span></div></section><a class='back-link' href='/settings/rbac'>Back to RBAC</a>"
+            self.send_html(page("Account Saved", body, "rbac"))
+            return
+
+        if parsed.path == "/settings/database/save":
+            data = {
+                "host": form_value(form, "host"),
+                "port": form_value(form, "port"),
+                "database": form_value(form, "database"),
+                "username": form_value(form, "username"),
+                "savedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            }
+            write_json(SETTINGS / "database.json", data)
+            body = "<section class='metric'><div class='metric-label'>Settings Saved</div><div class='metric-value'>Database</div><div class='metric-foot'><span class='chip ok'>Saved locally</span></div></section><a class='back-link' href='/settings/database'>Back to database</a>"
+            self.send_html(page("Database Saved", body, "database"))
+            return
+
         if parsed.path != "/action":
             self.send_html(page("Not Found", "<h2>Not found</h2>"), status=404)
             return
-        length = int(self.headers.get("Content-Length", "0"))
-        form = parse_qs(self.rfile.read(length).decode("utf-8"))
+
         action = form.get("action", [""])[0]
         config = Path(form.get("config", [""])[0])
         if action not in SAFE_ACTIONS:

@@ -1,0 +1,36 @@
+environment:
+  name: lab-connected
+  type: connected
+
+nkp:
+  version: v2.17.1
+  bundleType: standard
+  bundlePath: /mnt/c/Share/nkp-bundle_v2.17.1_linux_amd64/nkp-v2.17.1
+  cliPath: /mnt/c/Share/nkp-bundle_v2.17.1_linux_amd64/nkp-v2.17.1/cli/nkp
+  kubectlPath: /mnt/c/Share/nkp-bundle_v2.17.1_linux_amd64/nkp-v2.17.1/kubectl
+
+nutanix:
+  prismCentralEndpoint: https://prism-central.example.com:9440
+  clusterName: nutanix-cluster
+  subnetName: vlan-k8s
+  imageName: nkp-node-image
+  storageContainer: default-container
+  project: default
+
+cluster:
+  name: nkp-mgmt-connected
+  kubernetesVersion: 1.34.3
+  controlPlaneEndpointIp: 10.10.10.50
+  controlPlaneEndpointPort: 6443
+  controlPlaneReplicas: 3
+  workerReplicas: 3
+  podCidr: 192.168.0.0/16
+  serviceCidr: 10.96.0.0/12
+  loadBalancerIpRange: 10.10.10.100-10.10.10.120
+  ntpServers:
+    - 0.pool.ntp.org
+    - 1.pool.ntp.org
+  sshPublicKeyFile: /home/nkp/.ssh/id_rsa.pub
+  sshUsername: nutanix
+  selfManaged: true
+  fips: false
