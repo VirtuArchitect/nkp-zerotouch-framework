@@ -8,12 +8,18 @@ import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, urlparse
+
+try:
+    import yaml
+except ImportError:
+    yaml = None
 
 
 ROOT = Path(__file__).resolve().parents[1]
 ZT = ROOT / ".zt"
 SETTINGS = ZT / "settings"
+ENV_DIR = ROOT / "configs" / "environments"
 SAFE_ACTIONS = {"validate", "prepare", "generate", "verify", "backup", "runs"}
 ACTION_ORDER = ["validate", "prepare", "generate", "verify", "backup", "runs"]
 VIEW_PATHS = {
@@ -45,7 +51,62 @@ def write_json(path, data):
 
 
 def env_configs():
-    return sorted((ROOT / "configs" / "environments").glob("*.yaml"))
+    return sorted(ENV_DIR.glob("*.yaml"))
+
+
+def resolve_env_config(raw_path):
+    if not raw_path:
+        raise ValueError("Missing environment config path.")
+    candidate = Path(raw_path)
+    if not candidate.is_absolute():
+        candidate = ROOT / candidate
+    resolved = candidate.resolve()
+    env_root = ENV_DIR.resolve()
+    if resolved.parent != env_root or resolved.suffix not in {".yaml", ".yml"}:
+        raise ValueError("Environment config path is outside configs/environments.")
+    if not resolved.exists():
+        raise ValueError(f"Environment config not found: {resolved.name}")
+    return resolved
+
+
+def load_env_yaml(config):
+    if yaml is None:
+        raise RuntimeError("PyYAML is required to edit environment files.")
+    data = yaml.safe_load(config.read_text(encoding="utf-8")) or {}
+    if not isinstance(data, dict):
+        raise ValueError("Environment config must be a YAML mapping.")
+    return data
+
+
+def write_env_yaml(config, data):
+    if yaml is None:
+        raise RuntimeError("PyYAML is required to edit environment files.")
+    config.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+
+def nested_get(data, path, default=""):
+    cursor = data
+    for key in path:
+        if not isinstance(cursor, dict):
+            return default
+        cursor = cursor.get(key, default)
+    if cursor is None:
+        return default
+    return cursor
+
+
+def nested_set(data, path, value):
+    cursor = data
+    for key in path[:-1]:
+        cursor = cursor.setdefault(key, {})
+    cursor[path[-1]] = value
+
+
+def int_or_original(value):
+    try:
+        return int(value)
+    except ValueError:
+        return value
 
 
 def env_state(name):
@@ -339,6 +400,15 @@ def page(title, body, active="environments"):
       color: #263449; font-weight: 700; font-size: 12px;
     }}
     button:hover {{ background: var(--accent-soft); border-color: #9bb8f5; color: #1746a2; }}
+    .button-link {{
+      display: inline-flex; align-items: center; min-height: 32px;
+      border: 1px solid var(--line-strong); background: #fff;
+      padding: 0 10px; border-radius: 6px; color: #263449;
+      font-weight: 700; font-size: 12px;
+    }}
+    .button-link:hover {{ background: var(--accent-soft); border-color: #9bb8f5; color: #1746a2; }}
+    .button-danger {{ border-color: #f0b4af; color: var(--bad); }}
+    .button-danger:hover {{ background: var(--bad-soft); border-color: #f0b4af; color: var(--bad); }}
     .run-list {{ list-style: none; margin: 0; padding: 0; }}
     .run-list li {{
       display: flex; align-items: center; justify-content: space-between;
@@ -452,13 +522,19 @@ class Handler(BaseHTTPRequestHandler):
                     f'<form method="post" action="/action"><input type="hidden" name="action" value="{a}"><input type="hidden" name="config" value="{html.escape(str(config))}"><button>{a}</button></form> '
                     for a in ACTION_ORDER
                 )
+                config_arg = quote(str(config))
+                manage_buttons = (
+                    f'<a class="button-link" href="/environment/edit?config={config_arg}">edit</a> '
+                    f'<a class="button-link button-danger" href="/environment/delete?config={config_arg}">delete</a>'
+                )
                 rows.append(
                     f"<tr><td><div class='env-name'>{html.escape(name)}</div><div class='env-file'>{html.escape(config.name)}</div></td>"
                     f"<td><span class='badge {html.escape(env_type)}'>{html.escape(env_type)}</span></td>"
                     f"<td><span class='chip {'ok' if prepared else 'warn'}'>{'Ready' if prepared else 'Pending'}</span></td>"
                     f"<td><span class='chip {'ok' if generated else 'warn'}'>{'Generated' if generated else 'Pending'}</span></td>"
                     f"<td><span class='chip {'ok' if report else 'warn'}'>{'Available' if report else 'Missing'}</span></td>"
-                    f"<td class='actions'>{buttons}</td></tr>"
+                    f"<td class='actions'>{buttons}</td>"
+                    f"<td class='actions'>{manage_buttons}</td></tr>"
                 )
             runs = sorted((ZT / "runs").glob("*/summary.md")) if (ZT / "runs").exists() else []
             recent_runs = list(reversed(runs[-10:]))
@@ -482,7 +558,7 @@ class Handler(BaseHTTPRequestHandler):
 </div>
 <section class="panel">
   <table>
-    <thead><tr><th>Name</th><th>Type</th><th>Prepared</th><th>Generated</th><th>Report</th><th>Safe Actions</th></tr></thead>
+    <thead><tr><th>Name</th><th>Type</th><th>Prepared</th><th>Generated</th><th>Report</th><th>Safe Actions</th><th>Manage</th></tr></thead>
     <tbody>{''.join(rows)}</tbody>
   </table>
 </section>
@@ -499,6 +575,96 @@ class Handler(BaseHTTPRequestHandler):
 <div class="notice">Destructive and apply actions are intentionally CLI-only. This console exposes validation, preparation, generation, verification, backup, and run inspection workflows.</div>
 """
             self.send_html(page("NKP ZeroTouch Console", body, "environments"))
+            return
+        if parsed.path == "/environment/edit":
+            query = parse_qs(parsed.query)
+            try:
+                config = resolve_env_config(query.get("config", [""])[0])
+                data = load_env_yaml(config)
+            except Exception as exc:
+                self.send_html(page("Edit Environment", f"<h2>Edit unavailable</h2><div class='notice'>{html.escape(str(exc))}</div><a class='back-link' href='/'>Back to environments</a>", "environments"), status=400)
+                return
+            body = f"""
+<div class="section-head">
+  <div>
+    <h2>Edit Environment</h2>
+    <div class="section-copy">Update core deployment settings for <code>{html.escape(config.name)}</code>.</div>
+  </div>
+</div>
+<section class="panel">
+  <form method="post" action="/environment/edit/save">
+    <input type="hidden" name="config" value="{html.escape(str(config))}">
+    <table>
+      <thead><tr><th>Setting</th><th>Value</th></tr></thead>
+      <tbody>
+        <tr><td>Environment name</td><td><div class="field"><input name="environment_name" value="{html.escape(str(nested_get(data, ['environment', 'name'])))}"></div></td></tr>
+        <tr><td>Environment type</td><td><div class="field"><select name="environment_type">
+          <option value="connected" {'selected' if nested_get(data, ['environment', 'type']) == 'connected' else ''}>connected</option>
+          <option value="proxied" {'selected' if nested_get(data, ['environment', 'type']) == 'proxied' else ''}>proxied</option>
+          <option value="air-gapped" {'selected' if nested_get(data, ['environment', 'type']) == 'air-gapped' else ''}>air-gapped</option>
+        </select></div></td></tr>
+        <tr><td>NKP version</td><td><div class="field"><input name="nkp_version" value="{html.escape(str(nested_get(data, ['nkp', 'version'])))}"></div></td></tr>
+        <tr><td>Bundle type</td><td><div class="field"><select name="bundle_type">
+          <option value="standard" {'selected' if nested_get(data, ['nkp', 'bundleType']) == 'standard' else ''}>standard</option>
+          <option value="air-gapped" {'selected' if nested_get(data, ['nkp', 'bundleType']) == 'air-gapped' else ''}>air-gapped</option>
+        </select></div></td></tr>
+        <tr><td>Bundle path</td><td><div class="field"><input name="bundle_path" value="{html.escape(str(nested_get(data, ['nkp', 'bundlePath'])))}"></div></td></tr>
+        <tr><td>Prism Central endpoint</td><td><div class="field"><input name="prism_endpoint" value="{html.escape(str(nested_get(data, ['nutanix', 'prismCentralEndpoint'])))}"></div></td></tr>
+        <tr><td>Nutanix cluster</td><td><div class="field"><input name="nutanix_cluster" value="{html.escape(str(nested_get(data, ['nutanix', 'clusterName'])))}"></div></td></tr>
+        <tr><td>Subnet</td><td><div class="field"><input name="subnet" value="{html.escape(str(nested_get(data, ['nutanix', 'subnetName'])))}"></div></td></tr>
+        <tr><td>Image name</td><td><div class="field"><input name="image_name" value="{html.escape(str(nested_get(data, ['nutanix', 'imageName'])))}"></div></td></tr>
+        <tr><td>Cluster name</td><td><div class="field"><input name="cluster_name" value="{html.escape(str(nested_get(data, ['cluster', 'name'])))}"></div></td></tr>
+        <tr><td>Kubernetes version</td><td><div class="field"><input name="kubernetes_version" value="{html.escape(str(nested_get(data, ['cluster', 'kubernetesVersion'])))}"></div></td></tr>
+        <tr><td>Control plane replicas</td><td><div class="field"><input name="control_plane_replicas" value="{html.escape(str(nested_get(data, ['cluster', 'controlPlaneReplicas'])))}"></div></td></tr>
+        <tr><td>Worker replicas</td><td><div class="field"><input name="worker_replicas" value="{html.escape(str(nested_get(data, ['cluster', 'workerReplicas'])))}"></div></td></tr>
+        <tr><td>Registry endpoint</td><td><div class="field"><input name="registry_endpoint" value="{html.escape(str(nested_get(data, ['registry', 'endpoint'])))}"></div></td></tr>
+        <tr><td>Registry namespace</td><td><div class="field"><input name="registry_namespace" value="{html.escape(str(nested_get(data, ['registry', 'namespace'])))}"></div></td></tr>
+        <tr><td></td><td><button>Save environment</button> <a class="button-link" href="/">Cancel</a></td></tr>
+      </tbody>
+    </table>
+  </form>
+</section>
+<div class="notice">Advanced settings remain available by editing the YAML directly. This form updates common deployment fields only.</div>
+"""
+            self.send_html(page("Edit Environment - NKP ZeroTouch Console", body, "environments"))
+            return
+        if parsed.path == "/environment/delete":
+            query = parse_qs(parsed.query)
+            try:
+                config = resolve_env_config(query.get("config", [""])[0])
+                data = load_env_yaml(config)
+            except Exception as exc:
+                self.send_html(page("Delete Environment", f"<h2>Delete unavailable</h2><div class='notice'>{html.escape(str(exc))}</div><a class='back-link' href='/'>Back to environments</a>", "environments"), status=400)
+                return
+            env_name = str(nested_get(data, ["environment", "name"], config.stem))
+            protected = config.name.endswith(".example.yaml")
+            protected_notice = "<div class='notice'>Example environment templates are protected and cannot be deleted from the console.</div>" if protected else ""
+            disabled = "disabled" if protected else ""
+            body = f"""
+<div class="section-head">
+  <div>
+    <h2>Delete Environment</h2>
+    <div class="section-copy">Confirm deletion for <code>{html.escape(config.name)}</code>.</div>
+  </div>
+</div>
+<section class="panel">
+  <form method="post" action="/environment/delete/confirm">
+    <input type="hidden" name="config" value="{html.escape(str(config))}">
+    <table>
+      <thead><tr><th>Item</th><th>Value</th></tr></thead>
+      <tbody>
+        <tr><td>Environment</td><td><code>{html.escape(env_name)}</code></td></tr>
+        <tr><td>Config file</td><td><span class="muted">{html.escape(str(config.relative_to(ROOT)))}</span></td></tr>
+        <tr><td>Confirmation</td><td><div class="field"><input name="confirm" placeholder="Type {html.escape(env_name)} to confirm"></div></td></tr>
+        <tr><td>Delete local state</td><td><label><input type="checkbox" name="delete_state" value="yes"> also remove <code>.zt/environments/{html.escape(env_name)}</code></label></td></tr>
+        <tr><td></td><td><button class="button-danger" {disabled}>Delete environment</button> <a class="button-link" href="/">Cancel</a></td></tr>
+      </tbody>
+    </table>
+  </form>
+</section>
+{protected_notice}
+"""
+            self.send_html(page("Delete Environment - NKP ZeroTouch Console", body, "environments"))
             return
         if parsed.path == "/runs":
             run_rows = "".join(
@@ -893,6 +1059,61 @@ class Handler(BaseHTTPRequestHandler):
             write_json(SETTINGS / "database.json", data)
             body = "<section class='metric'><div class='metric-label'>Settings Saved</div><div class='metric-value'>Database</div><div class='metric-foot'><span class='chip ok'>Saved locally</span></div></section><a class='back-link' href='/settings/database'>Back to database</a>"
             self.send_html(page("Database Saved", body, "database"))
+            return
+
+        if parsed.path == "/environment/edit/save":
+            try:
+                config = resolve_env_config(form_value(form, "config"))
+                data = load_env_yaml(config)
+                field_map = {
+                    "environment_name": (["environment", "name"], str),
+                    "environment_type": (["environment", "type"], str),
+                    "nkp_version": (["nkp", "version"], str),
+                    "bundle_type": (["nkp", "bundleType"], str),
+                    "bundle_path": (["nkp", "bundlePath"], str),
+                    "prism_endpoint": (["nutanix", "prismCentralEndpoint"], str),
+                    "nutanix_cluster": (["nutanix", "clusterName"], str),
+                    "subnet": (["nutanix", "subnetName"], str),
+                    "image_name": (["nutanix", "imageName"], str),
+                    "cluster_name": (["cluster", "name"], str),
+                    "kubernetes_version": (["cluster", "kubernetesVersion"], str),
+                    "control_plane_replicas": (["cluster", "controlPlaneReplicas"], int_or_original),
+                    "worker_replicas": (["cluster", "workerReplicas"], int_or_original),
+                    "registry_endpoint": (["registry", "endpoint"], str),
+                    "registry_namespace": (["registry", "namespace"], str),
+                }
+                for key, (path, converter) in field_map.items():
+                    nested_set(data, path, converter(form_value(form, key)))
+                write_env_yaml(config, data)
+            except Exception as exc:
+                self.send_html(page("Environment Save Error", f"<h2>Save failed</h2><div class='notice'>{html.escape(str(exc))}</div><a class='back-link' href='/'>Back to environments</a>", "environments"), status=400)
+                return
+            body = f"<section class='metric'><div class='metric-label'>Environment Saved</div><div class='metric-value'>{html.escape(config.name)}</div><div class='metric-foot'><span class='chip ok'>YAML updated</span></div></section><a class='back-link' href='/'>Back to environments</a>"
+            self.send_html(page("Environment Saved", body, "environments"))
+            return
+
+        if parsed.path == "/environment/delete/confirm":
+            try:
+                config = resolve_env_config(form_value(form, "config"))
+                if config.name.endswith(".example.yaml"):
+                    raise ValueError("Example environment templates cannot be deleted from the console.")
+                data = load_env_yaml(config)
+                env_name = str(nested_get(data, ["environment", "name"], config.stem))
+                if form_value(form, "confirm") != env_name:
+                    raise ValueError(f"Confirmation must exactly match environment name: {env_name}")
+                config.unlink()
+                removed_state = False
+                if form_value(form, "delete_state") == "yes":
+                    state_dir = ZT / "environments" / env_name
+                    if state_dir.exists() and state_dir.resolve().is_relative_to((ZT / "environments").resolve()):
+                        shutil.rmtree(state_dir)
+                        removed_state = True
+            except Exception as exc:
+                self.send_html(page("Environment Delete Error", f"<h2>Delete failed</h2><div class='notice'>{html.escape(str(exc))}</div><a class='back-link' href='/'>Back to environments</a>", "environments"), status=400)
+                return
+            state_note = "Config and local state removed" if removed_state else "Config removed"
+            body = f"<section class='metric'><div class='metric-label'>Environment Deleted</div><div class='metric-value'>{html.escape(env_name)}</div><div class='metric-foot'><span class='chip ok'>{html.escape(state_note)}</span></div></section><a class='back-link' href='/'>Back to environments</a>"
+            self.send_html(page("Environment Deleted", body, "environments"))
             return
 
         if parsed.path != "/action":
