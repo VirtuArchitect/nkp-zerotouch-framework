@@ -21,15 +21,16 @@ Before live deployment, operations teams must provide:
 - Local login/logout with password-hashed RBAC accounts.
 - Local account and role management.
 - Environment create, edit, and delete.
+- Environment identity safeguards for duplicate names, cluster names, API VIPs, and registry namespaces.
 - CSRF protection on authenticated POST forms.
 - Route-level RBAC for operations, settings, jobs, approvals, artifacts, audit, and health.
 - Safe action execution through background jobs: validate, prepare, generate, verify, backup, runs.
 - Apply action requests through approval-gated jobs.
 - Job approval, reject, cancel, retry, detail, and captured log views.
 - Runs, artifacts, health checks, and append-only audit visibility from `.zt`.
-- Artifact viewer for generated plans, reports, logs, and configs.
+- Artifact viewer and diff workflow for generated plans, reports, logs, state, and configs.
 - Local connection, RBAC, database, integration, approval policy, source, inventory, network, provider, and secret-backend settings.
-- Enterprise integration contracts for Postgres, Vault, and OIDC metadata.
+- Enterprise integration contracts and health probes for Postgres, Vault, OIDC, and session-store consistency.
 
 ## Required Production Hardening
 
@@ -42,7 +43,7 @@ Before exposing this console beyond a trusted operator workstation:
 - Connect Vault or an equivalent external secret backend.
 - Review and tune role separation for authoring, approving, and executing deployment changes.
 - Add backup/restore procedures for `.zt` state and future database state.
-- Extend health checks with authenticated Prism Central and registry API validation.
+- Extend health checks from TCP and credential-environment validation to authenticated Prism Central and registry API validation.
 
 ## Recommended Operating Model
 
@@ -53,7 +54,7 @@ Keep live apply operations deliberate and controlled:
 2. Run `validate`.
 3. Run `prepare`.
 4. Run `generate`.
-5. Review generated artifacts and runbooks.
+5. Review generated artifacts, compare diffs, and approve runbooks.
 6. For air-gapped environments, run registry planning and approved image push.
 7. Request live deploy from the controlled CLI window.
 8. Obtain required approval under the configured approval policy.

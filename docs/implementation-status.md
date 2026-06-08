@@ -20,10 +20,12 @@ This maps the public-readiness and real-deployment tasks to the repository featu
 | CSRF protection | Implemented | authenticated POST forms receive and validate CSRF tokens |
 | Route-level RBAC | Implemented baseline | routes are mapped to permissions and enforced for local roles |
 | Audit events | Implemented baseline | append-only `.zt/audit/events.jsonl` for logins, settings, jobs, approvals, and environment changes |
-| Health checks | Implemented baseline | console health page for runner, tools, bundles, Prism, and registry |
+| Health checks | Implemented baseline | console health page for runner, tools, bundles, Prism, registry, credential variables, and enterprise integration probes |
 | Artifact viewer | Implemented | generated plans, reports, logs, and allowed config/docs files can be opened from the console |
+| Artifact diff/review | Implemented baseline | allowed artifacts can be compared from the console before operational use |
+| Environment uniqueness checks | Implemented baseline | environment create/edit blocks duplicate names, cluster names, API VIPs, and registry namespaces |
 | Approval policy | Implemented baseline | per-action approval thresholds, self-approval prevention, production Admin option |
-| Enterprise integrations | Configured baseline | Postgres, Vault, OIDC, and session-store metadata under Settings > Integrations |
+| Enterprise integrations | Probed baseline | Postgres TCP, Vault health, OIDC discovery, and session-store consistency checks under Settings > Integrations, Health, and Preflight |
 | Kubeconfig capture | Implemented | `kubeconfig` phase |
 | Registry push enhancements | Implemented | CA, insecure, concurrency, existing-tag behavior |
 | Containerized runner | Implemented | `Dockerfile`, `Containerfile`, `docs/container-runner.md` |

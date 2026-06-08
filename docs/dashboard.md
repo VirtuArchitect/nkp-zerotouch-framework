@@ -48,14 +48,19 @@ Deployment readiness sections:
 - `Sources`: NKP bundle paths, source path, Git URL/ref, version pin, and checksum metadata.
 - `Inventory`: AHV or future bare-metal node inventory, BMC details, boot mode, and OS image notes.
 - `Network`: management/workload CIDRs, API VIP, ingress range, DNS, NTP, proxy, and IP assignment mode.
-- `Preflight`: console-level readiness matrix across sources, inventory, network, connections, secrets, and provider.
+- `Preflight`: console-level readiness matrix across sources, inventory, network, connections, integration probes, uniqueness checks, secrets, and provider.
 - `Pipeline`: visual ZeroTouch flow from source intake through validation, preparation, generation, registry, deploy, verify, and operate.
 - `Jobs`: execution queue, approval controls, job detail pages, and captured live logs.
-- `Health`: runner, tool, bundle, Prism, registry, and state-path readiness.
-- `Artifacts`: generated file browser and viewer for plans, logs, reports, and configs.
+- `Health`: runner, tool, bundle, Prism, registry, credential environment variables, enterprise integration probes, and state-path readiness.
+- `Artifacts`: generated file browser, viewer, and diff workflow for plans, logs, reports, state, and configs.
 
 Settings sections:
 
 - `Providers`: default provider intent and runner type.
 - `Secrets`: metadata for local-file or external secret backends. Secret values are not stored by the dashboard.
-- `Integrations`: Postgres, Vault, OIDC, and session-store integration metadata.
+- `Integrations`: Postgres, Vault, OIDC, and session-store integration metadata with endpoint/discovery health probes.
+
+Environment safeguards:
+
+- New environment creation rewrites copied template identity fields so operators do not accidentally create another `lab-connected` target.
+- Environment create/edit workflows block duplicate environment names, cluster names, API VIPs, and registry namespaces before YAML is saved.

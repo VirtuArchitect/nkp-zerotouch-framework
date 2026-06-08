@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import difflib
 import html
 import hashlib
 import json
@@ -15,6 +16,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlparse
+from urllib.request import Request, urlopen
 
 try:
     import yaml
@@ -279,10 +281,22 @@ def preflight_checks():
     checks.append({"area": "Network", "check": "API endpoint VIP", "status": "ok" if network.get("api_vip") else "warn", "note": network.get("api_vip") or "not configured"})
     checks.append({"area": "Network", "check": "DNS servers", "status": "ok" if network.get("dns_servers") else "warn", "note": network.get("dns_servers") or "not configured"})
     checks.append({"area": "Network", "check": "NTP servers", "status": "ok" if network.get("ntp_servers") else "warn", "note": network.get("ntp_servers") or "not configured"})
-    checks.append({"area": "Connections", "check": "Prism Central", "status": "ok" if connections.get("prism") and ".example.com" not in connections.get("prism", "") else "warn", "note": connections.get("prism", "not configured")})
-    checks.append({"area": "Connections", "check": "Registry", "status": "ok" if connections.get("registry") and ".example.com" not in connections.get("registry", "") else "warn", "note": connections.get("registry", "not configured")})
+    prism_ok, prism_note = check_tcp_endpoint(connections.get("prism", ""), 9440)
+    registry_ok, registry_note = check_tcp_endpoint(connections.get("registry", ""), 443)
+    checks.append({"area": "Connections", "check": "Prism Central", "status": "ok" if prism_ok else "warn", "note": prism_note})
+    checks.append({"area": "Connections", "check": "Registry", "status": "ok" if registry_ok else "warn", "note": registry_note})
+    checks.append({"area": "Connections", "check": "Prism credentials", "status": "ok" if os.environ.get("NUTANIX_PC_USERNAME") and os.environ.get("NUTANIX_PC_PASSWORD") else "warn", "note": "environment variables present" if os.environ.get("NUTANIX_PC_USERNAME") and os.environ.get("NUTANIX_PC_PASSWORD") else "NUTANIX_PC_USERNAME/NUTANIX_PC_PASSWORD not set"})
+    checks.append({"area": "Connections", "check": "Registry credentials", "status": "ok" if os.environ.get("ZT_REGISTRY_USERNAME") and os.environ.get("ZT_REGISTRY_PASSWORD") else "warn", "note": "environment variables present" if os.environ.get("ZT_REGISTRY_USERNAME") and os.environ.get("ZT_REGISTRY_PASSWORD") else "ZT_REGISTRY_USERNAME/ZT_REGISTRY_PASSWORD not set"})
     checks.append({"area": "Secrets", "check": "Secrets backend", "status": "ok" if secrets_cfg.get("backend") not in {"local-file", ""} else "warn", "note": secrets_cfg.get("backend", "local-file")})
     checks.append({"area": "Provider", "check": "Default provider", "status": "ok", "note": providers.get("default_provider", "nutanix-ahv")})
+    for name, status, note in integration_checks():
+        checks.append({"area": "Integrations", "check": name, "status": status, "note": note})
+    uniqueness = environment_uniqueness_issues()
+    if uniqueness:
+        for issue in uniqueness:
+            checks.append({"area": "Uniqueness", "check": "Environment identity", "status": "warn", "note": issue})
+    else:
+        checks.append({"area": "Uniqueness", "check": "Environment identity", "status": "ok", "note": "no duplicate names, clusters, VIPs, or namespaces"})
     return checks
 
 
@@ -486,6 +500,131 @@ def check_tcp_endpoint(endpoint, default_port=443, timeout=2):
         return False, str(exc)
 
 
+def http_probe(url, headers=None, timeout=3):
+    if not url or ".example.com" in url:
+        return "warn", "not configured"
+    try:
+        request = Request(url, headers=headers or {}, method="GET")
+        with urlopen(request, timeout=timeout) as response:
+            return "ok", f"HTTP {response.status}"
+    except Exception as exc:
+        return "warn", str(exc)
+
+
+def postgres_status(settings):
+    if settings.get("postgres_enabled") != "true":
+        return "warn", "disabled"
+    dsn = settings.get("postgres_dsn", "")
+    if not dsn:
+        return "warn", "DSN missing"
+    parsed = urlparse(dsn)
+    host = parsed.hostname
+    if not host:
+        return "warn", "DSN host missing"
+    endpoint = f"{host}:{parsed.port or 5432}"
+    reachable, note = check_tcp_endpoint(endpoint, 5432)
+    return ("ok" if reachable else "warn"), note
+
+
+def oidc_status(settings):
+    if settings.get("oidc_enabled") != "true":
+        return "warn", "disabled"
+    issuer = settings.get("oidc_issuer", "").rstrip("/")
+    client_id = settings.get("oidc_client_id", "")
+    if not issuer or not client_id:
+        return "warn", "issuer/client ID missing"
+    status, note = http_probe(f"{issuer}/.well-known/openid-configuration")
+    return status, f"discovery {note}"
+
+
+def vault_status(settings):
+    if settings.get("vault_enabled") != "true":
+        return "warn", "disabled"
+    addr = settings.get("vault_addr", "").rstrip("/")
+    if not addr:
+        return "warn", "Vault address missing"
+    headers = {}
+    token = os.environ.get("VAULT_TOKEN", "")
+    if token:
+        headers["X-Vault-Token"] = token
+    status, note = http_probe(f"{addr}/v1/sys/health", headers=headers)
+    return status, f"health {note}"
+
+
+def integration_checks():
+    settings = load_setting("integrations", default_integrations())
+    postgres = postgres_status(settings)
+    oidc = oidc_status(settings)
+    vault = vault_status(settings)
+    session_store = settings.get("session_store", "memory")
+    session_status = "ok" if session_store != "postgres" or settings.get("postgres_enabled") == "true" else "warn"
+    session_note = f"{session_store}" if session_status == "ok" else "postgres session store requires Postgres"
+    return [
+        ("Postgres", postgres[0], postgres[1]),
+        ("OIDC", oidc[0], oidc[1]),
+        ("Vault", vault[0], vault[1]),
+        ("Session store", session_status, session_note),
+    ]
+
+
+def environment_inventory(extra=None, exclude=None):
+    rows = []
+    exclude_path = Path(exclude).resolve() if exclude else None
+    for config in env_configs():
+        if exclude_path and config.resolve() == exclude_path:
+            continue
+        try:
+            data = load_env_yaml(config)
+        except Exception:
+            continue
+        rows.append({
+            "config": config,
+            "environment": str(nested_get(data, ["environment", "name"], config.stem)).strip(),
+            "cluster": str(nested_get(data, ["cluster", "name"], "")).strip(),
+            "api_vip": str(nested_get(data, ["cluster", "controlPlaneEndpointIp"], "")).strip(),
+            "registry_namespace": str(nested_get(data, ["registry", "namespace"], "")).strip(),
+        })
+    if extra:
+        rows.append(extra)
+    return rows
+
+
+def environment_uniqueness_issues(extra=None, exclude=None):
+    fields = [
+        ("environment", "Environment name"),
+        ("cluster", "Cluster name"),
+        ("api_vip", "API endpoint VIP"),
+        ("registry_namespace", "Registry namespace"),
+    ]
+    issues = []
+    rows = environment_inventory(extra=extra, exclude=exclude)
+    for key, label in fields:
+        seen = {}
+        for row in rows:
+            value = row.get(key, "")
+            if not value:
+                continue
+            normalized = value.lower()
+            seen.setdefault(normalized, []).append(row)
+        for value, matches in seen.items():
+            if len(matches) > 1:
+                configs = ", ".join(match["config"].name for match in matches)
+                issues.append(f"{label} '{matches[0].get(key)}' is duplicated in {configs}.")
+    return issues
+
+
+def artifact_files():
+    roots = [ZT, ROOT / "docs", ROOT / "configs"]
+    files = []
+    for root in roots:
+        if not root.exists():
+            continue
+        for path in root.rglob("*"):
+            if path.is_file() and path.suffix.lower() in {".json", ".yaml", ".yml", ".md", ".txt", ".log", ".sh", ".ps1"}:
+                files.append(path)
+    return sorted(files, key=lambda item: str(item.relative_to(ROOT) if ROOT in item.parents else item))
+
+
 def health_checks():
     sources = load_setting("sources", default_sources())
     connections = read_json(SETTINGS / "connections.json") or {}
@@ -502,6 +641,10 @@ def health_checks():
     checks.append(("Prism Central", "ok" if prism_ok else "warn", prism_note))
     reg_ok, reg_note = check_tcp_endpoint(connections.get("registry", ""), 443)
     checks.append(("Registry", "ok" if reg_ok else "warn", reg_note))
+    checks.append(("Prism credentials", "ok" if os.environ.get("NUTANIX_PC_USERNAME") and os.environ.get("NUTANIX_PC_PASSWORD") else "warn", "environment variables present" if os.environ.get("NUTANIX_PC_USERNAME") and os.environ.get("NUTANIX_PC_PASSWORD") else "NUTANIX_PC_USERNAME/NUTANIX_PC_PASSWORD not set"))
+    checks.append(("Registry credentials", "ok" if os.environ.get("ZT_REGISTRY_USERNAME") and os.environ.get("ZT_REGISTRY_PASSWORD") else "warn", "environment variables present" if os.environ.get("ZT_REGISTRY_USERNAME") and os.environ.get("ZT_REGISTRY_PASSWORD") else "ZT_REGISTRY_USERNAME/ZT_REGISTRY_PASSWORD not set"))
+    for name, status, note in integration_checks():
+        checks.append((f"Integration: {name}", status, note))
     return checks
 
 
@@ -1488,6 +1631,7 @@ class Handler(BaseHTTPRequestHandler):
     <h2>Artifacts</h2>
     <div class="section-copy">Generated plans, reports, state files, and staged environment outputs.</div>
   </div>
+  <a class="button-link" href="/artifacts/diff">Compare artifacts</a>
 </div>
 <section class="panel">
   <table>
@@ -1497,6 +1641,52 @@ class Handler(BaseHTTPRequestHandler):
 </section>
 """
             self.send_html(page("Artifacts - NKP ZeroTouch Console", body, "artifacts"))
+            return
+        if parsed.path == "/artifacts/diff":
+            query = parse_qs(parsed.query)
+            files = artifact_files()
+            options = []
+            for artifact in files:
+                label = str(artifact.relative_to(ROOT) if ROOT in artifact.parents else artifact)
+                value = str(artifact)
+                options.append(f'<option value="{html.escape(value)}">{html.escape(label)}</option>')
+            diff_html = '<div class="notice">Select two artifacts to compare generated plans, state, reports, or environment YAML.</div>'
+            left_label = right_label = ""
+            if query.get("left") and query.get("right"):
+                try:
+                    left = resolve_artifact(query.get("left", [""])[0])
+                    right = resolve_artifact(query.get("right", [""])[0])
+                    left_text = left.read_text(encoding="utf-8", errors="replace").splitlines()
+                    right_text = right.read_text(encoding="utf-8", errors="replace").splitlines()
+                    left_label = str(left.relative_to(ROOT) if ROOT in left.parents else left)
+                    right_label = str(right.relative_to(ROOT) if ROOT in right.parents else right)
+                    diff = "\n".join(difflib.unified_diff(left_text, right_text, fromfile=left_label, tofile=right_label, lineterm=""))
+                    diff_html = f"<pre>{html.escape(diff[:200000] or 'No differences found.')}</pre>"
+                except Exception as exc:
+                    diff_html = f"<div class='notice'>Diff unavailable: {html.escape(str(exc))}</div>"
+            body = f"""
+<div class="section-head">
+  <div>
+    <h2>Artifact Diff</h2>
+    <div class="section-copy">Compare generated plans, reports, state files, and environment YAML before operational use.</div>
+  </div>
+</div>
+<section class="panel">
+  <form method="get" action="/artifacts/diff">
+    <table>
+      <thead><tr><th>Side</th><th>Artifact</th></tr></thead>
+      <tbody>
+        <tr><td>Left</td><td><div class="field"><select name="left">{''.join(options)}</select></div></td></tr>
+        <tr><td>Right</td><td><div class="field"><select name="right">{''.join(options)}</select></div></td></tr>
+        <tr><td></td><td><button>Compare</button></td></tr>
+      </tbody>
+    </table>
+  </form>
+</section>
+{diff_html}
+<a class="back-link" href="/artifacts">Back to artifacts</a>
+"""
+            self.send_html(page("Artifact Diff - NKP ZeroTouch Console", body, "artifacts"))
             return
         if parsed.path == "/artifacts/view":
             query = parse_qs(parsed.query)
@@ -2058,27 +2248,23 @@ class Handler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/settings/integrations":
             settings = load_setting("integrations", default_integrations())
-            postgres_ok, postgres_note = ("warn", "disabled")
-            if settings.get("postgres_enabled") == "true":
-                postgres_ok, postgres_note = ("ok", "configured") if settings.get("postgres_dsn") else ("warn", "DSN missing")
-            vault_ok, vault_note = ("warn", "disabled")
-            if settings.get("vault_enabled") == "true":
-                vault_ok, vault_note = ("ok", "configured") if settings.get("vault_addr") else ("warn", "Vault address missing")
-            oidc_ok, oidc_note = ("warn", "disabled")
-            if settings.get("oidc_enabled") == "true":
-                oidc_ok, oidc_note = ("ok", "configured") if settings.get("oidc_issuer") and settings.get("oidc_client_id") else ("warn", "Issuer/client ID missing")
+            integration_status = {name: (status, note) for name, status, note in integration_checks()}
+            postgres_ok, postgres_note = integration_status.get("Postgres", ("warn", "disabled"))
+            vault_ok, vault_note = integration_status.get("Vault", ("warn", "disabled"))
+            oidc_ok, oidc_note = integration_status.get("OIDC", ("warn", "disabled"))
+            session_ok, session_note = integration_status.get("Session store", ("warn", "memory"))
             body = f"""
 <div class="section-head">
   <div>
     <h2>Enterprise Integrations</h2>
-    <div class="section-copy">Configure durable sessions, Postgres persistence, Vault secrets, and OIDC identity metadata.</div>
+    <div class="section-copy">Configure and probe durable sessions, Postgres persistence, Vault secrets, and OIDC identity metadata.</div>
   </div>
 </div>
 <section class="ops-strip">
   <div class="ops-item"><div class="ops-label">Postgres</div><div class="ops-value"><span class="chip {postgres_ok}">{html.escape(postgres_note)}</span></div></div>
   <div class="ops-item"><div class="ops-label">Vault</div><div class="ops-value"><span class="chip {vault_ok}">{html.escape(vault_note)}</span></div></div>
   <div class="ops-item"><div class="ops-label">OIDC</div><div class="ops-value"><span class="chip {oidc_ok}">{html.escape(oidc_note)}</span></div></div>
-  <div class="ops-item"><div class="ops-label">Session Store</div><div class="ops-value">{html.escape(settings.get('session_store', 'memory'))}</div></div>
+  <div class="ops-item"><div class="ops-label">Session Store</div><div class="ops-value"><span class="chip {session_ok}">{html.escape(session_note)}</span></div></div>
 </section>
 <section class="panel">
   <form method="post" action="/settings/integrations/save">
@@ -2246,12 +2432,34 @@ class Handler(BaseHTTPRequestHandler):
             name = form_value(form, "name")
             env_type = form_value(form, "type", "connected")
             provider = form_value(form, "provider", "nutanix-ahv")
+            config_path = ENV_DIR / f"{safe_key(name)}.yaml"
+            duplicate_record = {
+                "config": config_path,
+                "environment": name,
+                "cluster": f"{safe_key(name)}-cluster" if name else "",
+                "api_vip": "",
+                "registry_namespace": "",
+            }
+            uniqueness = environment_uniqueness_issues(extra=duplicate_record)
+            if config_path.exists():
+                uniqueness.append(f"Environment config '{config_path.name}' already exists.")
+            if uniqueness:
+                audit_event("environment_create_blocked", self.current_user(), name, "failed", {"issues": uniqueness})
+                issue_rows = "".join(f"<li>{html.escape(issue)}</li>" for issue in uniqueness)
+                body = f"<h2>Environment creation blocked</h2><div class='notice'>Resolve these identity conflicts before creating the environment.</div><ul>{issue_rows}</ul><a class='back-link' href='/settings/new-environment'>Back to new environment</a>"
+                self.send_html(page("Environment Creation Blocked", body, "new-environment"), status=400)
+                return
             code, out, err = create_environment(name, env_type)
             if code == 0:
                 try:
                     new_config = resolve_env_config(str(ENV_DIR / f"{safe_key(name)}.yaml"))
                     data = load_env_yaml(new_config)
+                    nested_set(data, ["environment", "name"], name)
+                    nested_set(data, ["environment", "type"], env_type)
                     nested_set(data, ["environment", "provider"], provider)
+                    nested_set(data, ["cluster", "name"], f"{safe_key(name)}-cluster")
+                    nested_set(data, ["cluster", "controlPlaneEndpointIp"], "")
+                    nested_set(data, ["registry", "namespace"], "")
                     write_env_yaml(new_config, data)
                 except Exception as exc:
                     code = 1
@@ -2477,6 +2685,16 @@ class Handler(BaseHTTPRequestHandler):
                 }
                 for key, (path, converter) in field_map.items():
                     nested_set(data, path, converter(form_value(form, key)))
+                candidate = {
+                    "config": config,
+                    "environment": str(nested_get(data, ["environment", "name"], "")).strip(),
+                    "cluster": str(nested_get(data, ["cluster", "name"], "")).strip(),
+                    "api_vip": str(nested_get(data, ["cluster", "controlPlaneEndpointIp"], "")).strip(),
+                    "registry_namespace": str(nested_get(data, ["registry", "namespace"], "")).strip(),
+                }
+                uniqueness = environment_uniqueness_issues(extra=candidate, exclude=config)
+                if uniqueness:
+                    raise ValueError(" ".join(uniqueness))
                 write_env_yaml(config, data)
                 audit_event("environment_saved", self.current_user(), config.name, "success")
             except Exception as exc:
