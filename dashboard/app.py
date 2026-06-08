@@ -5,6 +5,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -14,6 +15,13 @@ ROOT = Path(__file__).resolve().parents[1]
 ZT = ROOT / ".zt"
 SAFE_ACTIONS = {"validate", "prepare", "generate", "verify", "backup", "runs"}
 ACTION_ORDER = ["validate", "prepare", "generate", "verify", "backup", "runs"]
+VIEW_PATHS = {
+    "environments": "/",
+    "runs": "/runs",
+    "artifacts": "/artifacts",
+    "actions": "/actions",
+    "audit": "/audit",
+}
 
 
 def read_json(path):
@@ -39,6 +47,23 @@ def env_state(name):
         "secrets": read_json(base / "state" / "secrets.json"),
         "verification": base / "reports" / "verification-summary.md",
     }
+
+
+def recent_run_summaries(limit=25):
+    runs = sorted((ZT / "runs").glob("*/summary.md")) if (ZT / "runs").exists() else []
+    return list(reversed(runs[-limit:]))
+
+
+def file_count(path, pattern="*"):
+    if not path.exists():
+        return 0
+    return len([p for p in path.rglob(pattern) if p.is_file()])
+
+
+def mtime_label(path):
+    if not path.exists():
+        return "n/a"
+    return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(path.stat().st_mtime))
 
 
 def run_action(action, config):
@@ -71,7 +96,19 @@ def run_action(action, config):
         return 127, "", f"Failed to start action runner: {exc}"
 
 
-def page(title, body):
+def page(title, body, active="environments"):
+    def nav_class(key):
+        return "nav-item active" if key == active else "nav-item"
+
+    nav = f"""
+    <div class="nav-label">Operations</div>
+    <a class="{nav_class('environments')}" href="{VIEW_PATHS['environments']}"><span class="nav-dot"></span>Environments</a>
+    <a class="{nav_class('runs')}" href="{VIEW_PATHS['runs']}">Runs</a>
+    <a class="{nav_class('artifacts')}" href="{VIEW_PATHS['artifacts']}">Artifacts</a>
+    <div class="nav-label">Governance</div>
+    <a class="{nav_class('actions')}" href="{VIEW_PATHS['actions']}">Safe Actions</a>
+    <a class="{nav_class('audit')}" href="{VIEW_PATHS['audit']}">Audit Trail</a>
+"""
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -127,10 +164,12 @@ def page(title, body):
     .nav-item {{
       display: flex; align-items: center; gap: 10px;
       min-height: 38px; padding: 0 10px; border-radius: 7px;
-      color: #d9e3f3; font-weight: 600;
+      color: #d9e3f3; font-weight: 600; text-decoration: none;
     }}
+    .nav-item:hover {{ background: rgba(255,255,255,.07); color: #fff; }}
     .nav-item.active {{ background: rgba(255,255,255,.1); color: #fff; }}
-    .nav-dot {{ width: 8px; height: 8px; border-radius: 50%; background: #3dd6a3; }}
+    .nav-dot {{ width: 8px; height: 8px; border-radius: 50%; background: transparent; }}
+    .nav-item.active .nav-dot {{ background: #3dd6a3; }}
     .content {{ min-width: 0; }}
     .topbar {{
       min-height: 68px; background: var(--panel);
@@ -233,13 +272,7 @@ def page(title, body):
         <div class="brand-subtitle">Deployment Console</div>
       </div>
     </div>
-    <div class="nav-label">Operations</div>
-    <div class="nav-item active"><span class="nav-dot"></span>Environments</div>
-    <div class="nav-item">Runs</div>
-    <div class="nav-item">Artifacts</div>
-    <div class="nav-label">Governance</div>
-    <div class="nav-item">Safe Actions</div>
-    <div class="nav-item">Audit Trail</div>
+{nav}
   </aside>
   <div class="content">
     <div class="topbar">
@@ -270,7 +303,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         parsed = urlparse(self.path)
-        if parsed.path == "/":
+        if parsed.path in ("/", "/environments"):
             rows = []
             env_total = 0
             prepared_total = 0
@@ -338,7 +371,109 @@ class Handler(BaseHTTPRequestHandler):
 </section>
 <div class="notice">Destructive and apply actions are intentionally CLI-only. This console exposes validation, preparation, generation, verification, backup, and run inspection workflows.</div>
 """
-            self.send_html(page("NKP ZeroTouch Console", body))
+            self.send_html(page("NKP ZeroTouch Console", body, "environments"))
+            return
+        if parsed.path == "/runs":
+            run_rows = "".join(
+                f"<tr><td><code>{html.escape(p.parent.name)}</code></td><td>{html.escape(mtime_label(p))}</td><td><span class='muted'>{html.escape(str(p.relative_to(ROOT)))}</span></td></tr>"
+                for p in recent_run_summaries()
+            )
+            body = f"""
+<div class="section-head">
+  <div>
+    <h2>Runs</h2>
+    <div class="section-copy">Timestamped execution summaries captured by the framework.</div>
+  </div>
+</div>
+<section class="panel">
+  <table>
+    <thead><tr><th>Run ID</th><th>Updated</th><th>Summary</th></tr></thead>
+    <tbody>{run_rows or '<tr><td colspan="3" class="muted">No run summaries yet.</td></tr>'}</tbody>
+  </table>
+</section>
+"""
+            self.send_html(page("Runs - NKP ZeroTouch Console", body, "runs"))
+            return
+        if parsed.path == "/artifacts":
+            artifact_rows = []
+            for env_dir in sorted((ZT / "environments").glob("*")) if (ZT / "environments").exists() else []:
+                if not env_dir.is_dir():
+                    continue
+                artifact_rows.append(
+                    f"<tr><td><div class='env-name'>{html.escape(env_dir.name)}</div><div class='env-file'>{html.escape(str(env_dir.relative_to(ROOT)))}</div></td>"
+                    f"<td>{file_count(env_dir / 'generated')}</td>"
+                    f"<td>{file_count(env_dir / 'reports')}</td>"
+                    f"<td>{file_count(env_dir / 'state')}</td>"
+                    f"<td>{html.escape(mtime_label(env_dir))}</td></tr>"
+                )
+            body = f"""
+<div class="section-head">
+  <div>
+    <h2>Artifacts</h2>
+    <div class="section-copy">Generated plans, reports, state files, and staged environment outputs.</div>
+  </div>
+</div>
+<section class="panel">
+  <table>
+    <thead><tr><th>Environment</th><th>Generated</th><th>Reports</th><th>State</th><th>Updated</th></tr></thead>
+    <tbody>{''.join(artifact_rows) or '<tr><td colspan="5" class="muted">No environment artifacts found. Run prepare or generate first.</td></tr>'}</tbody>
+  </table>
+</section>
+"""
+            self.send_html(page("Artifacts - NKP ZeroTouch Console", body, "artifacts"))
+            return
+        if parsed.path == "/actions":
+            action_rows = "".join(
+                f"<tr><td><code>{html.escape(action)}</code></td><td>Dashboard-safe</td><td><span class='chip ok'>Enabled</span></td></tr>"
+                for action in ACTION_ORDER
+            )
+            blocked_rows = "".join(
+                f"<tr><td><code>{action}</code></td><td>CLI-only guarded operation</td><td><span class='chip warn'>Blocked in console</span></td></tr>"
+                for action in ["registry --apply", "deploy --apply", "destroy --apply --confirm-destroy"]
+            )
+            body = f"""
+<div class="section-head">
+  <div>
+    <h2>Safe Actions</h2>
+    <div class="section-copy">Console-enabled actions are intentionally limited to non-destructive workflows.</div>
+  </div>
+</div>
+<section class="panel">
+  <table>
+    <thead><tr><th>Action</th><th>Scope</th><th>Status</th></tr></thead>
+    <tbody>{action_rows}{blocked_rows}</tbody>
+  </table>
+</section>
+<div class="notice">Live apply and destructive workflows remain CLI-only so operators must explicitly run guarded commands from a prepared shell.</div>
+"""
+            self.send_html(page("Safe Actions - NKP ZeroTouch Console", body, "actions"))
+            return
+        if parsed.path == "/audit":
+            audit_rows = []
+            if (ZT / "environments").exists():
+                for p in sorted((ZT / "environments").glob("*/state/*.json"), key=lambda item: item.stat().st_mtime, reverse=True)[:25]:
+                    audit_rows.append(
+                        f"<tr><td><code>{html.escape(p.parent.parent.name)}</code></td><td>{html.escape(p.name)}</td><td>{html.escape(mtime_label(p))}</td><td><span class='muted'>{html.escape(str(p.relative_to(ROOT)))}</span></td></tr>"
+                    )
+            for p in recent_run_summaries(10):
+                audit_rows.append(
+                    f"<tr><td><code>run</code></td><td>{html.escape(p.parent.name)}</td><td>{html.escape(mtime_label(p))}</td><td><span class='muted'>{html.escape(str(p.relative_to(ROOT)))}</span></td></tr>"
+                )
+            body = f"""
+<div class="section-head">
+  <div>
+    <h2>Audit Trail</h2>
+    <div class="section-copy">Recent local state and run summary updates from the .zt workspace.</div>
+  </div>
+</div>
+<section class="panel">
+  <table>
+    <thead><tr><th>Scope</th><th>Event</th><th>Updated</th><th>Path</th></tr></thead>
+    <tbody>{''.join(audit_rows) or '<tr><td colspan="4" class="muted">No audit events found yet.</td></tr>'}</tbody>
+  </table>
+</section>
+"""
+            self.send_html(page("Audit Trail - NKP ZeroTouch Console", body, "audit"))
             return
         self.send_html(page("Not Found", "<h2>Not found</h2>"), status=404)
 
@@ -364,7 +499,7 @@ class Handler(BaseHTTPRequestHandler):
             "<a class='back-link' href='/'>Back to dashboard</a>"
             "</div>"
         )
-        self.send_html(page("Action Result", body), status=200 if code == 0 else 500)
+        self.send_html(page("Action Result", body, "actions"), status=200 if code == 0 else 500)
 
 
 def read_json_from_context(config):
