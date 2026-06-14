@@ -127,6 +127,8 @@ def context(data, config_path):
 def render_secret_env(secrets_path):
     secrets = load_yaml(secrets_path)
     values = {
+        "NUTANIX_USER": dotted_get(secrets, "prismCentral.username"),
+        "NUTANIX_PASSWORD": dotted_get(secrets, "prismCentral.password"),
         "NUTANIX_PC_USERNAME": dotted_get(secrets, "prismCentral.username"),
         "NUTANIX_PC_PASSWORD": dotted_get(secrets, "prismCentral.password"),
         "ZT_REGISTRY_USERNAME": dotted_get(secrets, "registry.username"),

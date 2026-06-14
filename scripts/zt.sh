@@ -388,14 +388,14 @@ generate_assets() {
   local airgap_flag=""
   [[ "$environment_type" == "air-gapped" ]] && airgap_flag=" --airgapped"
   local registry_flags=""
-  [[ -n "$registry_endpoint" ]] && registry_flags=" --registry-url $registry_endpoint"
-  [[ "$environment_type" == "air-gapped" && -n "$registry_endpoint" ]] && registry_flags="$registry_flags --registry-mirror-url $registry_endpoint"
   local proxy_flags=""
   [[ "$environment_type" == "proxied" && -n "$http_proxy" ]] && proxy_flags="$proxy_flags --http-proxy $http_proxy"
   [[ "$environment_type" == "proxied" && -n "$https_proxy" ]] && proxy_flags="$proxy_flags --https-proxy $https_proxy"
   local bundle_flags=""
   if [[ -n "$bundle_path" ]]; then
     bundle_flags=" --bootstrap-cluster-image $bundle_path/konvoy-bootstrap-image-$nkp_version.tar --bundle $bundle_path/container-images/konvoy-image-bundle-$nkp_version.tar,$bundle_path/container-images/kommander-image-bundle-$nkp_version.tar"
+  elif [[ -n "$registry_endpoint" ]]; then
+    registry_flags=" --registry-mirror-url $registry_endpoint"
   fi
   local advanced_flags=""
   [[ -n "$control_plane_endpoint_ip" ]] && advanced_flags="$advanced_flags --control-plane-endpoint-ip $control_plane_endpoint_ip"
@@ -410,7 +410,7 @@ generate_assets() {
   [[ "$fips" == "true" || "$fips" == "True" ]] && advanced_flags="$advanced_flags --fips"
   [[ -n "$registry_ca_cert" ]] && advanced_flags="$advanced_flags --registry-cacert $registry_ca_cert"
 
-  local nkp_command="./bin/nkp create cluster nutanix --cluster-name $cluster_name --endpoint $prism_endpoint --kubernetes-version $kubernetes_version --control-plane-replicas $control_plane_replicas --worker-replicas $worker_replicas --vm-image $image_name --control-plane-prism-element-cluster $prism_cluster --worker-prism-element-cluster $prism_cluster --control-plane-subnets $subnet_name --worker-subnets $subnet_name --kubernetes-pod-network-cidr $pod_cidr --kubernetes-service-cidr $service_cidr$airgap_flag$registry_flags$proxy_flags$bundle_flags$advanced_flags --dry-run --output yaml --output-directory ./generated"
+  local nkp_command="./bin/nkp create cluster nutanix --cluster-name $cluster_name --endpoint $prism_endpoint --kubernetes-version $kubernetes_version --control-plane-replicas $control_plane_replicas --worker-replicas $worker_replicas --control-plane-vm-image $image_name --worker-vm-image $image_name --control-plane-prism-element-cluster $prism_cluster --worker-prism-element-cluster $prism_cluster --control-plane-subnets $subnet_name --worker-subnets $subnet_name --kubernetes-pod-network-cidr $pod_cidr --kubernetes-service-cidr $service_cidr$airgap_flag$registry_flags$proxy_flags$bundle_flags$advanced_flags --dry-run --output yaml --output-directory ./generated"
 
   cat >"$generated_dir/cluster-values.yaml" <<EOF
 environment:
@@ -506,9 +506,9 @@ if [[ -f ./secrets/secrets.env ]]; then
 fi
 : "\${ZT_REGISTRY_USERNAME:?Set ZT_REGISTRY_USERNAME}"
 : "\${ZT_REGISTRY_PASSWORD:?Set ZT_REGISTRY_PASSWORD}"
-./bin/nkp push image-bundle \\
-  --image-bundle "$konvoy_bundle" \\
-  --image-bundle "$kommander_bundle" \\
+./bin/nkp push bundle \\
+  --bundle "$konvoy_bundle" \\
+  --bundle "$kommander_bundle" \\
   --to-registry "$registry_endpoint" \\
 ${registry_extra_flags}  --force-oci-media-types \\
   --to-registry-username "\$ZT_REGISTRY_USERNAME" \\
@@ -635,6 +635,8 @@ EOF
   "$python_bin" ./tools/zt_config.py secret-env --secrets "$resolved_secrets" >"$secrets_dir/secrets.env"
   cat >"$generated_dir/secrets.env.example" <<'EOF'
 # Source this file pattern with real values in your shell. Do not commit real secrets.
+export NUTANIX_USER="admin"
+export NUTANIX_PASSWORD="change-me"
 export NUTANIX_PC_USERNAME="admin"
 export NUTANIX_PC_PASSWORD="change-me"
 export ZT_REGISTRY_USERNAME="registry-user"

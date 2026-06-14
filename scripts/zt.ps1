@@ -581,12 +581,6 @@ function Invoke-Generate {
 
     $airgapFlag = if ($context.environmentType -eq "air-gapped") { " --airgapped" } else { "" }
     $registryFlags = ""
-    if ($context.registryEndpoint) {
-        $registryFlags = " --registry-url $($context.registryEndpoint)"
-    }
-    if ($context.environmentType -eq "air-gapped" -and $context.registryEndpoint) {
-        $registryFlags += " --registry-mirror-url $($context.registryEndpoint)"
-    }
     $proxyFlags = ""
     if ($context.environmentType -eq "proxied") {
         if ($context.httpProxy) { $proxyFlags += " --http-proxy $($context.httpProxy)" }
@@ -595,6 +589,9 @@ function Invoke-Generate {
     $bundleFlags = ""
     if ($context.bundlePath) {
         $bundleFlags = " --bootstrap-cluster-image $($context.bundlePath)/konvoy-bootstrap-image-$($context.nkpVersion).tar --bundle $($context.bundlePath)/container-images/konvoy-image-bundle-$($context.nkpVersion).tar,$($context.bundlePath)/container-images/kommander-image-bundle-$($context.nkpVersion).tar"
+    }
+    elseif ($context.registryEndpoint) {
+        $registryFlags = " --registry-mirror-url $($context.registryEndpoint)"
     }
     $advancedFlags = ""
     if ($context.controlPlaneEndpointIp) { $advancedFlags += " --control-plane-endpoint-ip $($context.controlPlaneEndpointIp)" }
@@ -609,7 +606,7 @@ function Invoke-Generate {
     if ($context.fips -eq "True" -or $context.fips -eq "true") { $advancedFlags += " --fips" }
     if ($context.registryCaCert) { $advancedFlags += " --registry-cacert $($context.registryCaCert)" }
 
-    $nkpCommand = "./bin/nkp create cluster nutanix --cluster-name $($context.clusterName) --endpoint $($context.prismCentralEndpoint) --kubernetes-version $($context.kubernetesVersion) --control-plane-replicas $($context.controlPlaneReplicas) --worker-replicas $($context.workerReplicas) --vm-image $($context.imageName) --control-plane-prism-element-cluster $($context.prismElementCluster) --worker-prism-element-cluster $($context.prismElementCluster) --control-plane-subnets $($context.subnetName) --worker-subnets $($context.subnetName) --kubernetes-pod-network-cidr $($context.podCidr) --kubernetes-service-cidr $($context.serviceCidr)$airgapFlag$registryFlags$proxyFlags$bundleFlags$advancedFlags --dry-run --output yaml --output-directory ./generated"
+    $nkpCommand = "./bin/nkp create cluster nutanix --cluster-name $($context.clusterName) --endpoint $($context.prismCentralEndpoint) --kubernetes-version $($context.kubernetesVersion) --control-plane-replicas $($context.controlPlaneReplicas) --worker-replicas $($context.workerReplicas) --control-plane-vm-image $($context.imageName) --worker-vm-image $($context.imageName) --control-plane-prism-element-cluster $($context.prismElementCluster) --worker-prism-element-cluster $($context.prismElementCluster) --control-plane-subnets $($context.subnetName) --worker-subnets $($context.subnetName) --kubernetes-pod-network-cidr $($context.podCidr) --kubernetes-service-cidr $($context.serviceCidr)$airgapFlag$registryFlags$proxyFlags$bundleFlags$advancedFlags --dry-run --output yaml --output-directory ./generated"
 
     @"
 environment:
@@ -718,7 +715,7 @@ Bundles:
 - $konvoyBundle
 - $kommanderBundle
 
-The generated script uses nkp push image-bundle. Provide credentials through environment variables before running it:
+The generated script uses nkp push bundle. Provide credentials through environment variables before running it:
 
 - ZT_REGISTRY_USERNAME
 - ZT_REGISTRY_PASSWORD
@@ -734,9 +731,9 @@ if [[ -f ./secrets/secrets.env ]]; then
 fi
 : "${ZT_REGISTRY_USERNAME:?Set ZT_REGISTRY_USERNAME}"
 : "${ZT_REGISTRY_PASSWORD:?Set ZT_REGISTRY_PASSWORD}"
-./bin/nkp push image-bundle \
-  --image-bundle "__KONVOY_BUNDLE__" \
-  --image-bundle "__KOMMANDER_BUNDLE__" \
+./bin/nkp push bundle \
+  --bundle "__KONVOY_BUNDLE__" \
+  --bundle "__KOMMANDER_BUNDLE__" \
   --to-registry "__REGISTRY_ENDPOINT__" \
 __REGISTRY_EXTRA_FLAGS__  --force-oci-media-types \
   --to-registry-username "$ZT_REGISTRY_USERNAME" \
@@ -921,6 +918,8 @@ function Invoke-Secrets {
     New-ZtDirectory -Path $context.generatedDir
     @"
 # Source this file pattern with real values in your shell. Do not commit real secrets.
+export NUTANIX_USER="admin"
+export NUTANIX_PASSWORD="change-me"
 export NUTANIX_PC_USERNAME="admin"
 export NUTANIX_PC_PASSWORD="change-me"
 export ZT_REGISTRY_USERNAME="registry-user"

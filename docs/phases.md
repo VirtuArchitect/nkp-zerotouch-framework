@@ -28,7 +28,7 @@ Creates registry planning output.
 
 For `connected` and `proxied`, this records that mirroring is optional.
 
-For `air-gapped`, this also generates `registry.sh`, which uses `nkp push image-bundle` and expects credentials from:
+For `air-gapped`, this also generates `registry.sh`, which uses `nkp push bundle` and expects credentials from:
 
 - `ZT_REGISTRY_USERNAME`
 - `ZT_REGISTRY_PASSWORD`
