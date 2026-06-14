@@ -97,7 +97,9 @@ advanced: {{}}
     assert "--worker-vm-image nkp-node-image" in deploy_script
     assert "--vm-image" not in deploy_script
     assert "--bundle" in deploy_script
-    assert "--registry-mirror-url" not in deploy_script
+    assert "--registry-mirror-url registry.example.com/nkp" in deploy_script
+    assert "--registry-mirror-username" in deploy_script
+    assert "--registry-mirror-password" in deploy_script
 
 
 def test_bash_registry_uses_nkp_v217_push_bundle():

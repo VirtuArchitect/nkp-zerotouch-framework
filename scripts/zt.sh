@@ -388,14 +388,13 @@ generate_assets() {
   local airgap_flag=""
   [[ "$environment_type" == "air-gapped" ]] && airgap_flag=" --airgapped"
   local registry_flags=""
+  [[ -n "$registry_endpoint" ]] && registry_flags=" --registry-mirror-url $registry_endpoint \${ZT_REGISTRY_USERNAME:+--registry-mirror-username \$ZT_REGISTRY_USERNAME} \${ZT_REGISTRY_PASSWORD:+--registry-mirror-password \$ZT_REGISTRY_PASSWORD}"
   local proxy_flags=""
   [[ "$environment_type" == "proxied" && -n "$http_proxy" ]] && proxy_flags="$proxy_flags --http-proxy $http_proxy"
   [[ "$environment_type" == "proxied" && -n "$https_proxy" ]] && proxy_flags="$proxy_flags --https-proxy $https_proxy"
   local bundle_flags=""
   if [[ -n "$bundle_path" ]]; then
     bundle_flags=" --bootstrap-cluster-image $bundle_path/konvoy-bootstrap-image-$nkp_version.tar --bundle $bundle_path/container-images/konvoy-image-bundle-$nkp_version.tar,$bundle_path/container-images/kommander-image-bundle-$nkp_version.tar"
-  elif [[ -n "$registry_endpoint" ]]; then
-    registry_flags=" --registry-mirror-url $registry_endpoint"
   fi
   local advanced_flags=""
   [[ -n "$control_plane_endpoint_ip" ]] && advanced_flags="$advanced_flags --control-plane-endpoint-ip $control_plane_endpoint_ip"
@@ -408,7 +407,7 @@ generate_assets() {
   [[ -n "$project" ]] && advanced_flags="$advanced_flags --control-plane-pc-project $project --worker-pc-project $project"
   [[ "$self_managed" == "true" || "$self_managed" == "True" ]] && advanced_flags="$advanced_flags --self-managed"
   [[ "$fips" == "true" || "$fips" == "True" ]] && advanced_flags="$advanced_flags --fips"
-  [[ -n "$registry_ca_cert" ]] && advanced_flags="$advanced_flags --registry-cacert $registry_ca_cert"
+  [[ -n "$registry_ca_cert" ]] && advanced_flags="$advanced_flags --registry-mirror-cacert $registry_ca_cert"
 
   local nkp_command="./bin/nkp create cluster nutanix --cluster-name $cluster_name --endpoint $prism_endpoint --kubernetes-version $kubernetes_version --control-plane-replicas $control_plane_replicas --worker-replicas $worker_replicas --control-plane-vm-image $image_name --worker-vm-image $image_name --control-plane-prism-element-cluster $prism_cluster --worker-prism-element-cluster $prism_cluster --control-plane-subnets $subnet_name --worker-subnets $subnet_name --kubernetes-pod-network-cidr $pod_cidr --kubernetes-service-cidr $service_cidr$airgap_flag$registry_flags$proxy_flags$bundle_flags$advanced_flags --dry-run --output yaml --output-directory ./generated"
 

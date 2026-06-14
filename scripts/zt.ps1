@@ -581,6 +581,9 @@ function Invoke-Generate {
 
     $airgapFlag = if ($context.environmentType -eq "air-gapped") { " --airgapped" } else { "" }
     $registryFlags = ""
+    if ($context.registryEndpoint) {
+        $registryFlags = " --registry-mirror-url $($context.registryEndpoint) `${ZT_REGISTRY_USERNAME:+--registry-mirror-username `$ZT_REGISTRY_USERNAME} `${ZT_REGISTRY_PASSWORD:+--registry-mirror-password `$ZT_REGISTRY_PASSWORD}"
+    }
     $proxyFlags = ""
     if ($context.environmentType -eq "proxied") {
         if ($context.httpProxy) { $proxyFlags += " --http-proxy $($context.httpProxy)" }
@@ -589,9 +592,6 @@ function Invoke-Generate {
     $bundleFlags = ""
     if ($context.bundlePath) {
         $bundleFlags = " --bootstrap-cluster-image $($context.bundlePath)/konvoy-bootstrap-image-$($context.nkpVersion).tar --bundle $($context.bundlePath)/container-images/konvoy-image-bundle-$($context.nkpVersion).tar,$($context.bundlePath)/container-images/kommander-image-bundle-$($context.nkpVersion).tar"
-    }
-    elseif ($context.registryEndpoint) {
-        $registryFlags = " --registry-mirror-url $($context.registryEndpoint)"
     }
     $advancedFlags = ""
     if ($context.controlPlaneEndpointIp) { $advancedFlags += " --control-plane-endpoint-ip $($context.controlPlaneEndpointIp)" }
@@ -604,7 +604,7 @@ function Invoke-Generate {
     if ($context.project) { $advancedFlags += " --control-plane-pc-project $($context.project) --worker-pc-project $($context.project)" }
     if ($context.selfManaged -eq "True" -or $context.selfManaged -eq "true") { $advancedFlags += " --self-managed" }
     if ($context.fips -eq "True" -or $context.fips -eq "true") { $advancedFlags += " --fips" }
-    if ($context.registryCaCert) { $advancedFlags += " --registry-cacert $($context.registryCaCert)" }
+    if ($context.registryCaCert) { $advancedFlags += " --registry-mirror-cacert $($context.registryCaCert)" }
 
     $nkpCommand = "./bin/nkp create cluster nutanix --cluster-name $($context.clusterName) --endpoint $($context.prismCentralEndpoint) --kubernetes-version $($context.kubernetesVersion) --control-plane-replicas $($context.controlPlaneReplicas) --worker-replicas $($context.workerReplicas) --control-plane-vm-image $($context.imageName) --worker-vm-image $($context.imageName) --control-plane-prism-element-cluster $($context.prismElementCluster) --worker-prism-element-cluster $($context.prismElementCluster) --control-plane-subnets $($context.subnetName) --worker-subnets $($context.subnetName) --kubernetes-pod-network-cidr $($context.podCidr) --kubernetes-service-cidr $($context.serviceCidr)$airgapFlag$registryFlags$proxyFlags$bundleFlags$advancedFlags --dry-run --output yaml --output-directory ./generated"
 

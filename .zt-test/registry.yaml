@@ -1,0 +1,25 @@
+
+environment:
+  name: v217-registry
+  type: air-gapped
+  root: .zt-test/env
+nkp:
+  version: v2.17.0
+  bundleType: air-gapped
+  bundlePath: .zt-test/bundle/nkp-v2.17.0
+nutanix:
+  prismCentralEndpoint: pc.example.com
+  clusterName: pe-cluster
+  subnetName: vlan-10
+  imageName: nkp-node-image
+cluster:
+  name: nkp-v217-registry
+  kubernetesVersion: v1.32.3
+  controlPlaneReplicas: 3
+  workerReplicas: 3
+  podCidr: 192.168.0.0/16
+  serviceCidr: 10.96.0.0/12
+registry:
+  endpoint: registry.example.com/nkp
+  namespace: nkp
+advanced: {}
