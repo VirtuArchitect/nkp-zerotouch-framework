@@ -54,6 +54,23 @@ Release channels define promotion lanes such as `dev`, `lab`, `pilot`, and
 `production`. Production channels should require plan review, backup evidence,
 and elevated approvals.
 
+Apply jobs use the higher of the action approval threshold and the configured
+release-channel approval threshold.
+
+## Apply Gates
+
+Apply requests are blocked when:
+
+- Plan review is missing, rejected, or stale.
+- A production environment is missing required backup evidence.
+- Drift detection reports blocking signals.
+- The environment has an active lock.
+
+## Restore Planning
+
+The Restore page generates a restore plan from backup manifests and keeps the
+actual copy-back procedure manual and deliberate.
+
 ## Secret and Identity Checks
 
 The console checks required runtime secret keys by presence only. OIDC metadata

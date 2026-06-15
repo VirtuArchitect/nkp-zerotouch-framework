@@ -50,6 +50,8 @@ VIEW_PATHS = {
     "locks": "/locks",
     "drift": "/drift",
     "backups": "/backups",
+    "restore": "/restore",
+    "production-readiness": "/production-readiness",
     "release-channels": "/release-channels",
     "sources": "/sources",
     "inventory": "/inventory",
@@ -442,6 +444,8 @@ ROUTE_PERMISSIONS = [
     ("/locks", "jobs"),
     ("/drift", "preflight"),
     ("/backups", "artifacts"),
+    ("/restore", "artifacts"),
+    ("/production-readiness", "preflight"),
     ("/release-channels", "approval-policy"),
     ("/api", "health"),
     ("/sources", "sources"),
@@ -844,6 +848,68 @@ def drift_status(config):
     return env_name, ("warn" if issues else "ok"), issues or ["no drift indicators detected"]
 
 
+def release_channel_map():
+    settings = load_setting("release-channels", default_release_channels())
+    channels = {}
+    for item in settings.get("channels", "").split(","):
+        name, _, approvals = item.strip().partition(":")
+        if not name:
+            continue
+        try:
+            channels[safe_key(name)] = int(approvals or "0")
+        except ValueError:
+            channels[safe_key(name)] = 0
+    return channels
+
+
+def env_channel(data):
+    channel = str(data.get("releaseChannel") or data.get("channel") or "").strip()
+    if channel:
+        return safe_key(channel)
+    settings = load_setting("release-channels", default_release_channels())
+    return safe_key(settings.get("default_channel", "lab"))
+
+
+def backup_exists(env_name):
+    return any((item["data"].get("environment") == env_name or env_name in str(item["path"])) for item in backup_manifests())
+
+
+def production_gate(config):
+    data = read_json_from_context(config)
+    env_name = str(data.get("environmentName") or config.stem)
+    channel = env_channel(data)
+    state = env_state(env_name)
+    review_label, review_status = plan_review_status(env_name, state)
+    _, drift_state, drift_issues = drift_status(config)
+    channels = load_setting("release-channels", default_release_channels())
+    checks = []
+    if channel == "production":
+        checks.append(("Plan review", review_status == "ok", review_label))
+        checks.append(("Backup evidence", not (channels.get("production_requires_backup") == "true") or backup_exists(env_name), "backup found" if backup_exists(env_name) else "backup missing"))
+    else:
+        checks.append(("Plan review", review_status in {"ok", "warn"}, review_label))
+        checks.append(("Backup evidence", True, "not required for non-production"))
+    checks.append(("Drift", drift_state == "ok", "; ".join(drift_issues)))
+    checks.append(("Verification", state["verification"].exists(), "verification report available" if state["verification"].exists() else "verification missing"))
+    ok = all(item[1] for item in checks)
+    return env_name, channel, ok, checks
+
+
+def apply_gate(config, action):
+    env_name, channel, ok, checks = production_gate(config)
+    state = env_state(env_name)
+    review_label, review_status = plan_review_status(env_name, state)
+    reasons = []
+    if action in {"deploy", "registry", "upgrade", "destroy"}:
+        if review_status != "ok":
+            reasons.append(f"plan review is {review_label}")
+    if channel == "production" and not ok:
+        reasons.extend(f"{name}: {detail}" for name, passed, detail in checks if not passed)
+    if active_lock(env_name):
+        reasons.append(f"environment locked by job {active_lock(env_name).get('jobId', 'unknown')}")
+    return not reasons, reasons
+
+
 def backup_manifests():
     manifests = []
     for path in (ZT / "environments").glob("*/backup/*/backup-manifest.json") if (ZT / "environments").exists() else []:
@@ -1164,7 +1230,7 @@ def create_job(action, config, command, requested_by, kind="safe", approval_requ
         "requestedBy": requested_by.get("username", "unknown") if requested_by else "unknown",
         "requestedRole": requested_by.get("role", "") if requested_by else "",
         "approvalRequired": approval_required,
-        "requiredApprovals": approval_requirement(action) if approval_required else 0,
+        "requiredApprovals": approval_requirement_for_config(action, config) if approval_required else 0,
         "approvals": [],
         "createdAt": now,
         "updatedAt": now,
@@ -1189,6 +1255,15 @@ def approval_requirement(action):
         return max(1, int(policy.get(key, "1")))
     except ValueError:
         return 1
+
+
+def approval_requirement_for_config(action, config):
+    base = approval_requirement(action)
+    if not config:
+        return base
+    data = read_json_from_context(config)
+    channel = env_channel(data)
+    return max(base, release_channel_map().get(channel, 0))
 
 
 def approval_policy_allows(user, job):
@@ -1234,6 +1309,7 @@ def page(title, body, active="environments", user=None):
     <a class="{nav_class('plan-review')}" href="{VIEW_PATHS['plan-review']}">Plan Review</a>
     <a class="{nav_class('kubeconfig')}" href="{VIEW_PATHS['kubeconfig']}">Kubeconfig</a>
     <a class="{nav_class('backups')}" href="{VIEW_PATHS['backups']}">Backups</a>
+    <a class="{nav_class('restore')}" href="{VIEW_PATHS['restore']}">Restore</a>
     <a class="{nav_class('health')}" href="{VIEW_PATHS['health']}">Health</a>
     <div class="nav-label">Deployment</div>
     <a class="{nav_class('sources')}" href="{VIEW_PATHS['sources']}">Sources</a>
@@ -1241,6 +1317,7 @@ def page(title, body, active="environments", user=None):
     <a class="{nav_class('network')}" href="{VIEW_PATHS['network']}">Network</a>
     <a class="{nav_class('preflight')}" href="{VIEW_PATHS['preflight']}">Preflight</a>
     <a class="{nav_class('drift')}" href="{VIEW_PATHS['drift']}">Drift</a>
+    <a class="{nav_class('production-readiness')}" href="{VIEW_PATHS['production-readiness']}">Production Gate</a>
     <a class="{nav_class('pipeline')}" href="{VIEW_PATHS['pipeline']}">Pipeline</a>
     <a class="{nav_class('jobs')}" href="{VIEW_PATHS['jobs']}">Jobs</a>
     <a class="{nav_class('locks')}" href="{VIEW_PATHS['locks']}">Locks</a>
@@ -1758,6 +1835,7 @@ class Handler(BaseHTTPRequestHandler):
                 data = read_json_from_context(config)
                 name = data.get("environmentName") or config.stem
                 env_type = data.get("environmentType", "unknown")
+                channel = env_channel(data)
                 state = env_state(name)
                 prepared = bool(state["state"])
                 generated = bool(state["generate"])
@@ -1781,6 +1859,7 @@ class Handler(BaseHTTPRequestHandler):
                 rows.append(
                     f"<tr><td><div class='env-name'>{html.escape(name)}</div><div class='env-file'>{html.escape(config.name)}</div></td>"
                     f"<td><span class='badge {html.escape(env_type)}'>{html.escape(env_type)}</span></td>"
+                    f"<td><span class='badge connected'>{html.escape(channel)}</span></td>"
                     f"<td><span class='chip {lifecycle_status}'>{html.escape(lifecycle_label)}</span><div class='env-file'>readiness {ready_passed}/{ready_total}</div><div class='progress-track'><div class='progress-bar' style='width:{ready_pct}%'></div></div></td>"
                     f"<td><span class='chip {'ok' if prepared else 'warn'}'>{'Ready' if prepared else 'Pending'}</span></td>"
                     f"<td><span class='chip {'ok' if generated else 'warn'}'>{'Generated' if generated else 'Pending'}</span></td>"
@@ -1819,7 +1898,7 @@ class Handler(BaseHTTPRequestHandler):
 </div>
 <section class="panel">
   <table>
-    <thead><tr><th>Name</th><th>Type</th><th>Lifecycle</th><th>Prepared</th><th>Generated</th><th>Report</th><th>Plan Review</th><th>Safe Actions</th><th>Manage</th></tr></thead>
+    <thead><tr><th>Name</th><th>Type</th><th>Channel</th><th>Lifecycle</th><th>Prepared</th><th>Generated</th><th>Report</th><th>Plan Review</th><th>Safe Actions</th><th>Manage</th></tr></thead>
     <tbody>{''.join(rows)}</tbody>
   </table>
 </section>
@@ -1902,6 +1981,12 @@ class Handler(BaseHTTPRequestHandler):
           <option value="connected" {'selected' if nested_get(data, ['environment', 'type']) == 'connected' else ''}>connected</option>
           <option value="proxied" {'selected' if nested_get(data, ['environment', 'type']) == 'proxied' else ''}>proxied</option>
           <option value="air-gapped" {'selected' if nested_get(data, ['environment', 'type']) == 'air-gapped' else ''}>air-gapped</option>
+        </select></div></td></tr>
+        <tr><td>Release channel</td><td><div class="field"><select name="release_channel">
+          <option value="dev" {'selected' if env_channel(read_json_from_context(config)) == 'dev' else ''}>dev</option>
+          <option value="lab" {'selected' if env_channel(read_json_from_context(config)) == 'lab' else ''}>lab</option>
+          <option value="pilot" {'selected' if env_channel(read_json_from_context(config)) == 'pilot' else ''}>pilot</option>
+          <option value="production" {'selected' if env_channel(read_json_from_context(config)) == 'production' else ''}>production</option>
         </select></div></td></tr>
         <tr><td>Provider</td><td><div class="field"><select name="environment_provider">
           <option value="nutanix-ahv" {'selected' if nested_get(data, ['environment', 'provider'], 'nutanix-ahv') == 'nutanix-ahv' else ''}>nutanix-ahv</option>
@@ -2052,6 +2137,34 @@ class Handler(BaseHTTPRequestHandler):
 """
             self.send_html(page("Backups - NKP ZeroTouch Framework", body, "backups"))
             return
+        if parsed.path == "/restore":
+            rows = []
+            for item in backup_manifests():
+                data = item["data"]
+                path = item["path"]
+                rows.append(
+                    f"<tr><td><code>{html.escape(str(data.get('environment', path.parents[2].name)))}</code></td>"
+                    f"<td>{html.escape(str(data.get('createdAt', 'n/a')))}</td>"
+                    f"<td><span class='muted'>{html.escape(str(path.parent.relative_to(ROOT) if ROOT in path.parents else path.parent))}</span></td>"
+                    f"<td><form method='post' action='/restore/plan'><input type='hidden' name='manifest' value='{html.escape(str(path))}'><button>Generate restore plan</button></form></td></tr>"
+                )
+            body = f"""
+<div class="section-head">
+  <div>
+    <h2>Restore Planning</h2>
+    <div class="section-copy">Generate controlled restore plans from backup manifests. Actual restore remains manual.</div>
+  </div>
+</div>
+<section class="panel">
+  <table>
+    <thead><tr><th>Environment</th><th>Created</th><th>Backup Path</th><th>Plan</th></tr></thead>
+    <tbody>{''.join(rows) or '<tr><td colspan="4" class="muted">No backups available.</td></tr>'}</tbody>
+  </table>
+</section>
+<div class="notice">Restore plans are written under <code>.zt/restore-plans/</code>. Review the plan before manually copying state back into place.</div>
+"""
+            self.send_html(page("Restore - NKP ZeroTouch Framework", body, "restore"))
+            return
         if parsed.path == "/plan-review":
             rows = []
             for config in env_configs():
@@ -2060,6 +2173,8 @@ class Handler(BaseHTTPRequestHandler):
                 state = env_state(name)
                 review = load_plan_review(name)
                 review_label, review_status = plan_review_status(name, state)
+                hashes = plan_hashes(name)
+                hash_note = "<br>".join(f"{html.escape(key)}: <code>{html.escape(value[:12] or 'n/a')}</code>" for key, value in hashes.items())
                 plan = state["base"] / "generated" / "deploy-plan.md"
                 plan_link = f'<a class="button-link" href="/artifacts/view?path={quote(str(plan))}">Open deploy plan</a>' if plan.exists() else '<span class="muted">Generate first</span>'
                 has_plan = bool(state["generate"]) or plan.exists()
@@ -2072,6 +2187,7 @@ class Handler(BaseHTTPRequestHandler):
                     f"<td><span class='chip {review_status}'>{html.escape(review_label)}</span></td>"
                     f"<td>{html.escape(review.get('reviewedBy', '') or 'n/a')}</td>"
                     f"<td>{html.escape(review.get('reviewedAt', '') or 'n/a')}</td>"
+                    f"<td class='review-note'>{hash_note}</td>"
                     f"<td>{plan_link}</td><td><div class='actions'>{controls}</div></td></tr>"
                 )
             body = f"""
@@ -2083,8 +2199,8 @@ class Handler(BaseHTTPRequestHandler):
 </div>
 <section class="panel">
   <table>
-    <thead><tr><th>Environment</th><th>Status</th><th>Reviewer</th><th>Reviewed</th><th>Plan</th><th>Decision</th></tr></thead>
-    <tbody>{''.join(rows) or '<tr><td colspan="6" class="muted">No environments found.</td></tr>'}</tbody>
+    <thead><tr><th>Environment</th><th>Status</th><th>Reviewer</th><th>Reviewed</th><th>Plan Hashes</th><th>Plan</th><th>Decision</th></tr></thead>
+    <tbody>{''.join(rows) or '<tr><td colspan="7" class="muted">No environments found.</td></tr>'}</tbody>
   </table>
 </section>
 <div class="notice">Plan review records live under each environment state directory. Apply jobs still require approval through the Jobs workflow.</div>
@@ -2415,6 +2531,36 @@ class Handler(BaseHTTPRequestHandler):
 """
             self.send_html(page("Drift - NKP ZeroTouch Framework", body, "drift"))
             return
+        if parsed.path == "/production-readiness":
+            rows = []
+            ready_count = 0
+            for config in env_configs():
+                env_name, channel, ok, checks = production_gate(config)
+                ready_count += 1 if ok else 0
+                details = "; ".join(f"{name}: {'pass' if passed else detail}" for name, passed, detail in checks)
+                rows.append(
+                    f"<tr><td><div class='env-name'>{html.escape(env_name)}</div><div class='env-file'>{html.escape(config.name)}</div></td>"
+                    f"<td><span class='badge connected'>{html.escape(channel)}</span></td>"
+                    f"<td><span class='chip {'ok' if ok else 'warn'}'>{'ready' if ok else 'blocked'}</span></td>"
+                    f"<td>{html.escape(details)}</td></tr>"
+                )
+            body = f"""
+<section class="summary-grid">
+  {metric_card("Ready", ready_count, "environments passing gate", "/production-readiness")}
+  {metric_card("Blocked", len(env_configs()) - ready_count, "environments needing work", "/production-readiness")}
+  {metric_card("Backups", len(backup_manifests()), "backup manifests", "/backups")}
+  {metric_card("Channels", len(release_channel_map()), "configured channels", "/release-channels")}
+</section>
+<div class="section-head">
+  <div>
+    <h2>Production Readiness Gate</h2>
+    <div class="section-copy">Checks plan review, backup evidence, drift, channel policy, and verification evidence.</div>
+  </div>
+</div>
+<section class="panel"><table><thead><tr><th>Environment</th><th>Channel</th><th>Status</th><th>Signals</th></tr></thead><tbody>{''.join(rows)}</tbody></table></section>
+"""
+            self.send_html(page("Production Readiness - NKP ZeroTouch Framework", body, "production-readiness"))
+            return
         if parsed.path == "/pipeline":
             steps = [("Source", "sources", "ok"), ("Validate", "actions", "warn"), ("Prepare", "actions", "warn"), ("Generate", "actions", "warn"), ("Review", "plan-review", "warn"), ("Registry", "cli", "warn"), ("Deploy", "cli", "warn"), ("Kubeconfig", "kubeconfig", "warn"), ("Verify", "actions", "warn"), ("Operate", "runs", "warn")]
             cards = "".join(f"<a class='pipeline-step' href='{VIEW_PATHS[href]}'><strong>{html.escape(label)}</strong><span class='chip {status}'>{'configured' if status == 'ok' else 'pending'}</span></a>" for label, href, status in steps)
@@ -2467,12 +2613,14 @@ class Handler(BaseHTTPRequestHandler):
             for config in env_configs():
                 env_name = environment_for_config(config)
                 lock = active_lock(env_name)
+                clear = f"<form method='post' action='/locks/clear'><input type='hidden' name='environment' value='{html.escape(env_name)}'><button class='button-danger'>Clear stale lock</button></form>" if not lock and lock_path(env_name).exists() else ""
                 lock_rows.append(
                     f"<tr><td><div class='env-name'>{html.escape(env_name)}</div><div class='env-file'>{html.escape(config.name)}</div></td>"
                     f"<td><span class='chip {'warn' if lock else 'ok'}'>{'locked' if lock else 'available'}</span></td>"
                     f"<td>{html.escape(lock.get('jobId', 'n/a') if lock else 'n/a')}</td>"
                     f"<td>{html.escape(lock.get('action', 'n/a') if lock else 'n/a')}</td>"
-                    f"<td>{html.escape(lock.get('lockedBy', 'n/a') if lock else 'n/a')}</td></tr>"
+                    f"<td>{html.escape(lock.get('lockedBy', 'n/a') if lock else 'n/a')}</td>"
+                    f"<td>{clear}</td></tr>"
                 )
             body = f"""
 <div class="section-head">
@@ -2483,8 +2631,8 @@ class Handler(BaseHTTPRequestHandler):
 </div>
 <section class="panel">
   <table>
-    <thead><tr><th>Environment</th><th>Status</th><th>Job</th><th>Action</th><th>Locked By</th></tr></thead>
-    <tbody>{''.join(lock_rows) or '<tr><td colspan="5" class="muted">No environments found.</td></tr>'}</tbody>
+    <thead><tr><th>Environment</th><th>Status</th><th>Job</th><th>Action</th><th>Locked By</th><th>Cleanup</th></tr></thead>
+    <tbody>{''.join(lock_rows) or '<tr><td colspan="6" class="muted">No environments found.</td></tr>'}</tbody>
   </table>
 </section>
 """
@@ -2499,7 +2647,8 @@ class Handler(BaseHTTPRequestHandler):
                     f"<td>{html.escape(record.get('action', ''))}</td>"
                     f"<td><span class='chip {'ok' if record.get('status') == 'closed' else 'warn'}'>{html.escape(record.get('status', 'open'))}</span></td>"
                     f"<td>{html.escape(record.get('requestedBy', ''))}</td>"
-                    f"<td>{html.escape(record.get('createdAt', ''))}</td></tr>"
+                    f"<td>{html.escape(record.get('createdAt', ''))}</td>"
+                    f"<td><a class='button-link' href='/change-records/view?id={quote(record.get('id', ''))}'>Open</a></td></tr>"
                 )
             body = f"""
 <div class="section-head">
@@ -2510,12 +2659,50 @@ class Handler(BaseHTTPRequestHandler):
 </div>
 <section class="panel">
   <table>
-    <thead><tr><th>Change</th><th>Environment</th><th>Action</th><th>Status</th><th>Requested By</th><th>Created</th></tr></thead>
-    <tbody>{''.join(rows) or '<tr><td colspan="6" class="muted">No change records yet. Request an apply action from the CLI page.</td></tr>'}</tbody>
+    <thead><tr><th>Change</th><th>Environment</th><th>Action</th><th>Status</th><th>Requested By</th><th>Created</th><th>Open</th></tr></thead>
+    <tbody>{''.join(rows) or '<tr><td colspan="7" class="muted">No change records yet. Request an apply action from the CLI page.</td></tr>'}</tbody>
   </table>
 </section>
 """
             self.send_html(page("Change Records - NKP ZeroTouch Framework", body, "change-records"))
+            return
+        if parsed.path == "/change-records/view":
+            query = parse_qs(parsed.query)
+            record_id = query.get("id", [""])[0]
+            record = read_json(change_record_path(record_id))
+            if not record:
+                self.send_html(page("Change Record Not Found", "<h2>Change record not found</h2><a class='back-link' href='/change-records'>Back to change records</a>", "change-records"), status=404)
+                return
+            hashes = record.get("planHashes", {})
+            hash_rows = "".join(f"<tr><td>{html.escape(key)}</td><td><code>{html.escape(value or 'n/a')}</code></td></tr>" for key, value in hashes.items())
+            job_id = record.get("jobId", "")
+            body = f"""
+<div class="section-head">
+  <div>
+    <h2>Change Record</h2>
+    <div class="section-copy"><code>{html.escape(record.get('id', ''))}</code></div>
+  </div>
+  <a class="button-link" href="/jobs/view?id={quote(job_id)}">Open job</a>
+</div>
+<section class="panel">
+  <table>
+    <thead><tr><th>Field</th><th>Value</th></tr></thead>
+    <tbody>
+      <tr><td>Environment</td><td>{html.escape(record.get('environment', ''))}</td></tr>
+      <tr><td>Action</td><td>{html.escape(record.get('action', ''))}</td></tr>
+      <tr><td>Status</td><td>{html.escape(record.get('status', ''))}</td></tr>
+      <tr><td>Requested by</td><td>{html.escape(record.get('requestedBy', ''))} ({html.escape(record.get('requestedRole', ''))})</td></tr>
+      <tr><td>Created</td><td>{html.escape(record.get('createdAt', ''))}</td></tr>
+      <tr><td>Updated</td><td>{html.escape(record.get('updatedAt', 'n/a'))}</td></tr>
+      <tr><td>Rollback notes</td><td>{html.escape(record.get('rollbackNotes', ''))}</td></tr>
+    </tbody>
+  </table>
+</section>
+<div class="section-head"><div><h2>Plan Hashes</h2><div class="section-copy">Hashes captured when the apply request was created.</div></div></div>
+<section class="panel"><table><thead><tr><th>Artifact</th><th>SHA256</th></tr></thead><tbody>{hash_rows}</tbody></table></section>
+<a class="back-link" href="/change-records">Back to change records</a>
+"""
+            self.send_html(page("Change Record - NKP ZeroTouch Framework", body, "change-records"))
             return
         if parsed.path == "/jobs/view":
             query = parse_qs(parsed.query)
@@ -3210,6 +3397,50 @@ class Handler(BaseHTTPRequestHandler):
             self.send_redirect("/plan-review")
             return
 
+        if parsed.path == "/locks/clear":
+            env_name = form_value(form, "environment")
+            if active_lock(env_name):
+                self.send_html(page("Lock Active", "<h2>Lock is active</h2><div class='notice'>Active locks cannot be cleared while the linked job is queued, running, or pending approval.</div><a class='back-link' href='/locks'>Back to locks</a>", "locks"), status=409)
+                return
+            lock_path(env_name).unlink(missing_ok=True)
+            audit_event("lock_cleared", self.current_user(), env_name, "success")
+            self.send_redirect("/locks")
+            return
+
+        if parsed.path == "/restore/plan":
+            try:
+                manifest = resolve_artifact(form_value(form, "manifest"))
+                data = read_json(manifest) or {}
+                restore_dir = ZT / "restore-plans"
+                restore_dir.mkdir(parents=True, exist_ok=True)
+                plan_id = f"restore-{time.strftime('%Y%m%d-%H%M%S', time.gmtime())}"
+                plan_path = restore_dir / f"{plan_id}.md"
+                plan = f"""# Restore Plan
+
+Created: {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}
+Requested by: {self.current_user().get('username', 'operator')}
+
+Manifest: `{manifest}`
+Environment: `{data.get('environment', 'unknown')}`
+Backup: `{manifest.parent}`
+
+## Manual Restore Steps
+
+1. Stop active jobs for this environment.
+2. Confirm no active lock exists.
+3. Copy selected `state`, `generated`, or `reports` folders from the backup path.
+4. Re-run preflight and drift detection.
+5. Run verify before any apply action.
+"""
+                plan_path.write_text(plan, encoding="utf-8")
+                audit_event("restore_plan_created", self.current_user(), str(manifest), "success", {"plan": str(plan_path)})
+            except Exception as exc:
+                self.send_html(page("Restore Plan Error", f"<h2>Restore plan failed</h2><div class='notice'>{html.escape(str(exc))}</div><a class='back-link' href='/restore'>Back to restore</a>", "restore"), status=400)
+                return
+            body = f"<section class='metric'><div class='metric-label'>Restore Plan</div><div class='metric-value'>{html.escape(plan_id)}</div><div class='metric-foot'><span class='chip ok'>Generated</span></div></section><a class='button-link' href='/artifacts/view?path={quote(str(plan_path))}'>Open restore plan</a> <a class='back-link' href='/restore'>Back to restore</a>"
+            self.send_html(page("Restore Plan Created", body, "restore"))
+            return
+
         if parsed.path == "/jobs/approve":
             user = self.current_user()
             if not has_permission(user, "approve"):
@@ -3307,6 +3538,12 @@ class Handler(BaseHTTPRequestHandler):
             if not command:
                 self.send_html(page("CLI Error", "<h2>Runner unavailable</h2><div class='notice'>No supported shell runner found.</div><a class='back-link' href='/cli'>Back to CLI</a>", "cli"), status=500)
                 return
+            allowed, reasons = apply_gate(config, action)
+            if not allowed:
+                reason_rows = "".join(f"<li>{html.escape(reason)}</li>" for reason in reasons)
+                audit_event("apply_gate_blocked", self.current_user(), action, "denied", {"config": str(config), "reasons": reasons})
+                self.send_html(page("Apply Gate Blocked", f"<h2>Apply gate blocked</h2><div class='notice'>Resolve these controls before requesting apply.</div><ul>{reason_rows}</ul><a class='back-link' href='/cli'>Back to CLI</a>", "cli"), status=409)
+                return
             job = create_job(action, config, command, self.current_user(), kind="apply", approval_required=True)
             change = create_change_record(job, self.current_user())
             audit_event("apply_requested", self.current_user(), job["id"], "pending", {"action": action, "config": str(config)})
@@ -3321,6 +3558,7 @@ class Handler(BaseHTTPRequestHandler):
                 field_map = {
                     "environment_name": (["environment", "name"], str),
                     "environment_type": (["environment", "type"], str),
+                    "release_channel": (["environment", "channel"], str),
                     "environment_provider": (["environment", "provider"], str),
                     "nkp_version": (["nkp", "version"], str),
                     "bundle_type": (["nkp", "bundleType"], str),

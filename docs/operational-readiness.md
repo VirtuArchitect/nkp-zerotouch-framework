@@ -37,6 +37,9 @@ Before live deployment, operations teams must provide:
 - Drift detection for stale plans, changed YAML, and missing verification evidence.
 - Backup manifest browsing and release-channel metadata.
 - Authenticated JSON endpoints for future automation and frontend decoupling.
+- Apply gates that require current plan review and release-channel governance.
+- Production readiness view for review, backup, drift, channel, and verification status.
+- Restore plan generation from backup manifests.
 - Runs, artifacts, health checks, and append-only audit visibility from `.zt`.
 - Artifact viewer and diff workflow for generated plans, reports, logs, state, and configs.
 - Local connection, RBAC, database, integration, approval policy, source, inventory, network, provider, and secret-backend settings.

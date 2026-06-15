@@ -35,6 +35,13 @@ This maps the public-readiness and real-deployment tasks to the repository featu
 | Drift detection | Implemented baseline | console reports stale reviews, YAML-after-prepare changes, missing generate, and missing verification |
 | Backup/restore UI | Implemented baseline | console lists backup manifests; restore remains manual and controlled |
 | Release channels | Implemented baseline | configurable dev/lab/pilot/production channel metadata |
+| Release channel enforcement | Implemented baseline | apply jobs use the higher of action approval count or release-channel approval count |
+| Plan review enforcement | Implemented baseline | apply requests are blocked when review is missing, rejected, or stale |
+| Change record detail | Implemented baseline | change records have detail pages with job link, hashes, requester, status, and rollback notes |
+| Restore planning | Implemented baseline | console generates guarded restore plans from backup manifests |
+| Lock cleanup | Implemented baseline | stale locks can be cleared while active locks remain protected |
+| Production readiness gate | Implemented baseline | console reports plan review, backup, drift, channel, and verification readiness |
+| Dashboard route tests | Implemented baseline | pytest route/API smoke coverage for dashboard pages and JSON endpoints |
 | OIDC login flow | Partial | readiness route exists; full authorization-code token exchange remains future work |
 | Vault secret validation | Implemented baseline | runtime secret key presence checks and Vault health probe metadata |
 | Environment uniqueness checks | Implemented baseline | environment create/edit blocks duplicate names, cluster names, API VIPs, and registry namespaces |
