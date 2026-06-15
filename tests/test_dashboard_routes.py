@@ -46,7 +46,12 @@ def test_dashboard_pages_and_api_routes():
         status, _, _ = request(opener, base_url, "/login", {"username": "dashboard-smoke", "password": "DashboardSmoke-Local-123!"}, allow_error=True)
         assert status in {200, 303}
 
-        for path in ["/", "/setup", "/plan-review", "/kubeconfig", "/drift", "/locks", "/change-records", "/backups", "/restore", "/production-readiness", "/release-channels"]:
+        page_paths = ["/", "/setup", "/plan-review", "/kubeconfig", "/drift", "/locks", "/change-records", "/backups", "/restore", "/production-readiness", "/release-channels"]
+        configs = app.env_configs()
+        if configs:
+            page_paths.append(f"/environment/view?config={urllib.parse.quote(str(configs[0]))}")
+
+        for path in page_paths:
             status, content_type, body = request(opener, base_url, path)
             assert status == 200
             assert "text/html" in content_type

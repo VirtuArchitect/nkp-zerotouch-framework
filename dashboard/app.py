@@ -910,6 +910,33 @@ def apply_gate(config, action):
     return not reasons, reasons
 
 
+def environment_next_action(config):
+    data = read_json_from_context(config)
+    env_name = str(data.get("environmentName") or config.stem)
+    state = env_state(env_name)
+    review_label, review_status = plan_review_status(env_name, state)
+    _, drift_state, drift_issues = drift_status(config)
+    _, _, gate_ok, gate_checks = production_gate(config)
+    detail_href = f"/environment/view?config={quote(str(config))}"
+
+    if not state["state"]:
+        return "Prepare workspace", detail_href, "warn", "Stage NKP inputs and create local state."
+    if not state["generate"]:
+        return "Generate artifacts", detail_href, "warn", "Create registry, deploy, and reviewable plans."
+    if review_status != "ok":
+        return "Review plan", "/plan-review", "warn", review_label
+    if drift_state != "ok":
+        return "Resolve drift", "/drift", "warn", "; ".join(drift_issues)
+    if not gate_ok:
+        failed = [f"{name}: {detail}" for name, passed, detail in gate_checks if not passed]
+        return "Clear production gate", "/production-readiness", "warn", "; ".join(failed)
+    if not (state["base"] / "state" / "kubeconfig").exists():
+        return "Request deploy", "/cli", "ok", "Apply gate is clear; submit controlled CLI deploy."
+    if not state["verification"].exists():
+        return "Verify cluster", detail_href, "warn", "Run verification and capture deployment evidence."
+    return "Capture run summary", "/runs", "ok", "Environment has deployment evidence."
+
+
 def backup_manifests():
     manifests = []
     for path in (ZT / "environments").glob("*/backup/*/backup-manifest.json") if (ZT / "environments").exists() else []:
@@ -1301,25 +1328,27 @@ def page(title, body, active="environments", user=None):
 
     nav = f"""
     <div class="nav-label">Operations</div>
-    <a class="{nav_class('setup')}" href="{VIEW_PATHS['setup']}"><span class="nav-dot"></span>Setup Wizard</a>
     <a class="{nav_class('environments')}" href="{VIEW_PATHS['environments']}"><span class="nav-dot"></span>Environments</a>
-    <a class="{nav_class('cli')}" href="{VIEW_PATHS['cli']}">CLI</a>
+    <a class="{nav_class('jobs')}" href="{VIEW_PATHS['jobs']}">Jobs</a>
     <a class="{nav_class('runs')}" href="{VIEW_PATHS['runs']}">Runs</a>
+    <div class="nav-label">Readiness</div>
+    <a class="{nav_class('setup')}" href="{VIEW_PATHS['setup']}">Setup Wizard</a>
+    <a class="{nav_class('preflight')}" href="{VIEW_PATHS['preflight']}">Preflight</a>
+    <a class="{nav_class('drift')}" href="{VIEW_PATHS['drift']}">Drift</a>
+    <a class="{nav_class('production-readiness')}" href="{VIEW_PATHS['production-readiness']}">Production Gate</a>
+    <a class="{nav_class('health')}" href="{VIEW_PATHS['health']}">Health</a>
+    <div class="nav-label">Artifacts</div>
     <a class="{nav_class('artifacts')}" href="{VIEW_PATHS['artifacts']}">Artifacts</a>
     <a class="{nav_class('plan-review')}" href="{VIEW_PATHS['plan-review']}">Plan Review</a>
     <a class="{nav_class('kubeconfig')}" href="{VIEW_PATHS['kubeconfig']}">Kubeconfig</a>
     <a class="{nav_class('backups')}" href="{VIEW_PATHS['backups']}">Backups</a>
     <a class="{nav_class('restore')}" href="{VIEW_PATHS['restore']}">Restore</a>
-    <a class="{nav_class('health')}" href="{VIEW_PATHS['health']}">Health</a>
     <div class="nav-label">Deployment</div>
     <a class="{nav_class('sources')}" href="{VIEW_PATHS['sources']}">Sources</a>
     <a class="{nav_class('inventory')}" href="{VIEW_PATHS['inventory']}">Inventory</a>
     <a class="{nav_class('network')}" href="{VIEW_PATHS['network']}">Network</a>
-    <a class="{nav_class('preflight')}" href="{VIEW_PATHS['preflight']}">Preflight</a>
-    <a class="{nav_class('drift')}" href="{VIEW_PATHS['drift']}">Drift</a>
-    <a class="{nav_class('production-readiness')}" href="{VIEW_PATHS['production-readiness']}">Production Gate</a>
     <a class="{nav_class('pipeline')}" href="{VIEW_PATHS['pipeline']}">Pipeline</a>
-    <a class="{nav_class('jobs')}" href="{VIEW_PATHS['jobs']}">Jobs</a>
+    <a class="{nav_class('cli')}" href="{VIEW_PATHS['cli']}">CLI</a>
     <a class="{nav_class('locks')}" href="{VIEW_PATHS['locks']}">Locks</a>
     <div class="nav-label">Governance</div>
     <a class="{nav_class('actions')}" href="{VIEW_PATHS['actions']}">Safe Actions</a>
@@ -1348,14 +1377,14 @@ def page(title, body, active="environments", user=None):
   <style>
     :root {{
       --bg: #030712;
-      --panel: #1c1e2d;
-      --panel-2: #252840;
+      --panel: #111827;
+      --panel-2: #172033;
       --panel-3: #111827;
       --ink: #f1f5f9;
       --muted: #9ca3af;
       --muted-2: #6b7280;
-      --line: #2e3150;
-      --line-strong: #3d4170;
+      --line: #263244;
+      --line-strong: #344256;
       --nav: #030712;
       --nav-2: #080d1a;
       --accent: #034ea2;
@@ -1538,6 +1567,18 @@ def page(title, body, active="environments", user=None):
     .progress-track {{ height: 8px; min-width: 120px; border-radius: 999px; background: rgba(148,163,184,.18); overflow: hidden; margin-top: 6px; }}
     .progress-bar {{ height: 100%; background: linear-gradient(90deg, var(--accent), var(--good)); }}
     .action-group {{ display: grid; grid-template-columns: repeat(2, minmax(260px, 1fr)); gap: 14px; }}
+    .detail-grid {{ display: grid; grid-template-columns: repeat(3, minmax(220px, 1fr)); gap: 14px; }}
+    .next-actions {{ display: grid; grid-template-columns: repeat(2, minmax(260px, 1fr)); gap: 12px; }}
+    .next-action {{
+      display: flex; justify-content: space-between; gap: 14px; align-items: center;
+      padding: 14px; border: 1px solid var(--line); border-radius: 8px;
+      background: var(--panel);
+    }}
+    .next-action strong {{ display: block; margin-bottom: 4px; }}
+    .next-action .button-link {{ flex: 0 0 auto; }}
+    .risk-low {{ color: var(--good); }}
+    .risk-medium {{ color: var(--warn); }}
+    .risk-high {{ color: #fca5a5; }}
     .review-note {{ max-width: 380px; color: var(--muted); font-size: 12px; }}
     .terminal-window {{ background: #0b1220; color: #dbeafe; border-radius: 8px; border: 1px solid #253149; overflow: hidden; }}
     .terminal-bar {{ min-height: 36px; display: flex; align-items: center; gap: 8px; padding: 0 12px; background: #111827; border-bottom: 1px solid #253149; color: #93a4bd; font-size: 12px; font-weight: 700; }}
@@ -1560,7 +1601,7 @@ def page(title, body, active="environments", user=None):
       .summary-grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
       .ops-strip {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
       .settings-grid, .form-grid {{ grid-template-columns: 1fr; }}
-      .action-group {{ grid-template-columns: 1fr; }}
+      .action-group, .detail-grid, .next-actions {{ grid-template-columns: 1fr; }}
       .actions {{ min-width: 270px; }}
       .manage-actions {{ min-width: 128px; }}
     }}
@@ -1827,9 +1868,11 @@ class Handler(BaseHTTPRequestHandler):
             return
         if parsed.path in ("/", "/environments"):
             rows = []
+            next_action_cards = []
             env_total = 0
-            prepared_total = 0
-            generated_total = 0
+            ready_to_deploy = 0
+            blocked_total = 0
+            drift_total = 0
             report_total = 0
             for config in env_configs():
                 data = read_json_from_context(config)
@@ -1837,41 +1880,53 @@ class Handler(BaseHTTPRequestHandler):
                 env_type = data.get("environmentType", "unknown")
                 channel = env_channel(data)
                 state = env_state(name)
-                prepared = bool(state["state"])
-                generated = bool(state["generate"])
                 report = state["verification"].exists()
                 lifecycle_label, lifecycle_status = environment_lifecycle(name, state)
                 ready_passed, ready_total, ready_pct = environment_readiness(data, state)
                 review_label, review_status = plan_review_status(name, state)
+                _, drift_state, drift_issues = drift_status(config)
+                gate_ok, gate_reasons = apply_gate(config, "deploy")
+                next_label, next_href, next_status, next_detail = environment_next_action(config)
                 env_total += 1
-                prepared_total += 1 if prepared else 0
-                generated_total += 1 if generated else 0
+                ready_to_deploy += 1 if gate_ok else 0
+                blocked_total += 0 if gate_ok else 1
+                drift_total += 1 if drift_state != "ok" else 0
                 report_total += 1 if report else 0
-                buttons = "".join(
-                    f'<form method="post" action="/action"><input type="hidden" name="action" value="{a}"><input type="hidden" name="config" value="{html.escape(str(config))}"><button title="Run {a}">{a}</button></form> '
-                    for a in ACTION_ORDER
-                )
                 config_arg = quote(str(config))
                 manage_buttons = (
+                    f'<a class="button-link" href="/environment/view?config={config_arg}">Open</a> '
                     f'<a class="button-link" href="/environment/edit?config={config_arg}">Edit</a> '
-                    f'<a class="button-link button-danger" href="/environment/delete?config={config_arg}">Delete</a>'
                 )
+                if len(next_action_cards) < 4:
+                    next_action_cards.append(
+                        f"<div class='next-action'><div><strong>{html.escape(name)}</strong>"
+                        f"<div class='env-file'>{html.escape(config.name)} · {html.escape(next_detail[:140])}</div></div>"
+                        f"<a class='button-link' href='{html.escape(next_href)}'>{html.escape(next_label)}</a></div>"
+                    )
+                gate_detail = "deploy gate clear" if gate_ok else "; ".join(gate_reasons[:2])
+                drift_label = "clear" if drift_state == "ok" else "attention"
                 rows.append(
                     f"<tr><td><div class='env-name'>{html.escape(name)}</div><div class='env-file'>{html.escape(config.name)}</div></td>"
-                    f"<td><span class='badge {html.escape(env_type)}'>{html.escape(env_type)}</span></td>"
-                    f"<td><span class='badge connected'>{html.escape(channel)}</span></td>"
+                    f"<td><span class='badge {html.escape(env_type)}'>{html.escape(env_type)}</span><div class='env-file'>channel {html.escape(channel)}</div></td>"
                     f"<td><span class='chip {lifecycle_status}'>{html.escape(lifecycle_label)}</span><div class='env-file'>readiness {ready_passed}/{ready_total}</div><div class='progress-track'><div class='progress-bar' style='width:{ready_pct}%'></div></div></td>"
-                    f"<td><span class='chip {'ok' if prepared else 'warn'}'>{'Ready' if prepared else 'Pending'}</span></td>"
-                    f"<td><span class='chip {'ok' if generated else 'warn'}'>{'Generated' if generated else 'Pending'}</span></td>"
-                    f"<td><span class='chip {'ok' if report else 'warn'}'>{'Available' if report else 'Missing'}</span></td>"
-                    f"<td><span class='chip {review_status}'>{html.escape(review_label)}</span></td>"
-                    f"<td class='actions'>{buttons}</td>"
+                    f"<td><span class='chip {'ok' if gate_ok else 'warn'}'>{'ready' if gate_ok else 'blocked'}</span><div class='env-file'>{html.escape(gate_detail[:120])}</div></td>"
+                    f"<td><span class='chip {drift_state}'>{html.escape(drift_label)}</span><div class='env-file'>{html.escape('; '.join(drift_issues)[:120])}</div></td>"
+                    f"<td><span class='chip {review_status}'>{html.escape(review_label)}</span><div class='env-file'>{'report available' if report else 'report missing'}</div></td>"
+                    f"<td><a class='button-link' href='{html.escape(next_href)}'>{html.escape(next_label)}</a><div class='env-file'>{html.escape(next_detail[:120])}</div></td>"
                     f"<td class='manage-actions'>{manage_buttons}</td></tr>"
                 )
             runs = sorted((ZT / "runs").glob("*/summary.md")) if (ZT / "runs").exists() else []
             recent_runs = list(reversed(runs[-10:]))
             rbac = load_rbac()
             auth_mode = "Local RBAC" if any(account.get("passwordHash") for account in rbac.get("accounts", [])) else "Bootstrap"
+            pending_approvals = sum(1 for job in list_jobs(200) if job.get("status") == "pending_approval")
+            uniqueness_issues = environment_uniqueness_issues()
+            uniqueness_notice = (
+                "<div class='notice'><strong>Environment identity warning:</strong> "
+                + " ".join(html.escape(issue) for issue in uniqueness_issues)
+                + "</div>"
+                if uniqueness_issues else ""
+            )
             run_rows = "".join(
                 f"<li><code>{html.escape(p.parent.name)}</code><span class='muted'>summary.md</span></li>"
                 for p in recent_runs
@@ -1884,21 +1939,30 @@ class Handler(BaseHTTPRequestHandler):
   <div class="ops-item"><div class="ops-label">Live Apply</div><div class="ops-value">CLI Approval Required</div></div>
 </section>
 <section class="summary-grid">
-  {metric_card("Environments", env_total, "configured deployment targets", "/")}
-  {metric_card("Prepared", prepared_total, "workspace states available", "/artifacts")}
-  {metric_card("Generated", generated_total, "artifact sets created", "/artifacts")}
-  {metric_card("Reports", report_total, "verification summaries present", "/artifacts")}
+  {metric_card("Ready to Deploy", ready_to_deploy, "environments clear deploy gate", "/production-readiness")}
+  {metric_card("Blocked", blocked_total, "environments need operator action", "/preflight")}
+  {metric_card("Pending Approval", pending_approvals, "apply jobs awaiting review", "/jobs")}
+  {metric_card("Drift Detected", drift_total, "environments with drift signals", "/drift")}
 </section>
+{uniqueness_notice}
+
+<div class="section-head">
+  <div>
+    <h2>Recommended Next Actions</h2>
+    <div class="section-copy">Highest-signal operator actions based on current state, review, drift, and production gate checks.</div>
+  </div>
+</div>
+<section class="next-actions">{''.join(next_action_cards) or '<div class="next-action"><div><strong>No environments found</strong><div class="env-file">Create an environment profile to start the deployment flow.</div></div><a class="button-link" href="/settings/new-environment">Create</a></div>'}</section>
 
 <div class="section-head">
   <div>
     <h2>Environments</h2>
-    <div class="section-copy">Validated deployment profiles for connected, proxied, and air-gapped NKP installs.</div>
+    <div class="section-copy">Operational cockpit for connected, proxied, and air-gapped NKP deployment profiles.</div>
   </div>
 </div>
 <section class="panel">
   <table>
-    <thead><tr><th>Name</th><th>Type</th><th>Channel</th><th>Lifecycle</th><th>Prepared</th><th>Generated</th><th>Report</th><th>Plan Review</th><th>Safe Actions</th><th>Manage</th></tr></thead>
+    <thead><tr><th>Name</th><th>Type / Channel</th><th>Lifecycle / Readiness</th><th>Deploy Gate</th><th>Drift</th><th>Evidence</th><th>Next Action</th><th>Manage</th></tr></thead>
     <tbody>{''.join(rows)}</tbody>
   </table>
 </section>
@@ -1915,6 +1979,122 @@ class Handler(BaseHTTPRequestHandler):
 <div class="notice">Destructive and apply actions are intentionally CLI-only. This console exposes validation, preparation, generation, verification, backup, and run inspection workflows.</div>
 """
             self.send_html(page("NKP ZeroTouch Framework", body, "environments"))
+            return
+        if parsed.path == "/environment/view":
+            query = parse_qs(parsed.query)
+            try:
+                config = resolve_env_config(query.get("config", [""])[0])
+            except Exception as exc:
+                self.send_html(page("Environment", f"<h2>Environment unavailable</h2><div class='notice'>{html.escape(str(exc))}</div><a class='back-link' href='/'>Back to environments</a>", "environments"), status=400)
+                return
+            data = read_json_from_context(config)
+            name = str(data.get("environmentName") or config.stem)
+            env_type = str(data.get("environmentType") or "unknown")
+            channel = env_channel(data)
+            state = env_state(name)
+            lifecycle_label, lifecycle_status = environment_lifecycle(name, state)
+            ready_passed, ready_total, ready_pct = environment_readiness(data, state)
+            review_label, review_status = plan_review_status(name, state)
+            _, drift_state, drift_issues = drift_status(config)
+            _, _, gate_ok, gate_checks = production_gate(config)
+            next_label, next_href, next_status, next_detail = environment_next_action(config)
+            config_arg = quote(str(config))
+            actions = "".join(
+                f'<form method="post" action="/action"><input type="hidden" name="action" value="{a}"><input type="hidden" name="config" value="{html.escape(str(config))}"><button>{a}</button></form>'
+                for a in ACTION_ORDER
+            )
+            generated_root = state["base"] / "generated"
+            artifact_candidates = [
+                generated_root / "deploy-plan.md",
+                generated_root / "deploy.sh",
+                generated_root / "registry-plan.md",
+                generated_root / "registry.sh",
+                state["verification"],
+                state["base"] / "state" / "kubeconfig",
+            ]
+            artifact_rows = "".join(
+                f"<tr><td><code>{html.escape(path.name)}</code></td><td><span class='muted'>{html.escape(str(path.relative_to(ROOT)))}</span></td><td><a class='button-link' href='/artifacts/view?path={quote(str(path))}'>Open</a></td></tr>"
+                for path in artifact_candidates if path.exists()
+            )
+            gate_rows = "".join(
+                f"<tr><td>{html.escape(label)}</td><td><span class='chip {'ok' if passed else 'warn'}'>{'passed' if passed else 'blocked'}</span></td><td>{html.escape(detail)}</td></tr>"
+                for label, passed, detail in gate_checks
+            )
+            recent_jobs = [job for job in list_jobs(100) if job.get("environment") == name][:8]
+            job_rows = "".join(
+                f"<tr><td><code>{html.escape(job.get('id', ''))}</code></td><td>{html.escape(job.get('action', ''))}</td><td><span class='chip {job_status_chip(job.get('status', 'queued'))}'>{html.escape(job.get('status', 'queued'))}</span></td><td><a class='button-link' href='/jobs/view?id={quote(job.get('id', ''))}'>Open</a></td></tr>"
+                for job in recent_jobs
+            )
+            body = f"""
+<section class="ops-strip">
+  <div class="ops-item"><div class="ops-label">Environment</div><div class="ops-value">{html.escape(name)}</div></div>
+  <div class="ops-item"><div class="ops-label">Type / Channel</div><div class="ops-value">{html.escape(env_type)} / {html.escape(channel)}</div></div>
+  <div class="ops-item"><div class="ops-label">Lifecycle</div><div class="ops-value"><span class="chip {lifecycle_status}">{html.escape(lifecycle_label)}</span></div></div>
+  <div class="ops-item"><div class="ops-label">Next Action</div><div class="ops-value"><span class="chip {next_status}">{html.escape(next_label)}</span></div></div>
+</section>
+<section class="summary-grid">
+  {metric_card("Readiness", ready_pct, f"{ready_passed}/{ready_total} checks complete", "/preflight")}
+  {metric_card("Deploy Gate", 1 if gate_ok else 0, "clear" if gate_ok else "blocked", "/production-readiness")}
+  {metric_card("Plan Review", 1 if review_status == "ok" else 0, review_label, "/plan-review")}
+  {metric_card("Drift", 0 if drift_state == "ok" else 1, "; ".join(drift_issues)[:80], "/drift")}
+</section>
+
+<div class="section-head">
+  <div>
+    <h2>{html.escape(name)}</h2>
+    <div class="section-copy">{html.escape(str(config.relative_to(ROOT)))} · {html.escape(next_detail)}</div>
+  </div>
+  <a class="button-link" href="{html.escape(next_href)}">{html.escape(next_label)}</a>
+</div>
+<section class="detail-grid">
+  <div class="settings-card">
+    <h3>Deployment Profile</h3>
+    <table><tbody>
+      <tr><td>NKP version</td><td><code>{html.escape(str(data.get('nkpVersion', '')))}</code></td></tr>
+      <tr><td>Cluster</td><td>{html.escape(str(data.get('clusterName', '')))}</td></tr>
+      <tr><td>Prism</td><td>{html.escape(str(data.get('prismEndpoint', '')))}</td></tr>
+      <tr><td>Registry</td><td>{html.escape(str(data.get('registryEndpoint', '')))}</td></tr>
+    </tbody></table>
+  </div>
+  <div class="settings-card">
+    <h3>Safe Actions</h3>
+    <div class="actions">{actions}</div>
+    <p style="margin-top: 12px;">Safe actions run as tracked jobs and do not execute live apply operations.</p>
+  </div>
+  <div class="settings-card">
+    <h3>Governance</h3>
+    <p><span class="chip {'ok' if gate_ok else 'warn'}">{'Deploy gate clear' if gate_ok else 'Deploy gate blocked'}</span></p>
+    <p style="margin-top: 10px;"><a href="/cli">CLI apply</a> · <a href="/plan-review">Plan review</a> · <a href="/change-records">Change records</a></p>
+  </div>
+</section>
+
+<div class="section-head">
+  <div>
+    <h2>Production Gate</h2>
+    <div class="section-copy">Release-channel checks that must be clear before apply work proceeds.</div>
+  </div>
+</div>
+<section class="panel"><table><thead><tr><th>Check</th><th>Status</th><th>Detail</th></tr></thead><tbody>{gate_rows}</tbody></table></section>
+
+<div class="section-head">
+  <div>
+    <h2>Artifacts</h2>
+    <div class="section-copy">Generated plans, scripts, kubeconfig evidence, and verification summaries for this environment.</div>
+  </div>
+</div>
+<section class="panel"><table><thead><tr><th>Artifact</th><th>Path</th><th>Open</th></tr></thead><tbody>{artifact_rows or '<tr><td colspan="3" class="muted">No generated artifacts found yet.</td></tr>'}</tbody></table></section>
+
+<div class="section-head">
+  <div>
+    <h2>Recent Jobs</h2>
+    <div class="section-copy">Latest tracked work for this deployment target.</div>
+  </div>
+  <span class="manage-actions"><a class="button-link" href="/environment/edit?config={config_arg}">Edit</a><a class="button-link button-danger" href="/environment/delete?config={config_arg}">Delete</a></span>
+</div>
+<section class="panel"><table><thead><tr><th>Job</th><th>Action</th><th>Status</th><th>Open</th></tr></thead><tbody>{job_rows or '<tr><td colspan="4" class="muted">No jobs have run for this environment yet.</td></tr>'}</tbody></table></section>
+<a class="back-link" href="/">Back to environments</a>
+"""
+            self.send_html(page(f"{name} - NKP ZeroTouch Framework", body, "environments"))
             return
         if parsed.path == "/cli":
             config_options = []
