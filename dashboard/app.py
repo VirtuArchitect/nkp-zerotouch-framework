@@ -1015,76 +1015,85 @@ def page(title, body, active="environments", user=None):
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{html.escape(title)}</title>
+  <link rel="icon" type="image/svg+xml" href="/assets/veridian-mark-teal.svg">
   <style>
     :root {{
-      --bg: #f2f5f8;
-      --panel: #ffffff;
-      --panel-2: #f7f9fc;
-      --ink: #111827;
-      --muted: #667085;
-      --line: #d7dee8;
-      --line-strong: #c3ccd8;
-      --nav: #0f1724;
-      --nav-2: #182235;
-      --accent: #1a6b6b;
-      --accent-2: #2563eb;
-      --accent-soft: #e6f4f4;
-      --good: #057a55;
-      --good-soft: #dcfce7;
-      --warn: #9a5b05;
-      --warn-soft: #fef3c7;
-      --bad: #b42318;
-      --bad-soft: #fee4e2;
-      --shadow: 0 12px 30px rgba(16, 24, 40, .07);
+      --bg: #030712;
+      --panel: #1c1e2d;
+      --panel-2: #252840;
+      --panel-3: #111827;
+      --ink: #f1f5f9;
+      --muted: #9ca3af;
+      --muted-2: #6b7280;
+      --line: #2e3150;
+      --line-strong: #3d4170;
+      --nav: #030712;
+      --nav-2: #080d1a;
+      --accent: #034ea2;
+      --accent-2: #21c2f8;
+      --accent-soft: rgba(3, 78, 162, .16);
+      --good: #00b388;
+      --good-soft: rgba(0, 179, 136, .14);
+      --warn: #eab308;
+      --warn-soft: rgba(234, 179, 8, .14);
+      --bad: #ef4444;
+      --bad-soft: rgba(239, 68, 68, .14);
+      --shadow: none;
     }}
     * {{ box-sizing: border-box; }}
     body {{
       margin: 0;
-      font: 14px/1.45 "Segoe UI", Roboto, Arial, sans-serif;
+      font: 14px/1.45 Inter, "Segoe UI", Roboto, Arial, sans-serif;
       color: var(--ink);
       background: var(--bg);
+      -webkit-font-smoothing: antialiased;
     }}
-    a {{ color: var(--accent); text-decoration: none; }}
-    .shell {{ display: grid; grid-template-columns: 248px minmax(0, 1fr); min-height: 100vh; }}
+    a {{ color: var(--accent-2); text-decoration: none; }}
+    ::-webkit-scrollbar {{ width: 6px; height: 6px; }}
+    ::-webkit-scrollbar-track {{ background: #111827; }}
+    ::-webkit-scrollbar-thumb {{ background: #374151; border-radius: 999px; }}
+    ::-webkit-scrollbar-thumb:hover {{ background: #4b5563; }}
+    .shell {{ display: grid; grid-template-columns: 256px minmax(0, 1fr); min-height: 100vh; }}
     .sidebar {{
-      background: linear-gradient(180deg, var(--nav) 0%, var(--nav-2) 100%);
+      background: var(--nav);
       color: #f8fafc;
-      padding: 20px 16px;
-      border-right: 1px solid rgba(255,255,255,.08);
+      padding: 0 12px 16px;
+      border-right: 1px solid var(--line);
       position: sticky; top: 0; height: 100vh; overflow-y: auto;
     }}
-    .brand {{ display: flex; align-items: center; gap: 12px; margin-bottom: 24px; padding: 2px 2px 14px; border-bottom: 1px solid rgba(255,255,255,.08); }}
+    .brand {{ min-height: 64px; display: flex; align-items: center; gap: 12px; margin: 0 -12px 12px; padding: 0 16px; border-bottom: 1px solid var(--line); }}
     .brand-mark {{
-      width: 34px; height: 34px; border-radius: 7px;
+      width: 34px; height: 34px; border-radius: 8px;
       display: grid; place-items: center;
       background: #1a6b6b;
-      box-shadow: inset 0 0 0 1px rgba(255,255,255,.16), 0 8px 18px rgba(0,0,0,.22);
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,.12);
     }}
-    .brand-mark img {{ width: 34px; height: 34px; display: block; border-radius: 7px; }}
-    .brand-title {{ font-size: 15px; font-weight: 760; letter-spacing: 0; }}
-    .brand-subtitle {{ color: #aab4c6; font-size: 12px; margin-top: 2px; }}
-    .nav-label {{ color: #8894aa; font-size: 11px; font-weight: 760; text-transform: uppercase; margin: 20px 10px 8px; letter-spacing: .04em; }}
+    .brand-mark img {{ width: 34px; height: 34px; display: block; border-radius: 8px; }}
+    .brand-title {{ font-size: 14px; font-weight: 800; color: #f1f5f9; letter-spacing: 0; }}
+    .brand-subtitle {{ color: #6b7280; font-size: 12px; margin-top: 1px; }}
+    .nav-label {{ color: #4b5563; font-size: 11px; font-weight: 760; text-transform: uppercase; margin: 20px 12px 8px; letter-spacing: .04em; }}
     .nav-item {{
       display: flex; align-items: center; gap: 10px;
-      min-height: 36px; padding: 0 10px; border-radius: 6px;
-      color: #d9e3f3; font-weight: 600; text-decoration: none;
+      min-height: 38px; padding: 0 12px; border-radius: 8px;
+      color: #9ca3af; font-weight: 650; text-decoration: none;
       border: 1px solid transparent;
+      transition: background .15s ease, color .15s ease, border-color .15s ease;
     }}
-    .nav-item:hover {{ background: rgba(255,255,255,.07); color: #fff; border-color: rgba(255,255,255,.06); }}
-    .nav-item.active {{ background: rgba(255,255,255,.11); color: #fff; border-color: rgba(255,255,255,.1); }}
+    .nav-item:hover {{ background: var(--panel); color: #e5e7eb; border-color: transparent; }}
+    .nav-item.active {{ background: var(--accent); color: #fff; border-color: transparent; }}
     .nav-dot {{ width: 8px; height: 8px; border-radius: 50%; background: transparent; }}
-    .nav-item.active .nav-dot {{ background: #3dd6a3; }}
+    .nav-item.active .nav-dot {{ background: var(--accent-2); }}
     .content {{ min-width: 0; }}
     .topbar {{
-      min-height: 72px; background: rgba(255,255,255,.96);
+      min-height: 64px; background: rgba(3,7,18,.82);
       border-bottom: 1px solid var(--line);
       display: flex; align-items: center; justify-content: space-between;
-      padding: 0 28px;
+      padding: 0 24px;
       position: sticky; top: 0; z-index: 5; backdrop-filter: blur(10px);
     }}
-    .topbar h1 {{ margin: 0; font-size: 20px; font-weight: 780; letter-spacing: 0; }}
+    .topbar h1 {{ margin: 0; font-size: 18px; font-weight: 700; letter-spacing: 0; color: #f1f5f9; }}
     .topbar-meta {{ display: flex; gap: 10px; align-items: center; color: var(--muted); font-size: 12px; flex-wrap: wrap; justify-content: flex-end; }}
-    .operator-pill {{ display: inline-flex; align-items: center; gap: 8px; min-height: 28px; padding: 0 10px; border: 1px solid var(--line); border-radius: 999px; background: #fff; color: #344054; font-weight: 700; }}
+    .operator-pill {{ display: inline-flex; align-items: center; gap: 8px; min-height: 28px; padding: 0 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--panel); color: #d1d5db; font-weight: 700; }}
     .operator-pill::before {{ content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--good); }}
     main {{ max-width: 1320px; margin: 0 auto; padding: 24px 28px 42px; }}
     h2 {{ margin: 0; font-size: 16px; }}
@@ -1092,24 +1101,23 @@ def page(title, body, active="environments", user=None):
     .section-copy {{ color: var(--muted); font-size: 12px; margin-top: 3px; }}
     .summary-grid {{ display: grid; grid-template-columns: repeat(4, minmax(160px, 1fr)); gap: 14px; }}
     .ops-strip {{ display: grid; grid-template-columns: repeat(4, minmax(180px, 1fr)); gap: 1px; border: 1px solid var(--line); border-radius: 8px; background: var(--line); overflow: hidden; box-shadow: var(--shadow); margin-bottom: 18px; }}
-    .ops-item {{ background: #fff; padding: 13px 15px; }}
+    .ops-item {{ background: var(--panel); padding: 13px 15px; }}
     .ops-label {{ color: var(--muted); font-size: 11px; font-weight: 760; text-transform: uppercase; letter-spacing: .04em; }}
-    .ops-value {{ margin-top: 5px; font-weight: 780; color: #172033; }}
+    .ops-value {{ margin-top: 5px; font-weight: 780; color: #f1f5f9; }}
     .metric {{
-      background: linear-gradient(180deg, #ffffff 0%, #fbfcfe 100%); border: 1px solid var(--line); border-radius: 8px;
+      background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
       padding: 17px; box-shadow: var(--shadow); position: relative; overflow: hidden;
     }}
-    .metric::after {{ content: ""; position: absolute; left: 0; right: 0; top: 0; height: 3px; background: #d6e3ef; }}
+    .metric::after {{ content: ""; position: absolute; left: 0; right: 0; top: 0; height: 3px; background: var(--line-strong); }}
     .metric-link::after {{ background: var(--accent); }}
-    }}
     .metric-link {{
       display: block; color: var(--ink);
       transition: transform .12s ease, border-color .12s ease, box-shadow .12s ease;
     }}
     .metric-link:hover {{
       transform: translateY(-1px);
-      border-color: #9bb8f5;
-      box-shadow: 0 18px 42px rgba(26, 107, 107, .13);
+      border-color: var(--line-strong);
+      box-shadow: 0 18px 42px rgba(3, 78, 162, .12);
     }}
     .metric.disabled {{ opacity: .72; }}
     .metric-label {{ color: var(--muted); font-size: 12px; font-weight: 650; }}
@@ -1123,16 +1131,16 @@ def page(title, body, active="environments", user=None):
     th, td {{ padding: 13px 16px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; }}
     tr:last-child td {{ border-bottom: 0; }}
     th {{
-      background: var(--panel-2); color: #475467;
+      background: var(--panel-2); color: #9ca3af;
       font-size: 11px; font-weight: 780; text-transform: uppercase; letter-spacing: .035em;
       border-bottom: 1px solid var(--line-strong);
     }}
-    tbody tr:hover {{ background: #fbfdff; }}
+    tbody tr:hover {{ background: rgba(255,255,255,.025); }}
     code, pre {{ font-family: "Cascadia Mono", "SFMono-Regular", Consolas, monospace; }}
     pre {{
-      margin: 0; background: #111827; color: #dbeafe;
+      margin: 0; background: #030712; color: #dbeafe;
       padding: 16px; overflow: auto; border-radius: 8px;
-      border: 1px solid #263349;
+      border: 1px solid var(--line);
     }}
     .env-name {{ font-weight: 750; }}
     .env-file {{ color: var(--muted); font-size: 12px; margin-top: 3px; white-space: nowrap; }}
@@ -1142,9 +1150,9 @@ def page(title, body, active="environments", user=None):
       font-size: 12px; font-weight: 700; border: 1px solid transparent;
       white-space: nowrap;
     }}
-    .badge.connected {{ color: #075985; background: #e0f2fe; border-color: #bae6fd; }}
-    .badge.proxied {{ color: #5b21b6; background: #ede9fe; border-color: #ddd6fe; }}
-    .badge.air-gapped {{ color: #854d0e; background: #fef9c3; border-color: #fde68a; }}
+    .badge.connected {{ color: #93c5fd; background: rgba(3,78,162,.18); border-color: rgba(3,78,162,.3); }}
+    .badge.proxied {{ color: #c4b5fd; background: rgba(91,33,182,.22); border-color: rgba(124,58,237,.28); }}
+    .badge.air-gapped {{ color: #fcd34d; background: rgba(234,179,8,.12); border-color: rgba(234,179,8,.28); }}
     .chip {{ display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-weight: 650; }}
     .chip::before {{ content: ""; width: 8px; height: 8px; border-radius: 50%; background: #94a3b8; }}
     .chip.ok {{ color: var(--good); }}
@@ -1155,20 +1163,20 @@ def page(title, body, active="environments", user=None):
     .actions form {{ display: inline; }}
     .manage-actions {{ display: flex; flex-wrap: wrap; gap: 7px; min-width: 128px; }}
     button {{
-      min-height: 32px; border: 1px solid var(--line-strong); background: #fff;
+      min-height: 32px; border: 1px solid var(--line); background: var(--panel-2);
       padding: 0 9px; border-radius: 6px; cursor: pointer;
-      color: #263449; font-weight: 700; font-size: 12px;
+      color: #d1d5db; font-weight: 700; font-size: 12px;
     }}
-    button:hover {{ background: var(--accent-soft); border-color: #8ababa; color: #155e5e; }}
+    button:hover {{ background: var(--accent-soft); border-color: rgba(33,194,248,.45); color: #e5f5ff; }}
     .button-link {{
       display: inline-flex; align-items: center; min-height: 32px;
-      border: 1px solid var(--line-strong); background: #fff;
-      padding: 0 9px; border-radius: 6px; color: #263449;
+      border: 1px solid var(--line); background: var(--panel-2);
+      padding: 0 9px; border-radius: 6px; color: #d1d5db;
       font-weight: 700; font-size: 12px;
     }}
-    .button-link:hover {{ background: var(--accent-soft); border-color: #8ababa; color: #155e5e; }}
-    .button-danger {{ border-color: #f0b4af; color: var(--bad); }}
-    .button-danger:hover {{ background: var(--bad-soft); border-color: #f0b4af; color: var(--bad); }}
+    .button-link:hover {{ background: var(--accent-soft); border-color: rgba(33,194,248,.45); color: #e5f5ff; }}
+    .button-danger {{ border-color: rgba(239,68,68,.35); color: #fca5a5; }}
+    .button-danger:hover {{ background: var(--bad-soft); border-color: rgba(239,68,68,.45); color: #fecaca; }}
     .run-list {{ list-style: none; margin: 0; padding: 0; }}
     .run-list li {{
       display: flex; align-items: center; justify-content: space-between;
@@ -1178,24 +1186,24 @@ def page(title, body, active="environments", user=None):
     .muted {{ color: var(--muted); }}
     .notice {{
       margin-top: 16px; padding: 12px 14px; border-radius: 8px;
-      border: 1px solid #d7e3f8; background: #f5f8ff; color: #40516d;
+      border: 1px solid rgba(3,78,162,.3); background: rgba(3,78,162,.08); color: #bfdbfe;
       font-size: 13px;
     }}
     .login-panel {{ max-width: 520px; margin: 38px auto 0; }}
-    .login-panel .panel {{ box-shadow: 0 24px 70px rgba(16, 24, 40, .14); }}
+    .login-panel .panel {{ box-shadow: 0 24px 70px rgba(0, 0, 0, .28); }}
     .settings-grid {{ display: grid; grid-template-columns: repeat(2, minmax(260px, 1fr)); gap: 14px; }}
     .settings-card {{ background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 16px; box-shadow: var(--shadow); }}
     .settings-card h3 {{ margin: 0 0 8px; font-size: 15px; }}
     .settings-card p {{ margin: 0; color: var(--muted); }}
     .form-grid {{ display: grid; grid-template-columns: repeat(2, minmax(220px, 1fr)); gap: 14px; }}
-    .field label {{ display: block; color: #3b465a; font-size: 12px; font-weight: 750; margin-bottom: 6px; text-transform: uppercase; }}
+    .field label {{ display: block; color: #9ca3af; font-size: 12px; font-weight: 750; margin-bottom: 6px; text-transform: uppercase; }}
     .field input, .field select, .field textarea {{
-      width: 100%; min-height: 36px; border: 1px solid var(--line-strong); border-radius: 6px;
-      padding: 0 10px; color: var(--ink); background: #fff;
+      width: 100%; min-height: 36px; border: 1px solid var(--line); border-radius: 6px;
+      padding: 0 10px; color: var(--ink); background: #111827;
     }}
     .field textarea {{ min-height: 96px; padding: 10px; resize: vertical; font: inherit; }}
     .pipeline {{ display: grid; grid-template-columns: repeat(6, minmax(120px, 1fr)); gap: 10px; }}
-    .pipeline-step {{ background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 14px; box-shadow: var(--shadow); }}
+    .pipeline-step {{ background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px; box-shadow: var(--shadow); }}
     .pipeline-step strong {{ display: block; margin-bottom: 6px; }}
     .pipeline-step .chip {{ font-size: 12px; }}
     .terminal-window {{ background: #0b1220; color: #dbeafe; border-radius: 8px; border: 1px solid #253149; overflow: hidden; }}
@@ -1234,7 +1242,7 @@ def page(title, body, active="environments", user=None):
       <div class="brand-mark"><img src="/assets/veridian-mark-teal.svg" alt="Veridian"></div>
       <div>
         <div class="brand-title">NKP ZeroTouch</div>
-        <div class="brand-subtitle">Deployment Console</div>
+        <div class="brand-subtitle">Framework</div>
       </div>
     </div>
 {nav}
@@ -1242,8 +1250,8 @@ def page(title, body, active="environments", user=None):
   <div class="content">
     <div class="topbar">
       <div>
-        <h1>NKP ZeroTouch Console</h1>
-        <div class="section-copy">Nutanix Kubernetes Platform deployment orchestration</div>
+        <h1>NKP ZeroTouch Framework</h1>
+        <div class="section-copy">Nutanix Kubernetes Platform deployment console</div>
       </div>
       <div class="topbar-meta">
         <span class="badge connected">Console Online</span>
@@ -1359,7 +1367,7 @@ class Handler(BaseHTTPRequestHandler):
 <div class="notice">This is local console authentication for operator workstations. Production use should move to OIDC/SSO and server-side session storage.</div>
 </div>
 """
-            self.send_html(page("Login - NKP ZeroTouch Console", body, "about"))
+            self.send_html(page("Login - NKP ZeroTouch Framework", body, "about"))
             return
         if parsed.path == "/logout":
             token = cookie_value(self.headers, "zt_session")
@@ -1449,7 +1457,7 @@ class Handler(BaseHTTPRequestHandler):
 </section>
 <div class="notice">Destructive and apply actions are intentionally CLI-only. This console exposes validation, preparation, generation, verification, backup, and run inspection workflows.</div>
 """
-            self.send_html(page("NKP ZeroTouch Console", body, "environments"))
+            self.send_html(page("NKP ZeroTouch Framework", body, "environments"))
             return
         if parsed.path == "/cli":
             config_options = []
@@ -1488,7 +1496,7 @@ class Handler(BaseHTTPRequestHandler):
 </section>
 <div class="notice">This is a command window, but not an unrestricted shell. The server only executes approved ZeroTouch apply actions after parsing and validating the command.</div>
 """
-            self.send_html(page("CLI - NKP ZeroTouch Console", body, "cli"))
+            self.send_html(page("CLI - NKP ZeroTouch Framework", body, "cli"))
             return
         if parsed.path == "/environment/edit":
             query = parse_qs(parsed.query)
@@ -1546,7 +1554,7 @@ class Handler(BaseHTTPRequestHandler):
 </section>
 <div class="notice">Advanced settings remain available by editing the YAML directly. This form updates common deployment fields only.</div>
 """
-            self.send_html(page("Edit Environment - NKP ZeroTouch Console", body, "environments"))
+            self.send_html(page("Edit Environment - NKP ZeroTouch Framework", body, "environments"))
             return
         if parsed.path == "/environment/delete":
             query = parse_qs(parsed.query)
@@ -1584,7 +1592,7 @@ class Handler(BaseHTTPRequestHandler):
 </section>
 {protected_notice}
 """
-            self.send_html(page("Delete Environment - NKP ZeroTouch Console", body, "environments"))
+            self.send_html(page("Delete Environment - NKP ZeroTouch Framework", body, "environments"))
             return
         if parsed.path == "/runs":
             run_rows = "".join(
@@ -1605,7 +1613,7 @@ class Handler(BaseHTTPRequestHandler):
   </table>
 </section>
 """
-            self.send_html(page("Runs - NKP ZeroTouch Console", body, "runs"))
+            self.send_html(page("Runs - NKP ZeroTouch Framework", body, "runs"))
             return
         if parsed.path == "/artifacts":
             artifact_rows = []
@@ -1640,7 +1648,7 @@ class Handler(BaseHTTPRequestHandler):
   </table>
 </section>
 """
-            self.send_html(page("Artifacts - NKP ZeroTouch Console", body, "artifacts"))
+            self.send_html(page("Artifacts - NKP ZeroTouch Framework", body, "artifacts"))
             return
         if parsed.path == "/artifacts/diff":
             query = parse_qs(parsed.query)
@@ -1686,7 +1694,7 @@ class Handler(BaseHTTPRequestHandler):
 {diff_html}
 <a class="back-link" href="/artifacts">Back to artifacts</a>
 """
-            self.send_html(page("Artifact Diff - NKP ZeroTouch Console", body, "artifacts"))
+            self.send_html(page("Artifact Diff - NKP ZeroTouch Framework", body, "artifacts"))
             return
         if parsed.path == "/artifacts/view":
             query = parse_qs(parsed.query)
@@ -1706,7 +1714,7 @@ class Handler(BaseHTTPRequestHandler):
 <pre>{html.escape(text[:200000])}</pre>
 <a class="back-link" href="/artifacts">Back to artifacts</a>
 """
-            self.send_html(page("Artifact Viewer - NKP ZeroTouch Console", body, "artifacts"))
+            self.send_html(page("Artifact Viewer - NKP ZeroTouch Framework", body, "artifacts"))
             return
         if parsed.path == "/health":
             rows = "".join(f"<tr><td>{html.escape(name)}</td><td><span class='chip {status}'>{html.escape(status)}</span></td><td>{html.escape(note)}</td></tr>" for name, status, note in health_checks())
@@ -1727,7 +1735,7 @@ class Handler(BaseHTTPRequestHandler):
 </div>
 <section class="panel"><table><thead><tr><th>Check</th><th>Status</th><th>Detail</th></tr></thead><tbody>{rows}</tbody></table></section>
 """
-            self.send_html(page("Health - NKP ZeroTouch Console", body, "health"))
+            self.send_html(page("Health - NKP ZeroTouch Framework", body, "health"))
             return
         if parsed.path == "/actions":
             action_rows = "".join(
@@ -1753,7 +1761,7 @@ class Handler(BaseHTTPRequestHandler):
 </section>
 <div class="notice">Live apply and destructive workflows remain CLI-only so operators must explicitly run guarded commands from a prepared shell.</div>
 """
-            self.send_html(page("Safe Actions - NKP ZeroTouch Console", body, "actions"))
+            self.send_html(page("Safe Actions - NKP ZeroTouch Framework", body, "actions"))
             return
         if parsed.path == "/audit":
             audit_rows = []
@@ -1784,7 +1792,7 @@ class Handler(BaseHTTPRequestHandler):
   </table>
 </section>
 """
-            self.send_html(page("Audit Trail - NKP ZeroTouch Console", body, "audit"))
+            self.send_html(page("Audit Trail - NKP ZeroTouch Framework", body, "audit"))
             return
         if parsed.path == "/sources":
             settings = load_setting("sources", default_sources())
@@ -1820,7 +1828,7 @@ class Handler(BaseHTTPRequestHandler):
 <section class="panel"><table><thead><tr><th>Item</th><th>Path</th><th>Status</th></tr></thead><tbody>{''.join(rows)}</tbody></table></section>
 <div class="notice">Sources are saved under <code>.zt/settings/sources.json</code>. Environment YAML can still override bundle paths per target.</div>
 """
-            self.send_html(page("Sources - NKP ZeroTouch Console", body, "sources"))
+            self.send_html(page("Sources - NKP ZeroTouch Framework", body, "sources"))
             return
         if parsed.path == "/inventory":
             settings = load_setting("inventory", default_inventory())
@@ -1850,7 +1858,7 @@ class Handler(BaseHTTPRequestHandler):
 </section>
 <div class="notice">For AHV deployments this inventory documents dependencies. For future bare-metal support it becomes the node admission and power-control source.</div>
 """
-            self.send_html(page("Inventory - NKP ZeroTouch Console", body, "inventory"))
+            self.send_html(page("Inventory - NKP ZeroTouch Framework", body, "inventory"))
             return
         if parsed.path == "/network":
             settings = load_setting("network", default_network())
@@ -1880,7 +1888,7 @@ class Handler(BaseHTTPRequestHandler):
   </form>
 </section>
 """
-            self.send_html(page("Network - NKP ZeroTouch Console", body, "network"))
+            self.send_html(page("Network - NKP ZeroTouch Framework", body, "network"))
             return
         if parsed.path == "/preflight":
             checks = preflight_checks()
@@ -1903,7 +1911,7 @@ class Handler(BaseHTTPRequestHandler):
 <section class="panel"><table><thead><tr><th>Area</th><th>Check</th><th>Status</th><th>Detail</th></tr></thead><tbody>{rows}</tbody></table></section>
 <div class="notice">This matrix is a console-level readiness gate. Environment-specific validation still runs through the <code>validate</code> phase.</div>
 """
-            self.send_html(page("Preflight - NKP ZeroTouch Console", body, "preflight"))
+            self.send_html(page("Preflight - NKP ZeroTouch Framework", body, "preflight"))
             return
         if parsed.path == "/pipeline":
             steps = [("Source", "sources", "ok"), ("Validate", "actions", "warn"), ("Prepare", "actions", "warn"), ("Generate", "actions", "warn"), ("Registry", "cli", "warn"), ("Deploy", "cli", "warn"), ("Verify", "actions", "warn"), ("Operate", "runs", "warn")]
@@ -1918,7 +1926,7 @@ class Handler(BaseHTTPRequestHandler):
 <section class="pipeline">{cards}</section>
 <div class="notice">Apply stages remain gated through the controlled CLI window. Safe stages can be run from Environments or Safe Actions.</div>
 """
-            self.send_html(page("Pipeline - NKP ZeroTouch Console", body, "pipeline"))
+            self.send_html(page("Pipeline - NKP ZeroTouch Framework", body, "pipeline"))
             return
         if parsed.path == "/jobs":
             pending = sum(1 for job in list_jobs(200) if job.get("status") == "pending_approval")
@@ -1950,7 +1958,7 @@ class Handler(BaseHTTPRequestHandler):
 <section class="panel"><table><thead><tr><th>Job</th><th>Action</th><th>Status</th><th>Requested By</th><th>Created</th><th>Controls</th></tr></thead><tbody>{job_rows or '<tr><td colspan="6" class="muted">No jobs have run yet.</td></tr>'}</tbody></table></section>
 <div class="notice">Safe jobs start immediately. Apply jobs are created as approval requests and must be approved by a role with approval permission.</div>
 """
-            self.send_html(page("Jobs - NKP ZeroTouch Console", body, "jobs"))
+            self.send_html(page("Jobs - NKP ZeroTouch Framework", body, "jobs"))
             return
         if parsed.path == "/jobs/view":
             query = parse_qs(parsed.query)
@@ -1985,7 +1993,7 @@ class Handler(BaseHTTPRequestHandler):
 <a class="back-link" href="/jobs">Back to jobs</a>
 {refresh}
 """
-            self.send_html(page("Job Detail - NKP ZeroTouch Console", body, "jobs"))
+            self.send_html(page("Job Detail - NKP ZeroTouch Framework", body, "jobs"))
             return
         if parsed.path == "/approval-policy":
             policy = load_setting("approval-policy", default_approval_policy())
@@ -2014,7 +2022,7 @@ class Handler(BaseHTTPRequestHandler):
 </section>
 <div class="notice">Apply jobs remain pending until the configured approval threshold is met. Destroy defaults to two approvals.</div>
 """
-            self.send_html(page("Approval Policy - NKP ZeroTouch Console", body, "approval-policy"))
+            self.send_html(page("Approval Policy - NKP ZeroTouch Framework", body, "approval-policy"))
             return
         if parsed.path == "/settings/connections":
             settings = read_json(SETTINGS / "connections.json") or {}
@@ -2042,7 +2050,7 @@ class Handler(BaseHTTPRequestHandler):
 </section>
 <div class="notice">Connection profiles are saved locally under <code>.zt/settings/connections.json</code>. Environment YAML remains the deployment source of truth.</div>
 """
-            self.send_html(page("Connections - NKP ZeroTouch Console", body, "connections"))
+            self.send_html(page("Connections - NKP ZeroTouch Framework", body, "connections"))
             return
         if parsed.path == "/settings/new-environment":
             providers = load_setting("providers", default_providers())
@@ -2069,7 +2077,7 @@ class Handler(BaseHTTPRequestHandler):
 </section>
 <div class="notice">This creates a config under <code>configs/environments/</code> using the same framework helper as <code>scripts/new-env.*</code>.</div>
 """
-            self.send_html(page("New Environment - NKP ZeroTouch Console", body, "new-environment"))
+            self.send_html(page("New Environment - NKP ZeroTouch Framework", body, "new-environment"))
             return
         if parsed.path == "/settings/providers":
             settings = load_setting("providers", default_providers())
@@ -2096,7 +2104,7 @@ class Handler(BaseHTTPRequestHandler):
 </section>
 <div class="notice">The current live deployment generator targets Nutanix AHV. Bare-metal is modeled as provider intent until a supported NKP bare-metal command path is wired into generation.</div>
 """
-            self.send_html(page("Providers - NKP ZeroTouch Console", body, "providers"))
+            self.send_html(page("Providers - NKP ZeroTouch Framework", body, "providers"))
             return
         if parsed.path == "/settings/secrets":
             settings = load_setting("secrets", default_secrets())
@@ -2124,7 +2132,7 @@ class Handler(BaseHTTPRequestHandler):
 </section>
 <div class="notice">This records backend metadata only. Secret values are not stored by the console.</div>
 """
-            self.send_html(page("Secrets - NKP ZeroTouch Console", body, "secrets"))
+            self.send_html(page("Secrets - NKP ZeroTouch Framework", body, "secrets"))
             return
         if parsed.path == "/settings/rbac":
             rbac = load_rbac()
@@ -2217,7 +2225,7 @@ class Handler(BaseHTTPRequestHandler):
 </section>
 <div class="notice">Accounts and roles are saved to <code>.zt/settings/rbac.json</code>. Passwords and login enforcement are intentionally not implemented yet.</div>
 """
-            self.send_html(page("RBAC - NKP ZeroTouch Console", body, "rbac"))
+            self.send_html(page("RBAC - NKP ZeroTouch Framework", body, "rbac"))
             return
         if parsed.path == "/settings/database":
             settings = read_json(SETTINGS / "database.json") or {}
@@ -2244,7 +2252,7 @@ class Handler(BaseHTTPRequestHandler):
 </section>
 <div class="notice">Database settings are saved locally under <code>.zt/settings/database.json</code>. Raw database passwords are intentionally not stored here.</div>
 """
-            self.send_html(page("Database - NKP ZeroTouch Console", body, "database"))
+            self.send_html(page("Database - NKP ZeroTouch Framework", body, "database"))
             return
         if parsed.path == "/settings/integrations":
             settings = load_setting("integrations", default_integrations())
@@ -2289,7 +2297,7 @@ class Handler(BaseHTTPRequestHandler):
 </section>
 <div class="notice">These settings provide concrete integration contracts. External Postgres, Vault, and OIDC services must still be deployed and connected in the target environment.</div>
 """
-            self.send_html(page("Integrations - NKP ZeroTouch Console", body, "integrations"))
+            self.send_html(page("Integrations - NKP ZeroTouch Framework", body, "integrations"))
             return
         if parsed.path == "/about":
             version = (ROOT / "VERSION").read_text(encoding="utf-8").strip() if (ROOT / "VERSION").exists() else "dev"
@@ -2297,7 +2305,7 @@ class Handler(BaseHTTPRequestHandler):
 <div class="section-head">
   <div>
     <h2>About</h2>
-    <div class="section-copy">Veridian ZeroTouch console for Nutanix Kubernetes Platform deployment orchestration.</div>
+    <div class="section-copy">NKP ZeroTouch Framework console for Nutanix Kubernetes Platform deployment orchestration.</div>
   </div>
 </div>
 <section class="settings-grid">
@@ -2308,7 +2316,7 @@ class Handler(BaseHTTPRequestHandler):
 </section>
 <div class="notice">RBAC, database, and connection settings are currently local bootstrap configuration. Production authentication, authorization, and database-backed persistence are planned next steps.</div>
 """
-            self.send_html(page("About - NKP ZeroTouch Console", body, "about"))
+            self.send_html(page("About - NKP ZeroTouch Framework", body, "about"))
             return
         self.send_html(page("Not Found", "<h2>Not found</h2>"), status=404)
 
