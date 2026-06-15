@@ -24,5 +24,6 @@ configs/secrets/*.secrets.yaml
 # Editor and OS files.
 .DS_Store
 Thumbs.db
+.pytest_cache/
 __pycache__/
 *.pyc

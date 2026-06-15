@@ -23,6 +23,11 @@ This maps the public-readiness and real-deployment tasks to the repository featu
 | Health checks | Implemented baseline | console health page for runner, tools, bundles, Prism, registry, credential variables, and enterprise integration probes |
 | Artifact viewer | Implemented | generated plans, reports, logs, and allowed config/docs files can be opened from the console |
 | Artifact diff/review | Implemented baseline | allowed artifacts can be compared from the console before operational use |
+| Formal plan review | Implemented baseline | console records per-environment approve/reject status under `.zt` |
+| Setup wizard | Implemented baseline | guided first-run setup page links source, connection, inventory, network, secrets, environment, and preflight tasks |
+| Lifecycle/readiness | Implemented baseline | environment table shows lifecycle state and readiness score |
+| Kubeconfig console visibility | Implemented baseline | kubeconfig page shows capture status and command guidance |
+| Provider catalog | Implemented baseline | provider contracts live under `providers/` and are visible in Settings > Providers |
 | Environment uniqueness checks | Implemented baseline | environment create/edit blocks duplicate names, cluster names, API VIPs, and registry namespaces |
 | Approval policy | Implemented baseline | per-action approval thresholds, self-approval prevention, production Admin option |
 | Enterprise integrations | Probed baseline | Postgres TCP, Vault health, OIDC discovery, and session-store consistency checks under Settings > Integrations, Health, and Preflight |

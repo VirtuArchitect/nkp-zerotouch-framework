@@ -37,10 +37,13 @@ CLI_APPLY_ACTIONS = {"registry", "deploy", "upgrade", "destroy"}
 CLI_ALLOWED_ACTIONS = CLI_APPLY_ACTIONS
 VIEW_PATHS = {
     "environments": "/",
+    "setup": "/setup",
     "cli": "/cli",
     "runs": "/runs",
     "artifacts": "/artifacts",
     "health": "/health",
+    "kubeconfig": "/kubeconfig",
+    "plan-review": "/plan-review",
     "sources": "/sources",
     "inventory": "/inventory",
     "network": "/network",
@@ -178,6 +181,12 @@ def metric_card(label, value, foot, href=None):
     if href and value > 0:
         return f'<a class="metric metric-link" href="{html.escape(href)}">{content}</a>'
     return f'<div class="metric disabled">{content}</div>'
+
+
+def pct(value, total):
+    if total <= 0:
+        return 0
+    return int(round((value / total) * 100))
 
 
 def form_value(form, name, default=""):
@@ -408,6 +417,9 @@ ROUTE_PERMISSIONS = [
     ("/settings/connections", "settings"),
     ("/settings/new-environment", "environments"),
     ("/environment", "environments"),
+    ("/setup", "environments"),
+    ("/kubeconfig", "artifacts"),
+    ("/plan-review", "artifacts"),
     ("/sources", "sources"),
     ("/inventory", "inventory"),
     ("/network", "network"),
@@ -625,6 +637,62 @@ def artifact_files():
     return sorted(files, key=lambda item: str(item.relative_to(ROOT) if ROOT in item.parents else item))
 
 
+def environment_lifecycle(name, state):
+    if state["verification"].exists():
+        return "Verified", "ok"
+    if (state["base"] / "state" / "kubeconfig").exists():
+        return "Kubeconfig Captured", "ok"
+    if state["generate"]:
+        return "Generated", "ok"
+    if state["state"]:
+        return "Prepared", "ok"
+    return "Draft", "warn"
+
+
+def environment_readiness(data, state):
+    checks = [
+        bool(data.get("environmentName")),
+        data.get("environmentType") in {"connected", "proxied", "air-gapped"},
+        bool(data.get("nkpVersion")),
+        bool(data.get("bundlePath")),
+        bool(data.get("prismEndpoint")) and ".example.com" not in str(data.get("prismEndpoint", "")),
+        bool(data.get("clusterName")),
+        bool(data.get("registryEndpoint")) and ".example.com" not in str(data.get("registryEndpoint", "")),
+        bool(state["state"]),
+        bool(state["generate"]),
+        bool(state["verification"].exists()),
+    ]
+    passed = sum(1 for item in checks if item)
+    return passed, len(checks), pct(passed, len(checks))
+
+
+def review_path(env_name):
+    return ZT / "environments" / env_name / "state" / "plan-review.json"
+
+
+def load_plan_review(env_name):
+    return read_json(review_path(env_name)) or {"status": "pending", "reviewedBy": "", "reviewedAt": "", "note": ""}
+
+
+def plan_review_status(env_name, state):
+    review = load_plan_review(env_name)
+    if not state["generate"] and not (state["base"] / "generated" / "deploy-plan.md").exists():
+        return "not generated", "warn"
+    if review.get("status") == "approved":
+        return "approved", "ok"
+    if review.get("status") == "rejected":
+        return "rejected", "warn"
+    return "pending review", "warn"
+
+
+def provider_catalog():
+    base = ROOT / "providers"
+    providers = []
+    for path in sorted(base.glob("*/README.md")) if base.exists() else []:
+        providers.append({"name": path.parent.name, "readme": path})
+    return providers
+
+
 def health_checks():
     sources = load_setting("sources", default_sources())
     connections = read_json(SETTINGS / "connections.json") or {}
@@ -655,7 +723,7 @@ def resolve_artifact(raw_path):
     if not candidate.is_absolute():
         candidate = ROOT / candidate
     resolved = candidate.resolve()
-    allowed_roots = [ZT.resolve(), (ROOT / "docs").resolve(), (ROOT / "configs").resolve()]
+    allowed_roots = [ZT.resolve(), (ROOT / "docs").resolve(), (ROOT / "configs").resolve(), (ROOT / "providers").resolve()]
     if not any(resolved == root or root in resolved.parents for root in allowed_roots):
         raise ValueError("Artifact path is outside allowed artifact roots.")
     if not resolved.exists() or not resolved.is_file():
@@ -982,10 +1050,13 @@ def page(title, body, active="environments", user=None):
 
     nav = f"""
     <div class="nav-label">Operations</div>
+    <a class="{nav_class('setup')}" href="{VIEW_PATHS['setup']}"><span class="nav-dot"></span>Setup Wizard</a>
     <a class="{nav_class('environments')}" href="{VIEW_PATHS['environments']}"><span class="nav-dot"></span>Environments</a>
     <a class="{nav_class('cli')}" href="{VIEW_PATHS['cli']}">CLI</a>
     <a class="{nav_class('runs')}" href="{VIEW_PATHS['runs']}">Runs</a>
     <a class="{nav_class('artifacts')}" href="{VIEW_PATHS['artifacts']}">Artifacts</a>
+    <a class="{nav_class('plan-review')}" href="{VIEW_PATHS['plan-review']}">Plan Review</a>
+    <a class="{nav_class('kubeconfig')}" href="{VIEW_PATHS['kubeconfig']}">Kubeconfig</a>
     <a class="{nav_class('health')}" href="{VIEW_PATHS['health']}">Health</a>
     <div class="nav-label">Deployment</div>
     <a class="{nav_class('sources')}" href="{VIEW_PATHS['sources']}">Sources</a>
@@ -1206,6 +1277,10 @@ def page(title, body, active="environments", user=None):
     .pipeline-step {{ background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px; box-shadow: var(--shadow); }}
     .pipeline-step strong {{ display: block; margin-bottom: 6px; }}
     .pipeline-step .chip {{ font-size: 12px; }}
+    .progress-track {{ height: 8px; min-width: 120px; border-radius: 999px; background: rgba(148,163,184,.18); overflow: hidden; margin-top: 6px; }}
+    .progress-bar {{ height: 100%; background: linear-gradient(90deg, var(--accent), var(--good)); }}
+    .action-group {{ display: grid; grid-template-columns: repeat(2, minmax(260px, 1fr)); gap: 14px; }}
+    .review-note {{ max-width: 380px; color: var(--muted); font-size: 12px; }}
     .terminal-window {{ background: #0b1220; color: #dbeafe; border-radius: 8px; border: 1px solid #253149; overflow: hidden; }}
     .terminal-bar {{ min-height: 36px; display: flex; align-items: center; gap: 8px; padding: 0 12px; background: #111827; border-bottom: 1px solid #253149; color: #93a4bd; font-size: 12px; font-weight: 700; }}
     .terminal-dot {{ width: 9px; height: 9px; border-radius: 50%; background: #64748b; }}
@@ -1227,6 +1302,7 @@ def page(title, body, active="environments", user=None):
       .summary-grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
       .ops-strip {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
       .settings-grid, .form-grid {{ grid-template-columns: 1fr; }}
+      .action-group {{ grid-template-columns: 1fr; }}
       .actions {{ min-width: 270px; }}
       .manage-actions {{ min-width: 128px; }}
     }}
@@ -1375,6 +1451,49 @@ class Handler(BaseHTTPRequestHandler):
             SESSIONS.pop(token, None)
             self.send_redirect("/login", {"Set-Cookie": "zt_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax"})
             return
+        if parsed.path == "/setup":
+            sources = load_setting("sources", default_sources())
+            connections = read_json(SETTINGS / "connections.json") or {}
+            inventory = load_setting("inventory", default_inventory())
+            network = load_setting("network", default_network())
+            secrets_cfg = load_setting("secrets", default_secrets())
+            checks = [
+                ("Sources", "/sources", bool(sources.get("standard_bundle") or sources.get("airgapped_bundle")), "Register NKP bundle and source paths."),
+                ("Connections", "/settings/connections", bool(connections.get("prism") or connections.get("registry")), "Add Prism Central and registry endpoints."),
+                ("Inventory", "/inventory", bool(inventory.get("nodes") or inventory.get("mode")), "Document AHV or bare-metal target inventory."),
+                ("Network", "/network", bool(network.get("api_vip") or network.get("dns_servers")), "Define VIP, DNS, NTP, proxy, and CIDR inputs."),
+                ("Secrets", "/settings/secrets", secrets_cfg.get("backend") not in {"", "local-file"} or bool((ZT / "settings").exists()), "Choose local or external secret backend."),
+                ("Environment", "/settings/new-environment", bool(env_configs()), "Create or edit deployment profiles."),
+                ("Preflight", "/preflight", any(item["status"] == "ok" for item in preflight_checks()), "Review readiness warnings before generate/apply."),
+            ]
+            rows = "".join(
+                f"<tr><td>{idx}</td><td><a href='{href}'>{html.escape(label)}</a></td><td><span class='chip {'ok' if ok else 'warn'}'>{'complete' if ok else 'pending'}</span></td><td>{html.escape(note)}</td></tr>"
+                for idx, (label, href, ok, note) in enumerate(checks, 1)
+            )
+            done = sum(1 for _, _, ok, _ in checks if ok)
+            body = f"""
+<section class="summary-grid">
+  {metric_card("Setup Progress", pct(done, len(checks)), "percent complete", "/setup")}
+  {metric_card("Steps Complete", done, "of 7 setup steps", "/setup")}
+  {metric_card("Preflight", sum(1 for item in preflight_checks() if item["status"] == "ok"), "checks passing", "/preflight")}
+  {metric_card("Environments", len(env_configs()), "profiles available", "/")}
+</section>
+<div class="section-head">
+  <div>
+    <h2>Setup Wizard</h2>
+    <div class="section-copy">Guided operator flow from source intake through preflight readiness.</div>
+  </div>
+</div>
+<section class="panel">
+  <table>
+    <thead><tr><th>Step</th><th>Area</th><th>Status</th><th>Operator Task</th></tr></thead>
+    <tbody>{rows}</tbody>
+  </table>
+</section>
+<div class="notice">Use this page for first-run setup. Once all steps are complete, run validate, prepare, generate, review artifacts, and request apply through the controlled CLI workflow.</div>
+"""
+            self.send_html(page("Setup Wizard - NKP ZeroTouch Framework", body, "setup"))
+            return
         if parsed.path in ("/", "/environments"):
             rows = []
             env_total = 0
@@ -1389,6 +1508,9 @@ class Handler(BaseHTTPRequestHandler):
                 prepared = bool(state["state"])
                 generated = bool(state["generate"])
                 report = state["verification"].exists()
+                lifecycle_label, lifecycle_status = environment_lifecycle(name, state)
+                ready_passed, ready_total, ready_pct = environment_readiness(data, state)
+                review_label, review_status = plan_review_status(name, state)
                 env_total += 1
                 prepared_total += 1 if prepared else 0
                 generated_total += 1 if generated else 0
@@ -1405,9 +1527,11 @@ class Handler(BaseHTTPRequestHandler):
                 rows.append(
                     f"<tr><td><div class='env-name'>{html.escape(name)}</div><div class='env-file'>{html.escape(config.name)}</div></td>"
                     f"<td><span class='badge {html.escape(env_type)}'>{html.escape(env_type)}</span></td>"
+                    f"<td><span class='chip {lifecycle_status}'>{html.escape(lifecycle_label)}</span><div class='env-file'>readiness {ready_passed}/{ready_total}</div><div class='progress-track'><div class='progress-bar' style='width:{ready_pct}%'></div></div></td>"
                     f"<td><span class='chip {'ok' if prepared else 'warn'}'>{'Ready' if prepared else 'Pending'}</span></td>"
                     f"<td><span class='chip {'ok' if generated else 'warn'}'>{'Generated' if generated else 'Pending'}</span></td>"
                     f"<td><span class='chip {'ok' if report else 'warn'}'>{'Available' if report else 'Missing'}</span></td>"
+                    f"<td><span class='chip {review_status}'>{html.escape(review_label)}</span></td>"
                     f"<td class='actions'>{buttons}</td>"
                     f"<td class='manage-actions'>{manage_buttons}</td></tr>"
                 )
@@ -1441,7 +1565,7 @@ class Handler(BaseHTTPRequestHandler):
 </div>
 <section class="panel">
   <table>
-    <thead><tr><th>Name</th><th>Type</th><th>Prepared</th><th>Generated</th><th>Report</th><th>Safe Actions</th><th>Manage</th></tr></thead>
+    <thead><tr><th>Name</th><th>Type</th><th>Lifecycle</th><th>Prepared</th><th>Generated</th><th>Report</th><th>Plan Review</th><th>Safe Actions</th><th>Manage</th></tr></thead>
     <tbody>{''.join(rows)}</tbody>
   </table>
 </section>
@@ -1615,6 +1739,76 @@ class Handler(BaseHTTPRequestHandler):
 """
             self.send_html(page("Runs - NKP ZeroTouch Framework", body, "runs"))
             return
+        if parsed.path == "/kubeconfig":
+            rows = []
+            for config in env_configs():
+                data = read_json_from_context(config)
+                name = data.get("environmentName") or config.stem
+                state = env_state(name)
+                kubeconfig = state["base"] / "state" / "kubeconfig"
+                command = f".\\scripts\\zt.ps1 kubeconfig -Config .\\configs\\environments\\{config.name} -Kubeconfig <path>"
+                rows.append(
+                    f"<tr><td><div class='env-name'>{html.escape(name)}</div><div class='env-file'>{html.escape(config.name)}</div></td>"
+                    f"<td><span class='chip {'ok' if kubeconfig.exists() else 'warn'}'>{'Captured' if kubeconfig.exists() else 'Missing'}</span></td>"
+                    f"<td><span class='muted'>{html.escape(str(kubeconfig.relative_to(ROOT) if ROOT in kubeconfig.parents else kubeconfig))}</span></td>"
+                    f"<td><code>{html.escape(command)}</code></td></tr>"
+                )
+            body = f"""
+<div class="section-head">
+  <div>
+    <h2>Kubeconfig</h2>
+    <div class="section-copy">Post-deploy handoff for cluster verification and ongoing NKP operations.</div>
+  </div>
+</div>
+<section class="panel">
+  <table>
+    <thead><tr><th>Environment</th><th>Status</th><th>State Path</th><th>Capture Command</th></tr></thead>
+    <tbody>{''.join(rows) or '<tr><td colspan="4" class="muted">No environments found.</td></tr>'}</tbody>
+  </table>
+</section>
+<div class="notice">After deploy, capture kubeconfig into the environment state directory, then run verify to collect live cluster evidence.</div>
+"""
+            self.send_html(page("Kubeconfig - NKP ZeroTouch Framework", body, "kubeconfig"))
+            return
+        if parsed.path == "/plan-review":
+            rows = []
+            for config in env_configs():
+                data = read_json_from_context(config)
+                name = data.get("environmentName") or config.stem
+                state = env_state(name)
+                review = load_plan_review(name)
+                review_label, review_status = plan_review_status(name, state)
+                plan = state["base"] / "generated" / "deploy-plan.md"
+                plan_link = f'<a class="button-link" href="/artifacts/view?path={quote(str(plan))}">Open deploy plan</a>' if plan.exists() else '<span class="muted">Generate first</span>'
+                has_plan = bool(state["generate"]) or plan.exists()
+                controls = (
+                    f'<form method="post" action="/plan-review/save"><input type="hidden" name="environment" value="{html.escape(name)}"><input type="hidden" name="decision" value="approved"><button>Approve</button></form>'
+                    f'<form method="post" action="/plan-review/save"><input type="hidden" name="environment" value="{html.escape(name)}"><input type="hidden" name="decision" value="rejected"><button class="button-danger">Reject</button></form>'
+                ) if has_plan else ""
+                rows.append(
+                    f"<tr><td><div class='env-name'>{html.escape(name)}</div><div class='env-file'>{html.escape(config.name)}</div></td>"
+                    f"<td><span class='chip {review_status}'>{html.escape(review_label)}</span></td>"
+                    f"<td>{html.escape(review.get('reviewedBy', '') or 'n/a')}</td>"
+                    f"<td>{html.escape(review.get('reviewedAt', '') or 'n/a')}</td>"
+                    f"<td>{plan_link}</td><td><div class='actions'>{controls}</div></td></tr>"
+                )
+            body = f"""
+<div class="section-head">
+  <div>
+    <h2>Plan Review</h2>
+    <div class="section-copy">Formal review gate for generated deployment plans before apply approval.</div>
+  </div>
+</div>
+<section class="panel">
+  <table>
+    <thead><tr><th>Environment</th><th>Status</th><th>Reviewer</th><th>Reviewed</th><th>Plan</th><th>Decision</th></tr></thead>
+    <tbody>{''.join(rows) or '<tr><td colspan="6" class="muted">No environments found.</td></tr>'}</tbody>
+  </table>
+</section>
+<div class="notice">Plan review records live under each environment state directory. Apply jobs still require approval through the Jobs workflow.</div>
+"""
+            self.send_html(page("Plan Review - NKP ZeroTouch Framework", body, "plan-review"))
+            return
         if parsed.path == "/artifacts":
             artifact_rows = []
             for env_dir in sorted((ZT / "environments").glob("*")) if (ZT / "environments").exists() else []:
@@ -1739,27 +1933,25 @@ class Handler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/actions":
             action_rows = "".join(
-                f"<tr><td><code>{html.escape(action)}</code></td><td>Dashboard-safe</td><td><span class='chip ok'>Enabled</span></td></tr>"
+                f"<tr><td><code>{html.escape(action)}</code></td><td>No infrastructure mutation</td><td><span class='chip ok'>Console enabled</span></td></tr>"
                 for action in ACTION_ORDER
             )
             blocked_rows = "".join(
-                f"<tr><td><code>{action}</code></td><td>CLI-only guarded operation</td><td><span class='chip warn'>Blocked in console</span></td></tr>"
-                for action in ["registry --apply", "deploy --apply", "destroy --apply --confirm-destroy"]
+                f"<tr><td><code>{action}</code></td><td>Infrastructure-changing or destructive</td><td><span class='chip warn'>Approval gated</span></td></tr>"
+                for action in ["registry --apply", "deploy --apply", "upgrade --apply", "destroy --apply --confirm-destroy"]
             )
             body = f"""
 <div class="section-head">
   <div>
     <h2>Safe Actions</h2>
-    <div class="section-copy">Console-enabled actions are intentionally limited to non-destructive workflows.</div>
+    <div class="section-copy">Operational actions are split into safe console execution and approval-gated apply execution.</div>
   </div>
 </div>
-<section class="panel">
-  <table>
-    <thead><tr><th>Action</th><th>Scope</th><th>Status</th></tr></thead>
-    <tbody>{action_rows}{blocked_rows}</tbody>
-  </table>
+<section class="action-group">
+  <div class="panel"><table><thead><tr><th>Safe Action</th><th>Scope</th><th>Status</th></tr></thead><tbody>{action_rows}</tbody></table></div>
+  <div class="panel"><table><thead><tr><th>Apply Action</th><th>Scope</th><th>Status</th></tr></thead><tbody>{blocked_rows}</tbody></table></div>
 </section>
-<div class="notice">Live apply and destructive workflows remain CLI-only so operators must explicitly run guarded commands from a prepared shell.</div>
+<div class="notice">Use safe actions for validation, preparation, generation, verification, backup, and run capture. Use the CLI page for apply requests, then approve the generated job under Jobs.</div>
 """
             self.send_html(page("Safe Actions - NKP ZeroTouch Framework", body, "actions"))
             return
@@ -1914,7 +2106,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_html(page("Preflight - NKP ZeroTouch Framework", body, "preflight"))
             return
         if parsed.path == "/pipeline":
-            steps = [("Source", "sources", "ok"), ("Validate", "actions", "warn"), ("Prepare", "actions", "warn"), ("Generate", "actions", "warn"), ("Registry", "cli", "warn"), ("Deploy", "cli", "warn"), ("Verify", "actions", "warn"), ("Operate", "runs", "warn")]
+            steps = [("Source", "sources", "ok"), ("Validate", "actions", "warn"), ("Prepare", "actions", "warn"), ("Generate", "actions", "warn"), ("Review", "plan-review", "warn"), ("Registry", "cli", "warn"), ("Deploy", "cli", "warn"), ("Kubeconfig", "kubeconfig", "warn"), ("Verify", "actions", "warn"), ("Operate", "runs", "warn")]
             cards = "".join(f"<a class='pipeline-step' href='{VIEW_PATHS[href]}'><strong>{html.escape(label)}</strong><span class='chip {status}'>{'configured' if status == 'ok' else 'pending'}</span></a>" for label, href, status in steps)
             body = f"""
 <div class="section-head">
@@ -2081,6 +2273,10 @@ class Handler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/settings/providers":
             settings = load_setting("providers", default_providers())
+            provider_rows = "".join(
+                f"<tr><td><code>{html.escape(provider['name'])}</code></td><td><span class='muted'>{html.escape(str(provider['readme'].relative_to(ROOT)))}</span></td><td><a class='button-link' href='/artifacts/view?path={quote(str(provider['readme']))}'>Open</a></td></tr>"
+                for provider in provider_catalog()
+            )
             body = f"""
 <div class="section-head">
   <div>
@@ -2101,6 +2297,13 @@ class Handler(BaseHTTPRequestHandler):
       </tbody>
     </table>
   </form>
+</section>
+<div class="section-head"><div><h2>Provider Catalog</h2><div class="section-copy">Extension contracts available in the repository.</div></div></div>
+<section class="panel">
+  <table>
+    <thead><tr><th>Provider</th><th>Contract</th><th>Open</th></tr></thead>
+    <tbody>{provider_rows or '<tr><td colspan="3" class="muted">No provider contracts found.</td></tr>'}</tbody>
+  </table>
 </section>
 <div class="notice">The current live deployment generator targets Nutanix AHV. Bare-metal is modeled as provider intent until a supported NKP bare-metal command path is wired into generation.</div>
 """
@@ -2565,6 +2768,32 @@ class Handler(BaseHTTPRequestHandler):
             audit_event("database_saved", self.current_user(), "database", "success")
             body = "<section class='metric'><div class='metric-label'>Settings Saved</div><div class='metric-value'>Database</div><div class='metric-foot'><span class='chip ok'>Saved locally</span></div></section><a class='back-link' href='/settings/database'>Back to database</a>"
             self.send_html(page("Database Saved", body, "database"))
+            return
+
+        if parsed.path == "/plan-review/save":
+            env_name = form_value(form, "environment")
+            decision = form_value(form, "decision")
+            if decision not in {"approved", "rejected"}:
+                self.send_html(page("Plan Review Error", "<h2>Invalid decision</h2><a class='back-link' href='/plan-review'>Back to plan review</a>", "plan-review"), status=400)
+                return
+            env_names = {str(read_json_from_context(config).get("environmentName") or config.stem) for config in env_configs()}
+            if env_name not in env_names:
+                self.send_html(page("Plan Review Error", "<h2>Unknown environment</h2><a class='back-link' href='/plan-review'>Back to plan review</a>", "plan-review"), status=400)
+                return
+            state = env_state(env_name)
+            if not state["generate"] and not (state["base"] / "generated" / "deploy-plan.md").exists():
+                self.send_html(page("Plan Review Error", "<h2>Generate required</h2><div class='notice'>Run generate before approving or rejecting a deployment plan.</div><a class='back-link' href='/plan-review'>Back to plan review</a>", "plan-review"), status=400)
+                return
+            review = {
+                "status": decision,
+                "reviewedBy": self.current_user().get("username", "operator"),
+                "reviewedRole": self.current_user().get("role", ""),
+                "reviewedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "note": form_value(form, "note"),
+            }
+            write_json(review_path(env_name), review)
+            audit_event("plan_review_saved", self.current_user(), env_name, "success", review)
+            self.send_redirect("/plan-review")
             return
 
         if parsed.path == "/jobs/approve":

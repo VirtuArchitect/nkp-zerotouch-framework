@@ -27,6 +27,10 @@ Before live deployment, operations teams must provide:
 - Safe action execution through background jobs: validate, prepare, generate, verify, backup, runs.
 - Apply action requests through approval-gated jobs.
 - Job approval, reject, cancel, retry, detail, and captured log views.
+- Guided setup wizard for first-run source, connection, inventory, network, secrets, environment, and preflight work.
+- Lifecycle and readiness status for each environment.
+- Formal plan review status before apply approval.
+- Kubeconfig capture visibility for post-deploy verification.
 - Runs, artifacts, health checks, and append-only audit visibility from `.zt`.
 - Artifact viewer and diff workflow for generated plans, reports, logs, state, and configs.
 - Local connection, RBAC, database, integration, approval policy, source, inventory, network, provider, and secret-backend settings.

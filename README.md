@@ -43,6 +43,7 @@ configs/
   environments/        # Example environment definitions
   schema/              # Config contract for validation and tooling
 docs/                  # Design notes and runbooks
+providers/             # Provider contracts and extension boundaries
 scripts/               # ZeroTouch entrypoints
 templates/             # NKP config templates by environment type
 ```
@@ -101,6 +102,8 @@ Additional operational phases are available for secrets, backup, upgrade plannin
 - `docs/architecture.md`
 - `docs/container-runner.md`
 - `docs/operational-readiness.md`
+- `docs/production-persistence.md`
+- `docs/lab-evidence-template.md`
 - `docs/self-hosted-ci.md`
 - `docs/upgrade-destroy-policy.md`
 

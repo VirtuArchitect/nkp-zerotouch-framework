@@ -8,12 +8,14 @@ flowchart LR
   Prepare --> Workspace[".zt/environments/<name>"]
   Workspace --> Generate["generate"]
   Generate --> Plans["deploy.sh / registry.sh / plans"]
-  Plans --> Registry["registry --apply (guarded)"]
-  Plans --> Deploy["deploy --apply (guarded)"]
-  Workspace --> Verify["verify"]
+  Plans --> Review["plan review"]
+  Review --> Registry["registry --apply (guarded)"]
+  Review --> Deploy["deploy --apply (guarded)"]
+  Deploy --> Kubeconfig["kubeconfig capture"]
+  Kubeconfig --> Verify["verify"]
   Workspace --> Dashboard["Local dashboard"]
   Workspace --> Backup["backup"]
   Workspace --> Runs["runs"]
 ```
 
-The repository tracks framework code, example configs, docs, tests, and packaging assets. Generated state and real secrets stay local under ignored paths.
+The repository tracks framework code, provider contracts, example configs, docs, tests, and packaging assets. Generated state and real secrets stay local under ignored paths.
