@@ -28,6 +28,15 @@ This maps the public-readiness and real-deployment tasks to the repository featu
 | Lifecycle/readiness | Implemented baseline | environment table shows lifecycle state and readiness score |
 | Kubeconfig console visibility | Implemented baseline | kubeconfig page shows capture status and command guidance |
 | Provider catalog | Implemented baseline | provider contracts live under `providers/` and are visible in Settings > Providers |
+| API layer | Implemented baseline | authenticated JSON endpoints for status, environments, jobs, logs, locks, and change records |
+| Environment locking | Implemented baseline | environment locks are created for prepare, generate, registry, deploy, upgrade, and destroy jobs |
+| Plan hashing | Implemented baseline | plan review stores hashes and reports stale reviews when generated artifacts change |
+| Change records | Implemented baseline | apply requests create local change records with job ID, requester, plan hashes, and rollback notes |
+| Drift detection | Implemented baseline | console reports stale reviews, YAML-after-prepare changes, missing generate, and missing verification |
+| Backup/restore UI | Implemented baseline | console lists backup manifests; restore remains manual and controlled |
+| Release channels | Implemented baseline | configurable dev/lab/pilot/production channel metadata |
+| OIDC login flow | Partial | readiness route exists; full authorization-code token exchange remains future work |
+| Vault secret validation | Implemented baseline | runtime secret key presence checks and Vault health probe metadata |
 | Environment uniqueness checks | Implemented baseline | environment create/edit blocks duplicate names, cluster names, API VIPs, and registry namespaces |
 | Approval policy | Implemented baseline | per-action approval thresholds, self-approval prevention, production Admin option |
 | Enterprise integrations | Probed baseline | Postgres TCP, Vault health, OIDC discovery, and session-store consistency checks under Settings > Integrations, Health, and Preflight |

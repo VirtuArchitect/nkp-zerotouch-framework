@@ -1,0 +1,61 @@
+# Enterprise Controls
+
+This document summarizes the operational controls added around the ZeroTouch
+deployment flow.
+
+## API Layer
+
+Authenticated JSON endpoints are available for automation and future UI
+decoupling:
+
+- `/api/status`
+- `/api/environments`
+- `/api/jobs`
+- `/api/jobs/log?id=<job-id>`
+- `/api/locks`
+- `/api/change-records`
+
+## Environment Locking
+
+The console records a lock under `.zt/locks/` while prepare, generate, registry,
+deploy, upgrade, or destroy jobs run for an environment. This prevents
+overlapping operations against the same target.
+
+## Plan Hashing
+
+Plan review decisions store SHA256 hashes for generated deploy and registry
+plans/scripts. If generated artifacts change after approval, the console reports
+the review as stale.
+
+## Change Records
+
+Apply requests create change records under `.zt/change-records/` with:
+
+- Job ID.
+- Environment.
+- Action.
+- Requester.
+- Plan hashes.
+- Rollback notes.
+- Job completion status.
+
+## Drift Detection
+
+The Drift page highlights:
+
+- Missing generation.
+- Generated plan changes after approval.
+- Environment YAML changes after prepare.
+- Missing verification reports.
+
+## Release Channels
+
+Release channels define promotion lanes such as `dev`, `lab`, `pilot`, and
+`production`. Production channels should require plan review, backup evidence,
+and elevated approvals.
+
+## Secret and Identity Checks
+
+The console checks required runtime secret keys by presence only. OIDC metadata
+is probed for discovery readiness, while full authorization-code login remains a
+future production integration item.

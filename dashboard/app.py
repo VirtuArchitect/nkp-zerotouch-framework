@@ -29,6 +29,8 @@ ZT = ROOT / ".zt"
 SETTINGS = ZT / "settings"
 JOBS = ZT / "jobs"
 AUDIT = ZT / "audit"
+LOCKS = ZT / "locks"
+CHANGE_RECORDS = ZT / "change-records"
 ENV_DIR = ROOT / "configs" / "environments"
 SESSIONS = {}
 SAFE_ACTIONS = {"validate", "prepare", "generate", "verify", "backup", "runs"}
@@ -44,6 +46,11 @@ VIEW_PATHS = {
     "health": "/health",
     "kubeconfig": "/kubeconfig",
     "plan-review": "/plan-review",
+    "change-records": "/change-records",
+    "locks": "/locks",
+    "drift": "/drift",
+    "backups": "/backups",
+    "release-channels": "/release-channels",
     "sources": "/sources",
     "inventory": "/inventory",
     "network": "/network",
@@ -226,9 +233,11 @@ def default_rbac():
     return {
         "settings": {"enabled": "false", "provider": "local", "admin": "admin"},
         "roles": [
-            {"name": "Admin", "permissions": "settings, environments, safe-actions, audit"},
-            {"name": "Operator", "permissions": "environments, safe-actions, artifacts"},
-            {"name": "Auditor", "permissions": "runs, artifacts, audit"},
+            {"name": "Admin", "permissions": "settings, environments, safe-actions, audit, jobs, approve, apply, sources, inventory, network, preflight, pipeline, artifacts, runs, health, approval-policy, integrations, rbac"},
+            {"name": "Environment Author", "permissions": "environments, sources, inventory, network, preflight, pipeline, artifacts, runs, health"},
+            {"name": "Deployment Operator", "permissions": "environments, safe-actions, artifacts, jobs, sources, inventory, network, preflight, pipeline, runs, health, apply"},
+            {"name": "Approver", "permissions": "runs, artifacts, audit, jobs, approve, preflight, pipeline, health"},
+            {"name": "Auditor", "permissions": "runs, artifacts, audit, jobs, preflight, pipeline, health"},
         ],
         "accounts": [],
     }
@@ -376,6 +385,15 @@ def default_approval_policy():
     }
 
 
+def default_release_channels():
+    return {
+        "default_channel": "lab",
+        "channels": "dev:0, lab:1, pilot:1, production:2",
+        "production_requires_plan_review": "true",
+        "production_requires_backup": "true",
+    }
+
+
 def default_integrations():
     return {
         "session_store": "memory",
@@ -420,6 +438,12 @@ ROUTE_PERMISSIONS = [
     ("/setup", "environments"),
     ("/kubeconfig", "artifacts"),
     ("/plan-review", "artifacts"),
+    ("/change-records", "jobs"),
+    ("/locks", "jobs"),
+    ("/drift", "preflight"),
+    ("/backups", "artifacts"),
+    ("/release-channels", "approval-policy"),
+    ("/api", "health"),
     ("/sources", "sources"),
     ("/inventory", "inventory"),
     ("/network", "network"),
@@ -674,10 +698,34 @@ def load_plan_review(env_name):
     return read_json(review_path(env_name)) or {"status": "pending", "reviewedBy": "", "reviewedAt": "", "note": ""}
 
 
+def file_sha256(path):
+    if not path.exists() or not path.is_file():
+        return ""
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def plan_hashes(env_name):
+    base = ZT / "environments" / env_name / "generated"
+    return {
+        "deployPlan": file_sha256(base / "deploy-plan.md"),
+        "deployScript": file_sha256(base / "deploy.sh"),
+        "registryPlan": file_sha256(base / "registry-plan.md"),
+        "registryScript": file_sha256(base / "registry.sh"),
+    }
+
+
 def plan_review_status(env_name, state):
     review = load_plan_review(env_name)
     if not state["generate"] and not (state["base"] / "generated" / "deploy-plan.md").exists():
         return "not generated", "warn"
+    reviewed_hashes = review.get("planHashes") or {}
+    current_hashes = plan_hashes(env_name)
+    if review.get("status") == "approved" and reviewed_hashes and reviewed_hashes != current_hashes:
+        return "stale review", "warn"
     if review.get("status") == "approved":
         return "approved", "ok"
     if review.get("status") == "rejected":
@@ -691,6 +739,121 @@ def provider_catalog():
     for path in sorted(base.glob("*/README.md")) if base.exists() else []:
         providers.append({"name": path.parent.name, "readme": path})
     return providers
+
+
+def lock_path(env_name):
+    return LOCKS / f"{safe_key(env_name)}.json"
+
+
+def active_lock(env_name):
+    lock = read_json(lock_path(env_name))
+    if not lock:
+        return None
+    job_id = lock.get("jobId", "")
+    if job_id:
+        job = read_job(job_id)
+        if job and job.get("status") in {"queued", "running", "pending_approval", "cancel_requested"}:
+            return lock
+    try:
+        lock_path(env_name).unlink(missing_ok=True)
+    except OSError:
+        pass
+    return None
+
+
+def acquire_lock(env_name, job):
+    if not env_name:
+        return True, ""
+    existing = active_lock(env_name)
+    if existing:
+        return False, f"Environment is locked by job {existing.get('jobId', 'unknown')}."
+    write_json(lock_path(env_name), {
+        "environment": env_name,
+        "jobId": job.get("id", ""),
+        "action": job.get("action", ""),
+        "lockedBy": job.get("requestedBy", ""),
+        "lockedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    })
+    return True, ""
+
+
+def release_lock(env_name, job_id):
+    lock = read_json(lock_path(env_name))
+    if lock and lock.get("jobId") == job_id:
+        lock_path(env_name).unlink(missing_ok=True)
+
+
+def change_record_path(record_id):
+    return CHANGE_RECORDS / f"{safe_key(record_id)}.json"
+
+
+def create_change_record(job, user):
+    env_name = job.get("environment", "")
+    record_id = f"cr-{job.get('id', secrets.token_hex(4))}"
+    record = {
+        "id": record_id,
+        "jobId": job.get("id", ""),
+        "environment": env_name,
+        "action": job.get("action", ""),
+        "requestedBy": (user or {}).get("username", "unknown"),
+        "requestedRole": (user or {}).get("role", ""),
+        "createdAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "status": "open",
+        "planHashes": plan_hashes(env_name),
+        "rollbackNotes": "Run backup before apply. Use generated plan and NKP runbooks for rollback decision points.",
+    }
+    write_json(change_record_path(record_id), record)
+    return record
+
+
+def list_change_records(limit=100):
+    if not CHANGE_RECORDS.exists():
+        return []
+    records = [read_json(path) for path in CHANGE_RECORDS.glob("*.json")]
+    return sorted([record for record in records if record], key=lambda item: item.get("createdAt", ""), reverse=True)[:limit]
+
+
+def update_change_record_for_job(job_id, status):
+    if not CHANGE_RECORDS.exists():
+        return
+    for path in CHANGE_RECORDS.glob("*.json"):
+        record = read_json(path)
+        if record and record.get("jobId") == job_id:
+            record["status"] = "closed" if status == "succeeded" else status
+            record["updatedAt"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            write_json(path, record)
+
+
+def drift_status(config):
+    data = read_json_from_context(config)
+    env_name = str(data.get("environmentName") or config.stem)
+    state = env_state(env_name)
+    review = load_plan_review(env_name)
+    current = plan_hashes(env_name)
+    reviewed = review.get("planHashes") or {}
+    issues = []
+    if not state["generate"]:
+        issues.append("generate has not run")
+    if review.get("status") == "approved" and reviewed and reviewed != current:
+        issues.append("generated plan changed after approval")
+    env_state_file = state["base"] / "state" / "environment.json"
+    if config.exists() and env_state_file.exists() and config.stat().st_mtime > env_state_file.stat().st_mtime:
+        issues.append("environment YAML changed after prepare")
+    if not state["verification"].exists():
+        issues.append("verification report missing")
+    return env_name, ("warn" if issues else "ok"), issues or ["no drift indicators detected"]
+
+
+def backup_manifests():
+    manifests = []
+    for path in (ZT / "environments").glob("*/backup/*/backup-manifest.json") if (ZT / "environments").exists() else []:
+        manifests.append({"path": path, "data": read_json(path) or {}})
+    return sorted(manifests, key=lambda item: str(item["data"].get("createdAt", "")), reverse=True)
+
+
+def environment_for_config(config):
+    data = read_json_from_context(config)
+    return str(data.get("environmentName") or Path(config).stem)
 
 
 def health_checks():
@@ -952,6 +1115,14 @@ def run_job_background(job_id):
     if not job:
         return
     command = job.get("command", [])
+    env_name = job.get("environment", "")
+    lock_required = job.get("action") in {"prepare", "generate", "registry", "deploy", "upgrade", "destroy"}
+    if lock_required:
+        locked, reason = acquire_lock(env_name, job)
+        if not locked:
+            update_job(job_id, status="failed", exitCode=423, finishedAt=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+            append_job_log(job_id, f"[lock denied] {reason}\n")
+            return
     update_job(job_id, status="running", startedAt=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
     append_job_log(job_id, f"$ {job.get('commandLabel', command_label(command))}\n")
     try:
@@ -964,10 +1135,15 @@ def run_job_background(job_id):
         latest = read_job(job_id) or {}
         status = "cancelled" if latest.get("status") == "cancel_requested" else ("succeeded" if code == 0 else "failed")
         update_job(job_id, status=status, exitCode=code, finishedAt=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+        update_change_record_for_job(job_id, status)
         append_job_log(job_id, f"\n[exit code {code}]\n")
     except Exception as exc:
         update_job(job_id, status="failed", exitCode=127, finishedAt=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+        update_change_record_for_job(job_id, "failed")
         append_job_log(job_id, f"\n[job runner error] {exc}\n")
+    finally:
+        if lock_required:
+            release_lock(env_name, job_id)
 
 
 def start_job(job_id):
@@ -983,7 +1159,7 @@ def create_job(action, config, command, requested_by, kind="safe", approval_requ
         "kind": kind,
         "action": action,
         "config": str(config),
-        "environment": Path(config).stem if config else "",
+        "environment": environment_for_config(config) if config else "",
         "status": "pending_approval" if approval_required else "queued",
         "requestedBy": requested_by.get("username", "unknown") if requested_by else "unknown",
         "requestedRole": requested_by.get("role", "") if requested_by else "",
@@ -1057,17 +1233,22 @@ def page(title, body, active="environments", user=None):
     <a class="{nav_class('artifacts')}" href="{VIEW_PATHS['artifacts']}">Artifacts</a>
     <a class="{nav_class('plan-review')}" href="{VIEW_PATHS['plan-review']}">Plan Review</a>
     <a class="{nav_class('kubeconfig')}" href="{VIEW_PATHS['kubeconfig']}">Kubeconfig</a>
+    <a class="{nav_class('backups')}" href="{VIEW_PATHS['backups']}">Backups</a>
     <a class="{nav_class('health')}" href="{VIEW_PATHS['health']}">Health</a>
     <div class="nav-label">Deployment</div>
     <a class="{nav_class('sources')}" href="{VIEW_PATHS['sources']}">Sources</a>
     <a class="{nav_class('inventory')}" href="{VIEW_PATHS['inventory']}">Inventory</a>
     <a class="{nav_class('network')}" href="{VIEW_PATHS['network']}">Network</a>
     <a class="{nav_class('preflight')}" href="{VIEW_PATHS['preflight']}">Preflight</a>
+    <a class="{nav_class('drift')}" href="{VIEW_PATHS['drift']}">Drift</a>
     <a class="{nav_class('pipeline')}" href="{VIEW_PATHS['pipeline']}">Pipeline</a>
     <a class="{nav_class('jobs')}" href="{VIEW_PATHS['jobs']}">Jobs</a>
+    <a class="{nav_class('locks')}" href="{VIEW_PATHS['locks']}">Locks</a>
     <div class="nav-label">Governance</div>
     <a class="{nav_class('actions')}" href="{VIEW_PATHS['actions']}">Safe Actions</a>
+    <a class="{nav_class('change-records')}" href="{VIEW_PATHS['change-records']}">Change Records</a>
     <a class="{nav_class('approval-policy')}" href="{VIEW_PATHS['approval-policy']}">Approval Policy</a>
+    <a class="{nav_class('release-channels')}" href="{VIEW_PATHS['release-channels']}">Release Channels</a>
     <a class="{nav_class('audit')}" href="{VIEW_PATHS['audit']}">Audit Trail</a>
     <div class="nav-label">Settings</div>
     <a class="{nav_class('connections')}" href="{VIEW_PATHS['connections']}">Connections</a>
@@ -1359,6 +1540,14 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(encoded)
 
+    def send_json(self, payload, status=200):
+        encoded = json.dumps(payload, indent=2).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(encoded)))
+        self.end_headers()
+        self.wfile.write(encoded)
+
     def send_redirect(self, location, headers=None):
         self.send_response(303)
         self.send_header("Location", location)
@@ -1371,7 +1560,7 @@ class Handler(BaseHTTPRequestHandler):
         return SESSIONS.get(token)
 
     def require_login(self, parsed):
-        if parsed.path in {"/login", "/assets/veridian-mark-teal.svg"}:
+        if parsed.path in {"/login", "/login/oidc", "/login/oidc/callback", "/assets/veridian-mark-teal.svg"}:
             return True
         if self.current_user():
             return True
@@ -1440,16 +1629,81 @@ class Handler(BaseHTTPRequestHandler):
     </table>
   </form>
 </section>
-<div class="notice">This is local console authentication for operator workstations. Production use should move to OIDC/SSO and server-side session storage.</div>
+<div class="notice">This is local console authentication for operator workstations. Production use should move to OIDC/SSO and server-side session storage. <a href="/login/oidc">Check OIDC login readiness</a>.</div>
 </div>
 """
             self.send_html(page("Login - NKP ZeroTouch Framework", body, "about"))
+            return
+        if parsed.path == "/login/oidc":
+            settings = load_setting("integrations", default_integrations())
+            status, note = oidc_status(settings)
+            body = f"""
+<div class="login-panel">
+<div class="section-head">
+  <div>
+    <h2>OIDC Login</h2>
+    <div class="section-copy">Enterprise identity provider handoff status.</div>
+  </div>
+</div>
+<section class="panel">
+  <table>
+    <thead><tr><th>Item</th><th>Status</th></tr></thead>
+    <tbody>
+      <tr><td>OIDC issuer</td><td>{html.escape(settings.get('oidc_issuer', '') or 'not configured')}</td></tr>
+      <tr><td>Discovery</td><td><span class="chip {status}">{html.escape(note)}</span></td></tr>
+      <tr><td>Client ID</td><td>{html.escape(settings.get('oidc_client_id', '') or 'not configured')}</td></tr>
+    </tbody>
+  </table>
+</section>
+<div class="notice">OIDC metadata is configured and probed here. Full authorization-code token exchange is the next implementation step before production SSO can replace local login.</div>
+<a class="back-link" href="/login">Back to local login</a>
+</div>
+"""
+            self.send_html(page("OIDC Login - NKP ZeroTouch Framework", body, "about"))
             return
         if parsed.path == "/logout":
             token = cookie_value(self.headers, "zt_session")
             audit_event("logout", self.current_user(), "session", "success")
             SESSIONS.pop(token, None)
             self.send_redirect("/login", {"Set-Cookie": "zt_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax"})
+            return
+        if parsed.path.startswith("/api/"):
+            if parsed.path == "/api/status":
+                checks = health_checks()
+                self.send_json({"status": "ok", "checks": [{"name": name, "status": status, "note": note} for name, status, note in checks]})
+                return
+            if parsed.path == "/api/environments":
+                rows = []
+                for config in env_configs():
+                    data = read_json_from_context(config)
+                    env_name = data.get("environmentName") or config.stem
+                    state = env_state(env_name)
+                    lifecycle, lifecycle_status = environment_lifecycle(env_name, state)
+                    ready_passed, ready_total, ready_pct = environment_readiness(data, state)
+                    rows.append({"name": env_name, "config": config.name, "type": data.get("environmentType", ""), "lifecycle": lifecycle, "lifecycleStatus": lifecycle_status, "readiness": {"passed": ready_passed, "total": ready_total, "percent": ready_pct}, "planReview": plan_review_status(env_name, state)[0]})
+                self.send_json({"environments": rows})
+                return
+            if parsed.path == "/api/jobs":
+                self.send_json({"jobs": list_jobs(100)})
+                return
+            if parsed.path == "/api/jobs/log":
+                query = parse_qs(parsed.query)
+                job_id = query.get("id", [""])[0]
+                job = read_job(job_id)
+                if not job:
+                    self.send_json({"error": "job not found"}, status=404)
+                    return
+                log_path = job_log_path(job_id)
+                self.send_json({"job": job, "log": log_path.read_text(encoding="utf-8") if log_path.exists() else ""})
+                return
+            if parsed.path == "/api/locks":
+                locks = [read_json(path) for path in LOCKS.glob("*.json")] if LOCKS.exists() else []
+                self.send_json({"locks": [lock for lock in locks if lock]})
+                return
+            if parsed.path == "/api/change-records":
+                self.send_json({"changeRecords": list_change_records(100)})
+                return
+            self.send_json({"error": "not found"}, status=404)
             return
         if parsed.path == "/setup":
             sources = load_setting("sources", default_sources())
@@ -1769,6 +2023,34 @@ class Handler(BaseHTTPRequestHandler):
 <div class="notice">After deploy, capture kubeconfig into the environment state directory, then run verify to collect live cluster evidence.</div>
 """
             self.send_html(page("Kubeconfig - NKP ZeroTouch Framework", body, "kubeconfig"))
+            return
+        if parsed.path == "/backups":
+            rows = []
+            for item in backup_manifests():
+                data = item["data"]
+                path = item["path"]
+                rows.append(
+                    f"<tr><td><code>{html.escape(str(data.get('environment', path.parents[2].name)))}</code></td>"
+                    f"<td>{html.escape(str(data.get('createdAt', 'n/a')))}</td>"
+                    f"<td><span class='muted'>{html.escape(str(path.parent.relative_to(ROOT) if ROOT in path.parents else path.parent))}</span></td>"
+                    f"<td><a class='button-link' href='/artifacts/view?path={quote(str(path))}'>Manifest</a></td></tr>"
+                )
+            body = f"""
+<div class="section-head">
+  <div>
+    <h2>Backups</h2>
+    <div class="section-copy">Browse backup manifests created by the backup phase.</div>
+  </div>
+</div>
+<section class="panel">
+  <table>
+    <thead><tr><th>Environment</th><th>Created</th><th>Backup Path</th><th>Open</th></tr></thead>
+    <tbody>{''.join(rows) or '<tr><td colspan="4" class="muted">No backup manifests found. Run backup for an environment first.</td></tr>'}</tbody>
+  </table>
+</section>
+<div class="notice">Restore remains a controlled manual workflow. Review the manifest, then restore selected state/generated/report folders deliberately.</div>
+"""
+            self.send_html(page("Backups - NKP ZeroTouch Framework", body, "backups"))
             return
         if parsed.path == "/plan-review":
             rows = []
@@ -2105,6 +2387,34 @@ class Handler(BaseHTTPRequestHandler):
 """
             self.send_html(page("Preflight - NKP ZeroTouch Framework", body, "preflight"))
             return
+        if parsed.path == "/drift":
+            rows = []
+            warn_count = 0
+            for config in env_configs():
+                env_name, status, issues = drift_status(config)
+                warn_count += 1 if status == "warn" else 0
+                rows.append(
+                    f"<tr><td><div class='env-name'>{html.escape(env_name)}</div><div class='env-file'>{html.escape(config.name)}</div></td>"
+                    f"<td><span class='chip {status}'>{html.escape(status)}</span></td>"
+                    f"<td>{html.escape('; '.join(issues))}</td></tr>"
+                )
+            body = f"""
+<section class="summary-grid">
+  {metric_card("Drift Warnings", warn_count, "environments to review", "/drift")}
+  {metric_card("Environments", len(env_configs()), "profiles scanned", "/")}
+  {metric_card("Plan Reviews", sum(1 for config in env_configs() if load_plan_review(read_json_from_context(config).get('environmentName') or config.stem).get('status') == 'approved'), "approved plans", "/plan-review")}
+  {metric_card("Backups", len(backup_manifests()), "backup manifests", "/backups")}
+</section>
+<div class="section-head">
+  <div>
+    <h2>Drift Detection</h2>
+    <div class="section-copy">Detect changed plans, changed environment YAML, missing generation, and missing verification evidence.</div>
+  </div>
+</div>
+<section class="panel"><table><thead><tr><th>Environment</th><th>Status</th><th>Signals</th></tr></thead><tbody>{''.join(rows)}</tbody></table></section>
+"""
+            self.send_html(page("Drift - NKP ZeroTouch Framework", body, "drift"))
+            return
         if parsed.path == "/pipeline":
             steps = [("Source", "sources", "ok"), ("Validate", "actions", "warn"), ("Prepare", "actions", "warn"), ("Generate", "actions", "warn"), ("Review", "plan-review", "warn"), ("Registry", "cli", "warn"), ("Deploy", "cli", "warn"), ("Kubeconfig", "kubeconfig", "warn"), ("Verify", "actions", "warn"), ("Operate", "runs", "warn")]
             cards = "".join(f"<a class='pipeline-step' href='{VIEW_PATHS[href]}'><strong>{html.escape(label)}</strong><span class='chip {status}'>{'configured' if status == 'ok' else 'pending'}</span></a>" for label, href, status in steps)
@@ -2151,6 +2461,61 @@ class Handler(BaseHTTPRequestHandler):
 <div class="notice">Safe jobs start immediately. Apply jobs are created as approval requests and must be approved by a role with approval permission.</div>
 """
             self.send_html(page("Jobs - NKP ZeroTouch Framework", body, "jobs"))
+            return
+        if parsed.path == "/locks":
+            lock_rows = []
+            for config in env_configs():
+                env_name = environment_for_config(config)
+                lock = active_lock(env_name)
+                lock_rows.append(
+                    f"<tr><td><div class='env-name'>{html.escape(env_name)}</div><div class='env-file'>{html.escape(config.name)}</div></td>"
+                    f"<td><span class='chip {'warn' if lock else 'ok'}'>{'locked' if lock else 'available'}</span></td>"
+                    f"<td>{html.escape(lock.get('jobId', 'n/a') if lock else 'n/a')}</td>"
+                    f"<td>{html.escape(lock.get('action', 'n/a') if lock else 'n/a')}</td>"
+                    f"<td>{html.escape(lock.get('lockedBy', 'n/a') if lock else 'n/a')}</td></tr>"
+                )
+            body = f"""
+<div class="section-head">
+  <div>
+    <h2>Environment Locks</h2>
+    <div class="section-copy">Prevent overlapping prepare, generate, and apply operations for the same environment.</div>
+  </div>
+</div>
+<section class="panel">
+  <table>
+    <thead><tr><th>Environment</th><th>Status</th><th>Job</th><th>Action</th><th>Locked By</th></tr></thead>
+    <tbody>{''.join(lock_rows) or '<tr><td colspan="5" class="muted">No environments found.</td></tr>'}</tbody>
+  </table>
+</section>
+"""
+            self.send_html(page("Locks - NKP ZeroTouch Framework", body, "locks"))
+            return
+        if parsed.path == "/change-records":
+            rows = []
+            for record in list_change_records(100):
+                rows.append(
+                    f"<tr><td><code>{html.escape(record.get('id', ''))}</code><div class='env-file'>job {html.escape(record.get('jobId', ''))}</div></td>"
+                    f"<td>{html.escape(record.get('environment', ''))}</td>"
+                    f"<td>{html.escape(record.get('action', ''))}</td>"
+                    f"<td><span class='chip {'ok' if record.get('status') == 'closed' else 'warn'}'>{html.escape(record.get('status', 'open'))}</span></td>"
+                    f"<td>{html.escape(record.get('requestedBy', ''))}</td>"
+                    f"<td>{html.escape(record.get('createdAt', ''))}</td></tr>"
+                )
+            body = f"""
+<div class="section-head">
+  <div>
+    <h2>Change Records</h2>
+    <div class="section-copy">Deployment apply requests with plan hashes, requester, job ID, and rollback notes.</div>
+  </div>
+</div>
+<section class="panel">
+  <table>
+    <thead><tr><th>Change</th><th>Environment</th><th>Action</th><th>Status</th><th>Requested By</th><th>Created</th></tr></thead>
+    <tbody>{''.join(rows) or '<tr><td colspan="6" class="muted">No change records yet. Request an apply action from the CLI page.</td></tr>'}</tbody>
+  </table>
+</section>
+"""
+            self.send_html(page("Change Records - NKP ZeroTouch Framework", body, "change-records"))
             return
         if parsed.path == "/jobs/view":
             query = parse_qs(parsed.query)
@@ -2215,6 +2580,40 @@ class Handler(BaseHTTPRequestHandler):
 <div class="notice">Apply jobs remain pending until the configured approval threshold is met. Destroy defaults to two approvals.</div>
 """
             self.send_html(page("Approval Policy - NKP ZeroTouch Framework", body, "approval-policy"))
+            return
+        if parsed.path == "/release-channels":
+            channels = load_setting("release-channels", default_release_channels())
+            channel_rows = ""
+            for item in channels.get("channels", "").split(","):
+                name, _, approvals = item.strip().partition(":")
+                if not name:
+                    continue
+                channel_rows += f"<tr><td><code>{html.escape(name.strip())}</code></td><td>{html.escape(approvals.strip() or '0')}</td><td><span class='chip {'ok' if name.strip() != 'production' else 'warn'}'>{'standard' if name.strip() != 'production' else 'elevated'}</span></td></tr>"
+            body = f"""
+<div class="section-head">
+  <div>
+    <h2>Release Channels</h2>
+    <div class="section-copy">Promotion lanes for development, lab, pilot, and production deployment governance.</div>
+  </div>
+</div>
+<section class="panel">
+  <form method="post" action="/release-channels/save">
+    <table>
+      <thead><tr><th>Channel Policy</th><th>Value</th></tr></thead>
+      <tbody>
+        <tr><td>Default channel</td><td><div class="field"><input name="default_channel" value="{html.escape(channels.get('default_channel', 'lab'))}"></div></td></tr>
+        <tr><td>Channels</td><td><div class="field"><input name="channels" value="{html.escape(channels.get('channels', 'dev:0, lab:1, pilot:1, production:2'))}"></div></td></tr>
+        <tr><td>Production requires plan review</td><td><div class="field"><select name="production_requires_plan_review"><option value="true" {'selected' if channels.get('production_requires_plan_review') == 'true' else ''}>true</option><option value="false" {'selected' if channels.get('production_requires_plan_review') == 'false' else ''}>false</option></select></div></td></tr>
+        <tr><td>Production requires backup</td><td><div class="field"><select name="production_requires_backup"><option value="true" {'selected' if channels.get('production_requires_backup') == 'true' else ''}>true</option><option value="false" {'selected' if channels.get('production_requires_backup') == 'false' else ''}>false</option></select></div></td></tr>
+        <tr><td></td><td><button>Save release channels</button></td></tr>
+      </tbody>
+    </table>
+  </form>
+</section>
+<div class="section-head"><div><h2>Channel Matrix</h2><div class="section-copy">Approval expectations by channel.</div></div></div>
+<section class="panel"><table><thead><tr><th>Channel</th><th>Minimum Approvals</th><th>Governance</th></tr></thead><tbody>{channel_rows}</tbody></table></section>
+"""
+            self.send_html(page("Release Channels - NKP ZeroTouch Framework", body, "release-channels"))
             return
         if parsed.path == "/settings/connections":
             settings = read_json(SETTINGS / "connections.json") or {}
@@ -2311,6 +2710,10 @@ class Handler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/settings/secrets":
             settings = load_setting("secrets", default_secrets())
+            secret_rows = "".join(
+                f"<tr><td><code>{html.escape(name)}</code></td><td><span class='chip {'ok' if os.environ.get(name) else 'warn'}'>{'present' if os.environ.get(name) else 'missing'}</span></td></tr>"
+                for name in ["NUTANIX_PC_USERNAME", "NUTANIX_PC_PASSWORD", "ZT_REGISTRY_USERNAME", "ZT_REGISTRY_PASSWORD", "VAULT_TOKEN"]
+            )
             body = f"""
 <div class="section-head">
   <div>
@@ -2333,6 +2736,8 @@ class Handler(BaseHTTPRequestHandler):
     </table>
   </form>
 </section>
+<div class="section-head"><div><h2>Runtime Secret Checks</h2><div class="section-copy">Presence checks only. Secret values are never displayed.</div></div></div>
+<section class="panel"><table><thead><tr><th>Key</th><th>Status</th></tr></thead><tbody>{secret_rows}</tbody></table></section>
 <div class="notice">This records backend metadata only. Secret values are not stored by the console.</div>
 """
             self.send_html(page("Secrets - NKP ZeroTouch Framework", body, "secrets"))
@@ -2576,6 +2981,14 @@ class Handler(BaseHTTPRequestHandler):
             self.send_html(page("Approval Policy Saved", body, "approval-policy"))
             return
 
+        if parsed.path == "/release-channels/save":
+            data = {key: form_value(form, key) for key in ["default_channel", "channels", "production_requires_plan_review", "production_requires_backup"]}
+            save_setting("release-channels", data)
+            audit_event("release_channels_saved", self.current_user(), "release-channels", "success")
+            body = "<section class='metric'><div class='metric-label'>Settings Saved</div><div class='metric-value'>Release Channels</div><div class='metric-foot'><span class='chip ok'>Saved locally</span></div></section><a class='back-link' href='/release-channels'>Back to release channels</a>"
+            self.send_html(page("Release Channels Saved", body, "release-channels"))
+            return
+
         if parsed.path == "/settings/integrations/save":
             data = {key: form_value(form, key) for key in ["session_store", "postgres_enabled", "postgres_dsn", "oidc_enabled", "oidc_issuer", "oidc_client_id", "oidc_redirect_uri", "vault_enabled", "vault_addr", "vault_mount", "vault_secret_path"]}
             save_setting("integrations", data)
@@ -2790,6 +3203,7 @@ class Handler(BaseHTTPRequestHandler):
                 "reviewedRole": self.current_user().get("role", ""),
                 "reviewedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 "note": form_value(form, "note"),
+                "planHashes": plan_hashes(env_name),
             }
             write_json(review_path(env_name), review)
             audit_event("plan_review_saved", self.current_user(), env_name, "success", review)
@@ -2894,7 +3308,9 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_html(page("CLI Error", "<h2>Runner unavailable</h2><div class='notice'>No supported shell runner found.</div><a class='back-link' href='/cli'>Back to CLI</a>", "cli"), status=500)
                 return
             job = create_job(action, config, command, self.current_user(), kind="apply", approval_required=True)
+            change = create_change_record(job, self.current_user())
             audit_event("apply_requested", self.current_user(), job["id"], "pending", {"action": action, "config": str(config)})
+            audit_event("change_record_created", self.current_user(), change["id"], "success", {"jobId": job["id"], "environment": job.get("environment", "")})
             self.send_redirect(f"/jobs/view?id={quote(job['id'])}")
             return
 

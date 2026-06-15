@@ -102,6 +102,7 @@ Additional operational phases are available for secrets, backup, upgrade plannin
 - `docs/architecture.md`
 - `docs/container-runner.md`
 - `docs/operational-readiness.md`
+- `docs/enterprise-controls.md`
 - `docs/production-persistence.md`
 - `docs/lab-evidence-template.md`
 - `docs/self-hosted-ci.md`

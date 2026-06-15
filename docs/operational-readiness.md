@@ -31,6 +31,12 @@ Before live deployment, operations teams must provide:
 - Lifecycle and readiness status for each environment.
 - Formal plan review status before apply approval.
 - Kubeconfig capture visibility for post-deploy verification.
+- Environment locks to prevent overlapping operations.
+- Change records for apply requests.
+- Plan hashes to detect artifact changes after review.
+- Drift detection for stale plans, changed YAML, and missing verification evidence.
+- Backup manifest browsing and release-channel metadata.
+- Authenticated JSON endpoints for future automation and frontend decoupling.
 - Runs, artifacts, health checks, and append-only audit visibility from `.zt`.
 - Artifact viewer and diff workflow for generated plans, reports, logs, state, and configs.
 - Local connection, RBAC, database, integration, approval policy, source, inventory, network, provider, and secret-backend settings.
@@ -42,6 +48,7 @@ Before exposing this console beyond a trusted operator workstation:
 
 - Move from memory sessions to file or Postgres-backed durable session storage.
 - Connect OIDC/SAML or enterprise SSO to a real identity provider.
+- Complete OIDC authorization-code token exchange for production login.
 - Connect console state to Postgres if multi-user operation is required.
 - Encrypt or externalize all secrets; do not store raw credentials in the repo or database.
 - Connect Vault or an equivalent external secret backend.
