@@ -6,6 +6,10 @@ The framework is designed so `air-gapped` is one supported deployment mode, not 
 
 Unofficial community automation framework. This project is not affiliated with or supported by Nutanix.
 
+Current release: `v0.1.0`
+
+Live demo: https://virtuarchitect.github.io/nkp-zerotouch-framework/
+
 ## Engineering Quality
 
 This project follows a production-grade quality bar. Changes are expected to

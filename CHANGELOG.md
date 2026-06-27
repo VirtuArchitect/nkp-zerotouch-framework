@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- GitHub Pages live demo for the NKP ZeroTouch Framework.
+- Clickable static prototype covering environment inventory, profile design,
+  ZeroTouch phases, governance gates, and generated artifacts.
+
 ## [0.1.0] - 2026-06-04
 
 ### Added
