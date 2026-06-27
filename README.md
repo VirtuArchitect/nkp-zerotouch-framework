@@ -1,14 +1,18 @@
-# nkp-zerotouch-framework
+# NKP ZeroTouch Framework
 
-ZeroTouch framework for deploying Nutanix Kubernetes Platform (NKP) across multiple environment types.
+A clickable MVP prototype and automation framework for Nutanix Kubernetes Platform (NKP) deployment workflows.
+
+NKP ZeroTouch Framework shows how operators could validate, prepare, generate, govern, and review NKP deployment runs across connected, proxied, and air-gapped environments from a controlled workflow.
 
 The framework is designed so `air-gapped` is one supported deployment mode, not the only mode.
-
-Unofficial community automation framework. This project is not affiliated with or supported by Nutanix.
 
 Current release: `v0.1.0`
 
 Live demo: https://virtuarchitect.github.io/nkp-zerotouch-framework/
+
+## Disclaimer
+
+This repository is an independent clickable MVP prototype and community automation framework. All Nutanix integrations, provisioning jobs, policy checks, environment states, and admin workflows shown in the live demo are simulated for demonstration purposes unless explicitly run against real operator-provided infrastructure values. This project is not affiliated with, sponsored by, or endorsed by Nutanix unless explicitly stated otherwise.
 
 ## Engineering Quality
 
