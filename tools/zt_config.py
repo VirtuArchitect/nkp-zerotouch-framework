@@ -1,15 +1,27 @@
 #!/usr/bin/env python3
 import argparse
 import json
+import shlex
 import sys
+import time
 from pathlib import Path
 
 import yaml
+
+try:
+    import jsonschema
+except ImportError:
+    jsonschema = None
 
 
 ENV_TYPES = {"connected", "proxied", "air-gapped"}
 BUNDLE_TYPES = {"standard", "air-gapped"}
 PROVIDER_TYPES = {"nutanix-ahv", "air-gapped-ahv", "proxied-ahv", "bare-metal"}
+SCHEMA_PATH = Path(__file__).resolve().parents[1] / "configs" / "schema" / "environment.schema.json"
+
+
+class RawShell(str):
+    pass
 
 
 def load_yaml(path):
@@ -40,8 +52,59 @@ def require(errors, data, dotted_path):
     return value
 
 
-def validate_config(data):
+def load_schema():
+    with SCHEMA_PATH.open("r", encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def schema_errors(data):
+    if jsonschema is None or not hasattr(jsonschema, "Draft202012Validator"):
+        return fallback_schema_errors(data)
+    validator = jsonschema.Draft202012Validator(load_schema())
+    return [format_schema_error(error) for error in sorted(validator.iter_errors(data), key=lambda item: list(item.path))]
+
+
+def format_schema_error(error):
+    location = ".".join(str(part) for part in error.absolute_path)
+    prefix = f"{location}: " if location else ""
+    return f"{prefix}{error.message}"
+
+
+def fallback_schema_errors(data):
     errors = []
+    integer_minimums = {
+        "cluster.controlPlaneReplicas": 1,
+        "cluster.workerReplicas": 0,
+        "cluster.controlPlaneEndpointPort": 1,
+        "registry.pushConcurrency": 1,
+    }
+    for path, minimum in integer_minimums.items():
+        value = raw_dotted_get(data, path)
+        if value is None:
+            continue
+        if not isinstance(value, int) or isinstance(value, bool):
+            errors.append(f"{path} must be an integer")
+        elif value < minimum:
+            errors.append(f"{path} must be greater than or equal to {minimum}")
+    boolean_paths = ["registry.insecure", "cluster.selfManaged", "cluster.fips"]
+    for path in boolean_paths:
+        value = raw_dotted_get(data, path)
+        if value is not None and not isinstance(value, bool):
+            errors.append(f"{path} must be a boolean")
+    return errors
+
+
+def raw_dotted_get(data, dotted_path):
+    current = data
+    for part in dotted_path.split("."):
+        if not isinstance(current, dict) or part not in current:
+            return None
+        current = current[part]
+    return current
+
+
+def validate_config(data):
+    errors = schema_errors(data)
     warnings = []
 
     env_type = require(errors, data, "environment.type")
@@ -124,6 +187,292 @@ def context(data, config_path):
     return root
 
 
+def is_truthy(value):
+    return str(value).lower() in {"1", "true", "yes", "on"}
+
+
+def shell_join(args):
+    return " ".join(str(arg) if isinstance(arg, RawShell) else shlex.quote(str(arg)) for arg in args)
+
+
+def shell_export(key, value):
+    return f"export {key}={shlex.quote(str(value))}"
+
+
+def build_nkp_command(ctx):
+    args = [
+        "./bin/nkp",
+        "create",
+        "cluster",
+        "nutanix",
+        "--cluster-name",
+        ctx["clusterName"],
+        "--endpoint",
+        ctx["prismCentralEndpoint"],
+        "--kubernetes-version",
+        ctx["kubernetesVersion"],
+        "--control-plane-replicas",
+        ctx["controlPlaneReplicas"],
+        "--worker-replicas",
+        ctx["workerReplicas"],
+        "--control-plane-vm-image",
+        ctx["imageName"],
+        "--worker-vm-image",
+        ctx["imageName"],
+        "--control-plane-prism-element-cluster",
+        ctx["prismElementCluster"],
+        "--worker-prism-element-cluster",
+        ctx["prismElementCluster"],
+        "--control-plane-subnets",
+        ctx["subnetName"],
+        "--worker-subnets",
+        ctx["subnetName"],
+        "--kubernetes-pod-network-cidr",
+        ctx["podCidr"],
+        "--kubernetes-service-cidr",
+        ctx["serviceCidr"],
+    ]
+    if ctx["environmentType"] == "air-gapped":
+        args.append("--airgapped")
+    if ctx["registryEndpoint"]:
+        args.extend([
+            "--registry-mirror-url",
+            ctx["registryEndpoint"],
+            RawShell("${ZT_REGISTRY_USERNAME:+--registry-mirror-username}"),
+            RawShell("${ZT_REGISTRY_USERNAME:-}"),
+            RawShell("${ZT_REGISTRY_PASSWORD:+--registry-mirror-password}"),
+            RawShell("${ZT_REGISTRY_PASSWORD:-}"),
+        ])
+    if ctx["environmentType"] == "proxied":
+        if ctx["httpProxy"]:
+            args.extend(["--http-proxy", ctx["httpProxy"]])
+        if ctx["httpsProxy"]:
+            args.extend(["--https-proxy", ctx["httpsProxy"]])
+    if ctx["bundlePath"]:
+        args.extend([
+            "--bootstrap-cluster-image",
+            f"{ctx['bundlePath']}/konvoy-bootstrap-image-{ctx['nkpVersion']}.tar",
+            "--bundle",
+            f"{ctx['bundlePath']}/container-images/konvoy-image-bundle-{ctx['nkpVersion']}.tar,{ctx['bundlePath']}/container-images/kommander-image-bundle-{ctx['nkpVersion']}.tar",
+        ])
+    optional_pairs = [
+        ("controlPlaneEndpointIp", "--control-plane-endpoint-ip"),
+        ("controlPlaneEndpointPort", "--control-plane-endpoint-port"),
+        ("sshPublicKeyFile", "--ssh-public-key-file"),
+        ("sshUsername", "--ssh-username"),
+        ("loadBalancerIpRange", "--kubernetes-service-load-balancer-ip-range"),
+        ("storageContainer", "--csi-storage-container"),
+        ("registryCaCert", "--registry-mirror-cacert"),
+    ]
+    for key, flag in optional_pairs:
+        if ctx[key]:
+            args.extend([flag, ctx[key]])
+    if ctx["ntpServers"]:
+        try:
+            ntp_servers = ",".join(json.loads(ctx["ntpServers"]))
+        except json.JSONDecodeError:
+            ntp_servers = ctx["ntpServers"]
+        args.extend(["--ntp-servers", ntp_servers])
+    if ctx["project"]:
+        args.extend(["--control-plane-pc-project", ctx["project"], "--worker-pc-project", ctx["project"]])
+    if is_truthy(ctx["selfManaged"]):
+        args.append("--self-managed")
+    if is_truthy(ctx["fips"]):
+        args.append("--fips")
+    args.extend(["--dry-run", "--output", "yaml", "--output-directory", "./generated"])
+    return shell_join(args)
+
+
+def render_generate(config_path, generated_dir, state_dir, reports_dir, deploy_ps=False):
+    data = load_yaml(config_path)
+    ctx = context(data, config_path)
+    generated = Path(generated_dir)
+    state = Path(state_dir)
+    reports = Path(reports_dir)
+    for path in [generated, state, reports]:
+        path.mkdir(parents=True, exist_ok=True)
+
+    cluster_values = {
+        "environment": {"name": ctx["environmentName"], "type": ctx["environmentType"]},
+        "nkp": {"version": ctx["nkpVersion"], "bundleType": ctx["bundleType"]},
+        "nutanix": {
+            "prismCentralEndpoint": ctx["prismCentralEndpoint"],
+            "prismElementCluster": ctx["prismElementCluster"],
+            "subnetName": ctx["subnetName"],
+            "imageName": ctx["imageName"],
+        },
+        "cluster": {
+            "name": ctx["clusterName"],
+            "kubernetesVersion": ctx["kubernetesVersion"],
+            "controlPlaneReplicas": ctx["controlPlaneReplicas"],
+            "workerReplicas": ctx["workerReplicas"],
+            "podCidr": ctx["podCidr"],
+            "serviceCidr": ctx["serviceCidr"],
+        },
+        "registry": {"endpoint": ctx["registryEndpoint"], "namespace": ctx["registryNamespace"]},
+    }
+    cluster_config_path = generated / "cluster-values.yaml"
+    cluster_config_path.write_text(yaml.safe_dump(cluster_values, sort_keys=False), encoding="utf-8")
+
+    env_path = generated / "nkp.env"
+    env_values = {
+        "ZT_ENVIRONMENT_NAME": ctx["environmentName"],
+        "ZT_ENVIRONMENT_TYPE": ctx["environmentType"],
+        "ZT_NKP_VERSION": ctx["nkpVersion"],
+        "ZT_CLUSTER_NAME": ctx["clusterName"],
+        "ZT_BUNDLE_TYPE": ctx["bundleType"],
+        "ZT_BUNDLE_PATH": ctx["bundlePath"],
+        "ZT_REGISTRY_ENDPOINT": ctx["registryEndpoint"],
+    }
+    env_path.write_text("\n".join(shell_export(key, value) for key, value in env_values.items() if value) + "\n", encoding="utf-8")
+
+    nkp_command = build_nkp_command(ctx)
+    deploy_script_path = generated / "deploy.sh"
+    deploy_script_path.write_text(
+        "\n".join([
+            "#!/usr/bin/env bash",
+            "set -euo pipefail",
+            'cd "$(dirname "$0")/.."',
+            "if [[ -f ./secrets/secrets.env ]]; then",
+            "  # shellcheck disable=SC1091",
+            "  source ./secrets/secrets.env",
+            "fi",
+            nkp_command,
+            "",
+        ]),
+        encoding="utf-8",
+    )
+    try:
+        deploy_script_path.chmod(deploy_script_path.stat().st_mode | 0o111)
+    except OSError:
+        pass
+
+    files = [str(cluster_config_path), str(env_path), str(deploy_script_path)]
+    if deploy_ps:
+        deploy_ps_path = generated / "deploy.ps1"
+        ps_command = nkp_command.replace("'", "''")
+        deploy_ps_path.write_text(
+            "\n".join([
+                "param()",
+                "Set-StrictMode -Version Latest",
+                '$ErrorActionPreference = "Stop"',
+                'Set-Location (Join-Path $PSScriptRoot "..")',
+                'Write-Host "Run deploy.sh from Linux or WSL for NKP Linux binaries."',
+                f"Write-Host '{ps_command}'",
+                "",
+            ]),
+            encoding="utf-8",
+        )
+        files.append(str(deploy_ps_path))
+
+    state_payload = {"generatedAt": utc_stamp(), "files": files, "dryRunCommand": nkp_command}
+    generate_state = state / "generate.json"
+    generate_state.write_text(json.dumps(state_payload, indent=2) + "\n", encoding="utf-8")
+    return {"files": files, "state": str(generate_state), "dryRunCommand": nkp_command}
+
+
+def build_registry_command(ctx):
+    konvoy_bundle = f"{ctx['bundlePath']}/container-images/konvoy-image-bundle-{ctx['nkpVersion']}.tar"
+    kommander_bundle = f"{ctx['bundlePath']}/container-images/kommander-image-bundle-{ctx['nkpVersion']}.tar"
+    args = [
+        "./bin/nkp",
+        "push",
+        "bundle",
+        "--bundle",
+        konvoy_bundle,
+        "--bundle",
+        kommander_bundle,
+        "--to-registry",
+        ctx["registryEndpoint"],
+    ]
+    if ctx["registryCaCert"]:
+        args.extend(["--to-registry-ca-cert-file", ctx["registryCaCert"]])
+    if is_truthy(ctx["registryInsecure"]):
+        args.append("--to-registry-insecure-skip-tls-verify")
+    if ctx["registryPushConcurrency"]:
+        args.extend(["--image-push-concurrency", ctx["registryPushConcurrency"]])
+    if ctx["registryOnExistingTag"]:
+        args.extend(["--on-existing-tag", ctx["registryOnExistingTag"]])
+    args.extend([
+        "--force-oci-media-types",
+        "--to-registry-username",
+        RawShell('"$ZT_REGISTRY_USERNAME"'),
+        "--to-registry-password",
+        RawShell('"$ZT_REGISTRY_PASSWORD"'),
+    ])
+    return shell_join(args), konvoy_bundle, kommander_bundle
+
+
+def render_registry(config_path, generated_dir, state_dir):
+    data = load_yaml(config_path)
+    ctx = context(data, config_path)
+    generated = Path(generated_dir)
+    state = Path(state_dir)
+    generated.mkdir(parents=True, exist_ok=True)
+    state.mkdir(parents=True, exist_ok=True)
+
+    plan_path = generated / "registry-plan.md"
+    script_path = generated / "registry.sh"
+    script_value = None
+    if ctx["environmentType"] != "air-gapped":
+        plan_path.write_text(
+            f"# Registry Plan\n\nEnvironment `{ctx['environmentName']}` is `{ctx['environmentType']}`.\n\nNo mandatory image mirroring is required.\n",
+            encoding="utf-8",
+        )
+    else:
+        command, konvoy_bundle, kommander_bundle = build_registry_command(ctx)
+        plan_path.write_text(
+            "\n".join([
+                "# Registry Plan",
+                "",
+                f"Environment: `{ctx['environmentName']}`",
+                f"Registry: `{ctx['registryEndpoint']}`",
+                f"Namespace: `{ctx['registryNamespace']}`",
+                "",
+                "Bundles:",
+                "",
+                f"- `{konvoy_bundle}`",
+                f"- `{kommander_bundle}`",
+                "",
+                "The generated script uses nkp push bundle. Provide credentials through environment variables before running it:",
+                "",
+                "- ZT_REGISTRY_USERNAME",
+                "- ZT_REGISTRY_PASSWORD",
+                "",
+            ]),
+            encoding="utf-8",
+        )
+        script_path.write_text(
+            "\n".join([
+                "#!/usr/bin/env bash",
+                "set -euo pipefail",
+                'cd "$(dirname "$0")/.."',
+                "if [[ -f ./secrets/secrets.env ]]; then",
+                "  # shellcheck disable=SC1091",
+                "  source ./secrets/secrets.env",
+                "fi",
+                ': "${ZT_REGISTRY_USERNAME:?Set ZT_REGISTRY_USERNAME}"',
+                ': "${ZT_REGISTRY_PASSWORD:?Set ZT_REGISTRY_PASSWORD}"',
+                command,
+                "",
+            ]),
+            encoding="utf-8",
+        )
+        try:
+            script_path.chmod(script_path.stat().st_mode | 0o111)
+        except OSError:
+            pass
+        script_value = str(script_path)
+
+    registry_state = state / "registry.json"
+    registry_state.write_text(json.dumps({"generatedAt": utc_stamp(), "registryPlan": str(plan_path), "registryScript": script_value}, indent=2) + "\n", encoding="utf-8")
+    return {"registryPlan": str(plan_path), "registryScript": script_value, "state": str(registry_state)}
+
+
+def utc_stamp():
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
 def render_secret_env(secrets_path):
     secrets = load_yaml(secrets_path)
     values = {
@@ -138,7 +487,7 @@ def render_secret_env(secrets_path):
         "ZT_SSH_PRIVATE_KEY": dotted_get(secrets, "ssh.privateKeyPath"),
         "ZT_SSH_USERNAME": dotted_get(secrets, "ssh.username"),
     }
-    return "\n".join(f'export {key}="{value}"' for key, value in values.items() if value) + "\n"
+    return "\n".join(shell_export(key, value) for key, value in values.items() if value) + "\n"
 
 
 def main():
@@ -158,6 +507,18 @@ def main():
     env = sub.add_parser("secret-env")
     env.add_argument("--secrets", required=True)
 
+    generate = sub.add_parser("render-generate")
+    generate.add_argument("--config", required=True)
+    generate.add_argument("--generated-dir", required=True)
+    generate.add_argument("--state-dir", required=True)
+    generate.add_argument("--reports-dir", required=True)
+    generate.add_argument("--deploy-ps", action="store_true")
+
+    registry = sub.add_parser("render-registry")
+    registry.add_argument("--config", required=True)
+    registry.add_argument("--generated-dir", required=True)
+    registry.add_argument("--state-dir", required=True)
+
     args = parser.parse_args()
 
     try:
@@ -169,6 +530,10 @@ def main():
             print(json.dumps(context(load_yaml(args.config), args.config), indent=2))
         elif args.command == "secret-env":
             print(render_secret_env(args.secrets), end="")
+        elif args.command == "render-generate":
+            print(json.dumps(render_generate(args.config, args.generated_dir, args.state_dir, args.reports_dir, args.deploy_ps), indent=2))
+        elif args.command == "render-registry":
+            print(json.dumps(render_registry(args.config, args.generated_dir, args.state_dir), indent=2))
     except Exception as exc:
         print(f"zt_config error: {exc}", file=sys.stderr)
         return 1

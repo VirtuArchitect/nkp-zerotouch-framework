@@ -385,72 +385,11 @@ generate_assets() {
   assert_prepared
   mkdir -p "$generated_dir" "$state_dir" "$reports_dir"
 
-  local airgap_flag=""
-  [[ "$environment_type" == "air-gapped" ]] && airgap_flag=" --airgapped"
-  local registry_flags=""
-  [[ -n "$registry_endpoint" ]] && registry_flags=" --registry-mirror-url $registry_endpoint \${ZT_REGISTRY_USERNAME:+--registry-mirror-username \$ZT_REGISTRY_USERNAME} \${ZT_REGISTRY_PASSWORD:+--registry-mirror-password \$ZT_REGISTRY_PASSWORD}"
-  local proxy_flags=""
-  [[ "$environment_type" == "proxied" && -n "$http_proxy" ]] && proxy_flags="$proxy_flags --http-proxy $http_proxy"
-  [[ "$environment_type" == "proxied" && -n "$https_proxy" ]] && proxy_flags="$proxy_flags --https-proxy $https_proxy"
-  local bundle_flags=""
-  if [[ -n "$bundle_path" ]]; then
-    bundle_flags=" --bootstrap-cluster-image $bundle_path/konvoy-bootstrap-image-$nkp_version.tar --bundle $bundle_path/container-images/konvoy-image-bundle-$nkp_version.tar,$bundle_path/container-images/kommander-image-bundle-$nkp_version.tar"
-  fi
-  local advanced_flags=""
-  [[ -n "$control_plane_endpoint_ip" ]] && advanced_flags="$advanced_flags --control-plane-endpoint-ip $control_plane_endpoint_ip"
-  [[ -n "$control_plane_endpoint_port" ]] && advanced_flags="$advanced_flags --control-plane-endpoint-port $control_plane_endpoint_port"
-  [[ -n "$ssh_public_key_file" ]] && advanced_flags="$advanced_flags --ssh-public-key-file $ssh_public_key_file"
-  [[ -n "$ssh_username" ]] && advanced_flags="$advanced_flags --ssh-username $ssh_username"
-  [[ -n "$load_balancer_ip_range" ]] && advanced_flags="$advanced_flags --kubernetes-service-load-balancer-ip-range $load_balancer_ip_range"
-  [[ -n "$ntp_servers" ]] && advanced_flags="$advanced_flags --ntp-servers ${ntp_servers//[\[\]\"]/}"
-  [[ -n "$storage_container" ]] && advanced_flags="$advanced_flags --csi-storage-container $storage_container"
-  [[ -n "$project" ]] && advanced_flags="$advanced_flags --control-plane-pc-project $project --worker-pc-project $project"
-  [[ "$self_managed" == "true" || "$self_managed" == "True" ]] && advanced_flags="$advanced_flags --self-managed"
-  [[ "$fips" == "true" || "$fips" == "True" ]] && advanced_flags="$advanced_flags --fips"
-  [[ -n "$registry_ca_cert" ]] && advanced_flags="$advanced_flags --registry-mirror-cacert $registry_ca_cert"
-
-  local nkp_command="./bin/nkp create cluster nutanix --cluster-name $cluster_name --endpoint $prism_endpoint --kubernetes-version $kubernetes_version --control-plane-replicas $control_plane_replicas --worker-replicas $worker_replicas --control-plane-vm-image $image_name --worker-vm-image $image_name --control-plane-prism-element-cluster $prism_cluster --worker-prism-element-cluster $prism_cluster --control-plane-subnets $subnet_name --worker-subnets $subnet_name --kubernetes-pod-network-cidr $pod_cidr --kubernetes-service-cidr $service_cidr$airgap_flag$registry_flags$proxy_flags$bundle_flags$advanced_flags --dry-run --output yaml --output-directory ./generated"
-
-  cat >"$generated_dir/cluster-values.yaml" <<EOF
-environment:
-  name: $environment_name
-  type: $environment_type
-nkp:
-  version: $nkp_version
-  bundleType: $bundle_type
-cluster:
-  name: $cluster_name
-  kubernetesVersion: $kubernetes_version
-EOF
-
-  cat >"$generated_dir/nkp.env" <<EOF
-ZT_ENVIRONMENT_NAME=$environment_name
-ZT_ENVIRONMENT_TYPE=$environment_type
-ZT_NKP_VERSION=$nkp_version
-ZT_CLUSTER_NAME=$cluster_name
-ZT_BUNDLE_TYPE=$bundle_type
-ZT_BUNDLE_PATH=$bundle_path
-ZT_REGISTRY_ENDPOINT=$registry_endpoint
-EOF
-
-  cat >"$generated_dir/deploy.sh" <<EOF
-#!/usr/bin/env bash
-set -euo pipefail
-cd "\$(dirname "\$0")/.."
-if [[ -f ./secrets/secrets.env ]]; then
-  # shellcheck disable=SC1091
-  source ./secrets/secrets.env
-fi
-$nkp_command
-EOF
-  chmod +x "$generated_dir/deploy.sh"
-
-  cat >"$state_dir/generate.json" <<EOF
-{
-  "generatedAt": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
-  "dryRunCommand": "$nkp_command"
-}
-EOF
+  "$python_bin" ./tools/zt_config.py render-generate \
+    --config "$config_path" \
+    --generated-dir "$generated_dir" \
+    --state-dir "$state_dir" \
+    --reports-dir "$reports_dir" >/dev/null
 
   check PASS "Generated cluster values: $generated_dir/cluster-values.yaml"
   check PASS "Generated environment file: $generated_dir/nkp.env"
@@ -462,65 +401,15 @@ registry_assets() {
   assert_prepared
   mkdir -p "$generated_dir" "$state_dir"
 
-  if [[ "$environment_type" != "air-gapped" ]]; then
-    cat >"$generated_dir/registry-plan.md" <<EOF
-# Registry Plan
+  "$python_bin" ./tools/zt_config.py render-registry \
+    --config "$config_path" \
+    --generated-dir "$generated_dir" \
+    --state-dir "$state_dir" >/dev/null
 
-Environment \`$environment_name\` is \`$environment_type\`.
-
-No mandatory image mirroring is required.
-EOF
-    check PASS "Generated registry plan: $generated_dir/registry-plan.md"
-  else
-    local konvoy_bundle="$bundle_path/container-images/konvoy-image-bundle-$nkp_version.tar"
-    local kommander_bundle="$bundle_path/container-images/kommander-image-bundle-$nkp_version.tar"
-    local registry_extra_flags=""
-    [[ -n "$registry_ca_cert" ]] && registry_extra_flags="$registry_extra_flags  --to-registry-ca-cert-file \"$registry_ca_cert\" \\
-"
-    [[ "$registry_insecure" == "true" || "$registry_insecure" == "True" ]] && registry_extra_flags="$registry_extra_flags  --to-registry-insecure-skip-tls-verify \\
-"
-    [[ -n "$registry_push_concurrency" ]] && registry_extra_flags="$registry_extra_flags  --image-push-concurrency $registry_push_concurrency \\
-"
-    [[ -n "$registry_on_existing_tag" ]] && registry_extra_flags="$registry_extra_flags  --on-existing-tag $registry_on_existing_tag \\
-"
-    cat >"$generated_dir/registry-plan.md" <<EOF
-# Registry Plan
-
-Environment: \`$environment_name\`
-Registry: \`$registry_endpoint\`
-Namespace: \`$registry_namespace\`
-
-Bundles:
-
-- \`$konvoy_bundle\`
-- \`$kommander_bundle\`
-EOF
-    cat >"$generated_dir/registry.sh" <<EOF
-#!/usr/bin/env bash
-set -euo pipefail
-cd "\$(dirname "\$0")/.."
-if [[ -f ./secrets/secrets.env ]]; then
-  # shellcheck disable=SC1091
-  source ./secrets/secrets.env
-fi
-: "\${ZT_REGISTRY_USERNAME:?Set ZT_REGISTRY_USERNAME}"
-: "\${ZT_REGISTRY_PASSWORD:?Set ZT_REGISTRY_PASSWORD}"
-./bin/nkp push bundle \\
-  --bundle "$konvoy_bundle" \\
-  --bundle "$kommander_bundle" \\
-  --to-registry "$registry_endpoint" \\
-${registry_extra_flags}  --force-oci-media-types \\
-  --to-registry-username "\$ZT_REGISTRY_USERNAME" \\
-  --to-registry-password "\$ZT_REGISTRY_PASSWORD"
-EOF
-    chmod +x "$generated_dir/registry.sh"
-    check PASS "Generated registry plan: $generated_dir/registry-plan.md"
+  check PASS "Generated registry plan: $generated_dir/registry-plan.md"
+  if [[ -f "$generated_dir/registry.sh" ]]; then
     check PASS "Generated registry script: $generated_dir/registry.sh"
   fi
-
-  cat >"$state_dir/registry.json" <<EOF
-{ "generatedAt": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")", "registryPlan": "$generated_dir/registry-plan.md" }
-EOF
   if [[ "$apply" == "true" ]]; then
     if [[ "$environment_type" != "air-gapped" ]]; then
       check INFO "Registry apply is optional for $environment_type; generated plan only."

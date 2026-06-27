@@ -25,3 +25,22 @@ Migration approach:
 4. Keep generated artifacts on disk or object storage with database metadata.
 5. Add backup and restore procedures for both database state and generated
    artifacts.
+
+## Production Readiness Checklist
+
+Before production use, confirm:
+
+- Environment files pass `tools/zt_config.py validate` with the JSON schema
+  dependency installed.
+- Generated `deploy.sh`, `registry.sh`, and `secrets.env` files come from the
+  renderer and preserve shell quoting.
+- The first dashboard admin is created through localhost or with
+  `ZT_BOOTSTRAP_TOKEN` set for exposed binds.
+- Secrets are sourced from Vault or an equivalent external backend; committed
+  files contain placeholders only.
+- Apply, registry, upgrade, and destroy workflows are approval-gated and backed
+  by change records.
+- Backups cover `.zt` state, generated artifacts, future database state, and
+  the operator run evidence needed for audit.
+- Live runners are isolated, patched, and granted only the Prism Central,
+  registry, bundle, SSH, and network access required for the target environment.

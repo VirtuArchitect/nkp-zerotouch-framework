@@ -49,6 +49,11 @@ Before live deployment, operations teams must provide:
 
 Before exposing this console beyond a trusted operator workstation:
 
+- Run schema validation for every environment file in CI and before live apply.
+- Keep generated shell scripts produced by the Python renderer; do not hand-edit
+  command lines with unquoted environment values.
+- Set `ZT_BOOTSTRAP_TOKEN` whenever the dashboard is bound outside localhost
+  before the first admin account exists.
 - Move from memory sessions to file or Postgres-backed durable session storage.
 - Connect OIDC/SAML or enterprise SSO to a real identity provider.
 - Complete OIDC authorization-code token exchange for production login.
@@ -56,7 +61,11 @@ Before exposing this console beyond a trusted operator workstation:
 - Encrypt or externalize all secrets; do not store raw credentials in the repo or database.
 - Connect Vault or an equivalent external secret backend.
 - Review and tune role separation for authoring, approving, and executing deployment changes.
+- Confirm approval policy, release-channel gates, and plan-review controls are
+  enabled for production channels.
 - Add backup/restore procedures for `.zt` state and future database state.
+- Run deployment jobs from an isolated Linux or WSL runner with pinned NKP
+  bundles, least-privilege credentials, and controlled network access.
 - Extend health checks from TCP and credential-environment validation to authenticated Prism Central and registry API validation.
 
 ## Recommended Operating Model

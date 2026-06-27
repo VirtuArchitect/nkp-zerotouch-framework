@@ -579,95 +579,14 @@ function Invoke-Generate {
     $deployScriptPath = Join-Path $context.generatedDir "deploy.sh"
     $deployPsPath = Join-Path $context.generatedDir "deploy.ps1"
 
-    $airgapFlag = if ($context.environmentType -eq "air-gapped") { " --airgapped" } else { "" }
-    $registryFlags = ""
-    if ($context.registryEndpoint) {
-        $registryFlags = " --registry-mirror-url $($context.registryEndpoint) `${ZT_REGISTRY_USERNAME:+--registry-mirror-username `$ZT_REGISTRY_USERNAME} `${ZT_REGISTRY_PASSWORD:+--registry-mirror-password `$ZT_REGISTRY_PASSWORD}"
-    }
-    $proxyFlags = ""
-    if ($context.environmentType -eq "proxied") {
-        if ($context.httpProxy) { $proxyFlags += " --http-proxy $($context.httpProxy)" }
-        if ($context.httpsProxy) { $proxyFlags += " --https-proxy $($context.httpsProxy)" }
-    }
-    $bundleFlags = ""
-    if ($context.bundlePath) {
-        $bundleFlags = " --bootstrap-cluster-image $($context.bundlePath)/konvoy-bootstrap-image-$($context.nkpVersion).tar --bundle $($context.bundlePath)/container-images/konvoy-image-bundle-$($context.nkpVersion).tar,$($context.bundlePath)/container-images/kommander-image-bundle-$($context.nkpVersion).tar"
-    }
-    $advancedFlags = ""
-    if ($context.controlPlaneEndpointIp) { $advancedFlags += " --control-plane-endpoint-ip $($context.controlPlaneEndpointIp)" }
-    if ($context.controlPlaneEndpointPort) { $advancedFlags += " --control-plane-endpoint-port $($context.controlPlaneEndpointPort)" }
-    if ($context.sshPublicKeyFile) { $advancedFlags += " --ssh-public-key-file $($context.sshPublicKeyFile)" }
-    if ($context.sshUsername) { $advancedFlags += " --ssh-username $($context.sshUsername)" }
-    if ($context.loadBalancerIpRange) { $advancedFlags += " --kubernetes-service-load-balancer-ip-range $($context.loadBalancerIpRange)" }
-    if ($context.ntpServers) { $advancedFlags += " --ntp-servers $($context.ntpServers -replace '[\[\]`"]', '' -replace ',', ',')" }
-    if ($context.storageContainer) { $advancedFlags += " --csi-storage-container $($context.storageContainer)" }
-    if ($context.project) { $advancedFlags += " --control-plane-pc-project $($context.project) --worker-pc-project $($context.project)" }
-    if ($context.selfManaged -eq "True" -or $context.selfManaged -eq "true") { $advancedFlags += " --self-managed" }
-    if ($context.fips -eq "True" -or $context.fips -eq "true") { $advancedFlags += " --fips" }
-    if ($context.registryCaCert) { $advancedFlags += " --registry-mirror-cacert $($context.registryCaCert)" }
-
-    $nkpCommand = "./bin/nkp create cluster nutanix --cluster-name $($context.clusterName) --endpoint $($context.prismCentralEndpoint) --kubernetes-version $($context.kubernetesVersion) --control-plane-replicas $($context.controlPlaneReplicas) --worker-replicas $($context.workerReplicas) --control-plane-vm-image $($context.imageName) --worker-vm-image $($context.imageName) --control-plane-prism-element-cluster $($context.prismElementCluster) --worker-prism-element-cluster $($context.prismElementCluster) --control-plane-subnets $($context.subnetName) --worker-subnets $($context.subnetName) --kubernetes-pod-network-cidr $($context.podCidr) --kubernetes-service-cidr $($context.serviceCidr)$airgapFlag$registryFlags$proxyFlags$bundleFlags$advancedFlags --dry-run --output yaml --output-directory ./generated"
-
-    @"
-environment:
-  name: $($context.environmentName)
-  type: $($context.environmentType)
-nkp:
-  version: $($context.nkpVersion)
-  bundleType: $($context.bundleType)
-nutanix:
-  prismCentralEndpoint: $($context.prismCentralEndpoint)
-  prismElementCluster: $($context.prismElementCluster)
-  subnetName: $($context.subnetName)
-  imageName: $($context.imageName)
-cluster:
-  name: $($context.clusterName)
-  kubernetesVersion: $($context.kubernetesVersion)
-  controlPlaneReplicas: $($context.controlPlaneReplicas)
-  workerReplicas: $($context.workerReplicas)
-  podCidr: $($context.podCidr)
-  serviceCidr: $($context.serviceCidr)
-registry:
-  endpoint: $($context.registryEndpoint)
-  namespace: $($context.registryNamespace)
-"@ | Set-Content -LiteralPath $clusterConfigPath -Encoding utf8
-
-    @"
-ZT_ENVIRONMENT_NAME=$($context.environmentName)
-ZT_ENVIRONMENT_TYPE=$($context.environmentType)
-ZT_NKP_VERSION=$($context.nkpVersion)
-ZT_CLUSTER_NAME=$($context.clusterName)
-ZT_BUNDLE_TYPE=$($context.bundleType)
-ZT_BUNDLE_PATH=$($context.bundlePath)
-ZT_REGISTRY_ENDPOINT=$($context.registryEndpoint)
-"@ | Set-Content -LiteralPath $envPath -Encoding utf8
-
-    @"
-#!/usr/bin/env bash
-set -euo pipefail
-cd "`$(dirname "`$0")/.."
-if [[ -f ./secrets/secrets.env ]]; then
-  # shellcheck disable=SC1091
-  source ./secrets/secrets.env
-fi
-$nkpCommand
-"@ | Set-Content -LiteralPath $deployScriptPath -Encoding utf8
-
-    @"
-param()
-Set-StrictMode -Version Latest
-`$ErrorActionPreference = "Stop"
-Set-Location (Join-Path `$PSScriptRoot "..")
-Write-Host "Run deploy.sh from Linux or WSL for NKP Linux binaries."
-Write-Host '$nkpCommand'
-"@ | Set-Content -LiteralPath $deployPsPath -Encoding utf8
-
-    $phaseState = [ordered]@{
-        generatedAt = (Get-Date).ToUniversalTime().ToString("o")
-        files = @($clusterConfigPath, $envPath, $deployScriptPath, $deployPsPath)
-        dryRunCommand = $nkpCommand
-    }
-    $phaseState | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $context.stateDir "generate.json") -Encoding utf8
+    Invoke-ConfigTool -Arguments @(
+        "render-generate",
+        "--config", $ConfigPath,
+        "--generated-dir", $context.generatedDir,
+        "--state-dir", $context.stateDir,
+        "--reports-dir", $context.reportsDir,
+        "--deploy-ps"
+    ) | Out-Null
 
     Write-Check -Status "PASS" -Message "Generated cluster values: $clusterConfigPath"
     Write-Check -Status "PASS" -Message "Generated environment file: $envPath"
@@ -685,72 +604,17 @@ function Invoke-Registry {
     $registryPlanPath = Join-Path $context.generatedDir "registry-plan.md"
     $registryScriptPath = Join-Path $context.generatedDir "registry.sh"
 
-    if ($context.environmentType -ne "air-gapped") {
-        @"
-# Registry Plan
+    Invoke-ConfigTool -Arguments @(
+        "render-registry",
+        "--config", $ConfigPath,
+        "--generated-dir", $context.generatedDir,
+        "--state-dir", $context.stateDir
+    ) | Out-Null
 
-Environment $($context.environmentName) is $($context.environmentType).
-
-No mandatory image mirroring is required. Use this phase only if you want a controlled private registry workflow.
-"@ | Set-Content -LiteralPath $registryPlanPath -Encoding utf8
-        Write-Check -Status "PASS" -Message "Generated registry plan: $registryPlanPath"
-    }
-    else {
-        $konvoyBundle = "$($context.bundlePath)/container-images/konvoy-image-bundle-$($context.nkpVersion).tar"
-        $kommanderBundle = "$($context.bundlePath)/container-images/kommander-image-bundle-$($context.nkpVersion).tar"
-        $registryExtraFlags = ""
-        if ($context.registryCaCert) { $registryExtraFlags += "  --to-registry-ca-cert-file `"$($context.registryCaCert)`" \`n" }
-        if ($context.registryInsecure -eq "True" -or $context.registryInsecure -eq "true") { $registryExtraFlags += "  --to-registry-insecure-skip-tls-verify \`n" }
-        if ($context.registryPushConcurrency) { $registryExtraFlags += "  --image-push-concurrency $($context.registryPushConcurrency) \`n" }
-        if ($context.registryOnExistingTag) { $registryExtraFlags += "  --on-existing-tag $($context.registryOnExistingTag) \`n" }
-        @"
-# Registry Plan
-
-Environment: $($context.environmentName)
-Registry: $($context.registryEndpoint)
-Namespace: $($context.registryNamespace)
-
-Bundles:
-
-- $konvoyBundle
-- $kommanderBundle
-
-The generated script uses nkp push bundle. Provide credentials through environment variables before running it:
-
-- ZT_REGISTRY_USERNAME
-- ZT_REGISTRY_PASSWORD
-"@ | Set-Content -LiteralPath $registryPlanPath -Encoding utf8
-
-        $registryScript = @'
-#!/usr/bin/env bash
-set -euo pipefail
-cd "$(dirname "$0")/.."
-if [[ -f ./secrets/secrets.env ]]; then
-  # shellcheck disable=SC1091
-  source ./secrets/secrets.env
-fi
-: "${ZT_REGISTRY_USERNAME:?Set ZT_REGISTRY_USERNAME}"
-: "${ZT_REGISTRY_PASSWORD:?Set ZT_REGISTRY_PASSWORD}"
-./bin/nkp push bundle \
-  --bundle "__KONVOY_BUNDLE__" \
-  --bundle "__KOMMANDER_BUNDLE__" \
-  --to-registry "__REGISTRY_ENDPOINT__" \
-__REGISTRY_EXTRA_FLAGS__  --force-oci-media-types \
-  --to-registry-username "$ZT_REGISTRY_USERNAME" \
-  --to-registry-password "$ZT_REGISTRY_PASSWORD"
-'@
-        $registryScript = $registryScript.Replace("__KONVOY_BUNDLE__", $konvoyBundle).Replace("__KOMMANDER_BUNDLE__", $kommanderBundle).Replace("__REGISTRY_ENDPOINT__", $context.registryEndpoint).Replace("__REGISTRY_EXTRA_FLAGS__", $registryExtraFlags)
-        $registryScript | Set-Content -LiteralPath $registryScriptPath -Encoding utf8
-
-        Write-Check -Status "PASS" -Message "Generated registry plan: $registryPlanPath"
+    Write-Check -Status "PASS" -Message "Generated registry plan: $registryPlanPath"
+    if (Test-Path -LiteralPath $registryScriptPath) {
         Write-Check -Status "PASS" -Message "Generated registry script: $registryScriptPath"
     }
-
-    [ordered]@{
-        generatedAt = (Get-Date).ToUniversalTime().ToString("o")
-        registryPlan = $registryPlanPath
-        registryScript = if (Test-Path -LiteralPath $registryScriptPath) { $registryScriptPath } else { $null }
-    } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $context.stateDir "registry.json") -Encoding utf8
 
     if ($Apply) {
         if ($context.environmentType -ne "air-gapped") {

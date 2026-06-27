@@ -245,6 +245,27 @@ def default_rbac():
     }
 
 
+def has_password_accounts():
+    rbac = load_rbac()
+    return any(account.get("passwordHash") for account in rbac.get("accounts", []))
+
+
+def is_local_host(host):
+    return host in {"127.0.0.1", "localhost", "::1"}
+
+
+def bootstrap_token_required(host=None):
+    bind_host = host if host is not None else os.environ.get("ZT_DASHBOARD_HOST", "127.0.0.1")
+    return not is_local_host(bind_host) or bool(os.environ.get("ZT_BOOTSTRAP_TOKEN"))
+
+
+def assert_bootstrap_safe(host):
+    if has_password_accounts():
+        return
+    if bootstrap_token_required(host) and not os.environ.get("ZT_BOOTSTRAP_TOKEN"):
+        raise RuntimeError("Refusing dashboard startup on a non-local bind without ZT_BOOTSTRAP_TOKEN while no admin account exists.")
+
+
 def load_rbac():
     data = read_json(SETTINGS / "rbac.json") or default_rbac()
     if "settings" not in data:
@@ -1726,7 +1747,11 @@ class Handler(BaseHTTPRequestHandler):
             rbac = load_rbac()
             has_login_accounts = any(account.get("passwordHash") for account in rbac.get("accounts", []))
             heading = "Sign In" if has_login_accounts else "Create Admin Account"
+            needs_bootstrap_token = (not has_login_accounts) and bootstrap_token_required()
             hint = "Use a local console account." if has_login_accounts else "No password-enabled accounts exist yet. Create the first local administrator account."
+            token_row = ""
+            if needs_bootstrap_token:
+                token_row = '<tr><td>Bootstrap Token</td><td><div class="field"><input name="bootstrap_token" type="password"></div></td></tr>'
             body = f"""
 <div class="login-panel">
 <div class="section-head">
@@ -1742,6 +1767,7 @@ class Handler(BaseHTTPRequestHandler):
       <tbody>
         <tr><td>Username</td><td><div class="field"><input name="username" value="admin"></div></td></tr>
         <tr><td>Password</td><td><div class="field"><input name="password" type="password"></div></td></tr>
+        {token_row}
         <tr><td></td><td><button>{'Sign in' if has_login_accounts else 'Create admin and sign in'}</button></td></tr>
       </tbody>
     </table>
@@ -3198,7 +3224,7 @@ class Handler(BaseHTTPRequestHandler):
     <tbody>{account_rows or '<tr><td colspan="4" class="muted">No local accounts configured yet.</td></tr>'}</tbody>
   </table>
 </section>
-<div class="notice">Accounts and roles are saved to <code>.zt/settings/rbac.json</code>. Passwords and login enforcement are intentionally not implemented yet.</div>
+<div class="notice">Accounts and roles are saved to <code>.zt/settings/rbac.json</code>. Exposed first-admin bootstrap requires <code>ZT_BOOTSTRAP_TOKEN</code>.</div>
 """
             self.send_html(page("RBAC - NKP ZeroTouch Framework", body, "rbac"))
             return
@@ -3309,6 +3335,10 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_html(page("Login Failed", "<h2>Login failed</h2><div class='notice'>Username and password are required.</div><a class='back-link' href='/login'>Back to login</a>", "about"), status=400)
                 return
             if not login_accounts:
+                expected_bootstrap_token = os.environ.get("ZT_BOOTSTRAP_TOKEN", "")
+                if bootstrap_token_required() and (not expected_bootstrap_token or not secrets.compare_digest(form_value(form, "bootstrap_token"), expected_bootstrap_token)):
+                    self.send_html(page("Bootstrap Blocked", "<h2>Bootstrap blocked</h2><div class='notice'>A valid bootstrap token is required before creating the first administrator account.</div><a class='back-link' href='/login'>Back to login</a>", "about"), status=403)
+                    return
                 account = {
                     "username": username,
                     "displayName": "Console Administrator",
@@ -3841,6 +3871,7 @@ def read_json_from_context(config):
 def main():
     host = os.environ.get("ZT_DASHBOARD_HOST", "127.0.0.1")
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8080
+    assert_bootstrap_safe(host)
     server = ThreadingHTTPServer((host, port), Handler)
     print(f"Dashboard listening on http://{host}:{port}")
     server.serve_forever()

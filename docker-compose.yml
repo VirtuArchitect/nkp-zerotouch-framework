@@ -6,6 +6,7 @@ services:
     entrypoint: ["python", "dashboard/app.py", "8080"]
     environment:
       ZT_DASHBOARD_HOST: 0.0.0.0
+      ZT_BOOTSTRAP_TOKEN: ${ZT_BOOTSTRAP_TOKEN:?Set ZT_BOOTSTRAP_TOKEN before exposing the dashboard}
       PYTHON_BIN: python
     ports:
       - "18080:8080"

@@ -48,6 +48,81 @@ def test_invalid_environment_type():
     assert any("environment.type" in item for item in data["errors"])
 
 
+def test_schema_rejects_invalid_numeric_types(tmp_path):
+    config = tmp_path / "bad-types.yaml"
+    config.write_text(
+        """
+environment:
+  name: bad-types
+  type: connected
+nkp:
+  version: v2.17.1
+nutanix:
+  prismCentralEndpoint: https://pc.example.com:9440
+  clusterName: pe-cluster
+cluster:
+  name: bad-types
+  kubernetesVersion: v1.32.3
+  controlPlaneReplicas: zero
+  workerReplicas: -1
+registry:
+  pushConcurrency: 0
+""",
+        encoding="utf-8",
+    )
+
+    data = json.loads(run_tool("validate", "--config", str(config)))
+    assert data["valid"] is False
+    assert any("controlPlaneReplicas" in item for item in data["errors"])
+    assert any("workerReplicas" in item for item in data["errors"])
+    assert any("pushConcurrency" in item for item in data["errors"])
+
+
+def test_render_generate_quotes_shell_sensitive_values(tmp_path):
+    config = tmp_path / "quoted.yaml"
+    generated = tmp_path / "generated"
+    state = tmp_path / "state"
+    reports = tmp_path / "reports"
+    config.write_text(
+        """
+environment:
+  name: quoted-env
+  type: connected
+nkp:
+  version: v2.17.1
+  bundleType: standard
+  bundlePath: /tmp/nkp bundle/nkp-v2.17.1
+nutanix:
+  prismCentralEndpoint: https://pc.example.com:9440
+  clusterName: pe cluster
+  subnetName: vlan 10
+  imageName: image $(touch SHOULD_NOT_EXIST)
+cluster:
+  name: cluster name
+  kubernetesVersion: v1.32.3
+  sshUsername: user; touch SHOULD_NOT_EXIST
+""",
+        encoding="utf-8",
+    )
+
+    run_tool(
+        "render-generate",
+        "--config",
+        str(config),
+        "--generated-dir",
+        str(generated),
+        "--state-dir",
+        str(state),
+        "--reports-dir",
+        str(reports),
+    )
+    deploy_script = (generated / "deploy.sh").read_text(encoding="utf-8")
+    env_file = (generated / "nkp.env").read_text(encoding="utf-8")
+    assert "'image $(touch SHOULD_NOT_EXIST)'" in deploy_script
+    assert "'user; touch SHOULD_NOT_EXIST'" in deploy_script
+    assert "ZT_BUNDLE_PATH='/tmp/nkp bundle/nkp-v2.17.1'" in env_file
+
+
 def test_bash_generate_uses_nkp_v217_nutanix_flags():
     scratch = ROOT / ".zt-test"
     shutil.rmtree(scratch, ignore_errors=True)
@@ -155,6 +230,19 @@ advanced: {{}}
 
 def test_secret_env_exports_nkp_expected_prism_variables():
     output = run_tool("secret-env", "--secrets", "configs/secrets/lab-airgapped.secrets.example.yaml")
-    assert 'export NUTANIX_USER="' in output
-    assert 'export NUTANIX_PASSWORD="' in output
-    assert 'export NUTANIX_PC_USERNAME="' in output
+    assert "export NUTANIX_USER=" in output
+    assert "export NUTANIX_PASSWORD=" in output
+    assert "export NUTANIX_PC_USERNAME=" in output
+
+
+def test_secret_env_shell_quotes_values(tmp_path):
+    secrets = tmp_path / "secrets.yaml"
+    secrets.write_text(json.dumps({
+        "prismCentral": {"username": "admin user", "password": "$(touch SHOULD_NOT_EXIST)"},
+        "registry": {"username": "registry", "password": 'pass"word'},
+    }), encoding="utf-8")
+
+    output = run_tool("secret-env", "--secrets", str(secrets))
+    assert "export NUTANIX_USER='admin user'" in output
+    assert "export NUTANIX_PASSWORD='$(touch SHOULD_NOT_EXIST)'" in output
+    assert 'export ZT_REGISTRY_PASSWORD=' in output

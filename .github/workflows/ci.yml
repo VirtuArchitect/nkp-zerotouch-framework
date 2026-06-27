@@ -13,32 +13,37 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Install test tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+          python -m pip install --upgrade pip
+          python -m pip install pytest PyYAML jsonschema
+
       - name: Bash syntax
-        run: bash -n scripts/zt.sh
+        run: |
+          bash -n scripts/zt.sh
+          bash -n tests/smoke.sh
+
+      - name: Shellcheck
+        run: shellcheck scripts/zt.sh tests/smoke.sh
 
       - name: PowerShell syntax
         shell: pwsh
         run: |
           $null = [scriptblock]::Create((Get-Content -Raw scripts/zt.ps1))
+          $null = [scriptblock]::Create((Get-Content -Raw tests/smoke.ps1))
 
-      - name: Validate examples without local bundles
+      - name: Validate example config schema
         run: |
           for file in configs/environments/*.example.yaml; do
             echo "Checking $file"
-            test -s "$file"
+            python tools/zt_config.py validate --config "$file"
           done
 
-      - name: Python config helper
+      - name: Python tests
         run: |
-          python tools/zt_config.py validate --config configs/environments/connected.example.yaml
-          python tools/zt_config.py context --config configs/environments/connected.example.yaml
-          python tests/test_config.py
-
-      - name: Test scripts syntax
-        shell: pwsh
-        run: |
-          $null = [scriptblock]::Create((Get-Content -Raw tests/smoke.ps1))
-          bash -n tests/smoke.sh
+          pytest -q
 
       - name: Security scan
         run: bash scripts/security-scan.sh

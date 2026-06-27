@@ -1,4 +1,5 @@
 import http.cookiejar
+import os
 import threading
 import urllib.parse
 import urllib.request
@@ -65,6 +66,33 @@ def test_dashboard_pages_and_api_routes():
     finally:
         server.shutdown()
         server.server_close()
+        if original is None:
+            rbac_path.unlink(missing_ok=True)
+        else:
+            rbac_path.write_text(original, encoding="utf-8")
+
+
+def test_dashboard_exposed_bootstrap_requires_token():
+    rbac_path = app.SETTINGS / "rbac.json"
+    original = rbac_path.read_text(encoding="utf-8") if rbac_path.exists() else None
+    old_token = os.environ.pop("ZT_BOOTSTRAP_TOKEN", None)
+    try:
+        app.write_json(rbac_path, app.default_rbac())
+        try:
+            app.assert_bootstrap_safe("0.0.0.0")
+        except RuntimeError as exc:
+            assert "ZT_BOOTSTRAP_TOKEN" in str(exc)
+        else:
+            raise AssertionError("Expected exposed bootstrap without token to be blocked")
+
+        os.environ["ZT_BOOTSTRAP_TOKEN"] = "local-test-token"
+        app.assert_bootstrap_safe("0.0.0.0")
+        app.assert_bootstrap_safe("127.0.0.1")
+    finally:
+        if old_token is None:
+            os.environ.pop("ZT_BOOTSTRAP_TOKEN", None)
+        else:
+            os.environ["ZT_BOOTSTRAP_TOKEN"] = old_token
         if original is None:
             rbac_path.unlink(missing_ok=True)
         else:
