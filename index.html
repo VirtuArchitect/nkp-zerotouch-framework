@@ -3,190 +3,165 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="Clickable demo for the NKP ZeroTouch Framework.">
+    <meta name="description" content="Clickable static demo of the NKP ZeroTouch Framework console.">
     <title>NKP ZeroTouch Framework Demo</title>
     <link rel="stylesheet" href="styles.css">
-    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
     <script src="app.js" defer></script>
   </head>
   <body>
-    <div class="app-shell">
-      <aside class="sidebar" aria-label="Demo navigation">
-        <a class="brand" href="#overview" data-view-link="overview">
-          <img src="assets/veridian-mark-teal.svg" alt="Veridian mark">
+    <div class="shell">
+      <aside class="sidebar">
+        <a class="brand" href="#environments" data-view-link="environments" aria-label="NKP ZeroTouch home">
+          <span class="brand-mark"><img src="assets/veridian-mark-teal.svg" alt="Veridian"></span>
           <span>
-            <strong>NKP ZeroTouch</strong>
-            <small>Framework demo</small>
+            <span class="brand-title">NKP ZeroTouch</span>
+            <span class="brand-subtitle">Framework</span>
           </span>
         </a>
-        <nav class="nav-list">
-          <button class="nav-item active" type="button" data-view-link="overview"><i data-lucide="layout-dashboard"></i><span>Overview</span></button>
-          <button class="nav-item" type="button" data-view-link="designer"><i data-lucide="sliders-horizontal"></i><span>Environment</span></button>
-          <button class="nav-item" type="button" data-view-link="pipeline"><i data-lucide="git-branch"></i><span>Pipeline</span></button>
-          <button class="nav-item" type="button" data-view-link="governance"><i data-lucide="shield-check"></i><span>Governance</span></button>
-          <button class="nav-item" type="button" data-view-link="artifacts"><i data-lucide="folder-search"></i><span>Artifacts</span></button>
+        <nav class="nav" aria-label="Console sections">
+          <div class="nav-label">Operations</div>
+          <button class="nav-item active" type="button" data-view-link="environments"><span class="nav-dot"></span>Environments</button>
+          <button class="nav-item" type="button" data-view-link="jobs">Jobs</button>
+          <button class="nav-item" type="button" data-view-link="runs">Runs</button>
+          <div class="nav-label">Readiness</div>
+          <button class="nav-item" type="button" data-view-link="setup">Setup Wizard</button>
+          <button class="nav-item" type="button" data-view-link="preflight">Preflight</button>
+          <button class="nav-item" type="button" data-view-link="drift">Drift</button>
+          <button class="nav-item" type="button" data-view-link="production">Production Gate</button>
+          <button class="nav-item" type="button" data-view-link="health">Health</button>
+          <div class="nav-label">Artifacts</div>
+          <button class="nav-item" type="button" data-view-link="artifacts">Artifacts</button>
+          <button class="nav-item" type="button" data-view-link="plan">Plan Review</button>
+          <button class="nav-item" type="button" data-view-link="kubeconfig">Kubeconfig</button>
+          <button class="nav-item" type="button" data-view-link="backups">Backups</button>
+          <button class="nav-item" type="button" data-view-link="restore">Restore</button>
+          <div class="nav-label">Deployment</div>
+          <button class="nav-item" type="button" data-view-link="sources">Sources</button>
+          <button class="nav-item" type="button" data-view-link="inventory">Inventory</button>
+          <button class="nav-item" type="button" data-view-link="network">Network</button>
+          <button class="nav-item" type="button" data-view-link="pipeline">Pipeline</button>
+          <button class="nav-item" type="button" data-view-link="cli">CLI</button>
+          <button class="nav-item" type="button" data-view-link="locks">Locks</button>
+          <div class="nav-label">Governance</div>
+          <button class="nav-item" type="button" data-view-link="actions">Safe Actions</button>
+          <button class="nav-item" type="button" data-view-link="changes">Change Records</button>
+          <button class="nav-item" type="button" data-view-link="approval">Approval Policy</button>
+          <button class="nav-item" type="button" data-view-link="channels">Release Channels</button>
+          <button class="nav-item" type="button" data-view-link="audit">Audit Trail</button>
+          <div class="nav-label">Settings</div>
+          <button class="nav-item" type="button" data-view-link="settings">Providers</button>
         </nav>
-        <div class="repo-card">
-          <span class="eyebrow">Release</span>
-          <strong>v0.1.0</strong>
-          <a href="https://github.com/VirtuArchitect/nkp-zerotouch-framework" target="_blank" rel="noreferrer">GitHub repository</a>
-        </div>
       </aside>
 
-      <main class="workspace">
+      <div class="content">
         <header class="topbar">
           <div>
-            <p class="eyebrow">Unofficial community automation framework</p>
-            <h1>Deploy NKP with controlled ZeroTouch phases</h1>
+            <h1>NKP ZeroTouch Framework</h1>
+            <div class="section-copy">Nutanix Kubernetes Platform deployment console</div>
           </div>
-          <div class="top-actions">
-            <button class="icon-button" type="button" data-command="refresh" title="Refresh demo state" aria-label="Refresh demo state"><i data-lucide="refresh-cw"></i></button>
-            <a class="primary-action" href="https://github.com/VirtuArchitect/nkp-zerotouch-framework" target="_blank" rel="noreferrer"><i data-lucide="github"></i><span>View source</span></a>
+          <div class="topbar-meta">
+            <span class="badge connected">Console Online</span>
+            <span class="operator-pill">jgoulden (Admin)</span>
+            <button class="button-link" type="button" data-command="demo-login">Log out</button>
+            <span>CLI apply requires approval</span>
           </div>
         </header>
 
-        <section class="view active" data-view="overview">
-          <div class="overview-grid">
-            <section class="panel environment-panel">
-              <div class="panel-head">
-                <div>
-                  <p class="eyebrow">Environment inventory</p>
-                  <h2>Deployment profiles</h2>
-                </div>
-                <div class="field compact">
-                  <i data-lucide="search"></i>
-                  <input id="environmentSearch" type="search" placeholder="Filter profiles">
-                </div>
-              </div>
-              <div class="environment-list" id="environmentList"></div>
+        <main>
+          <section class="view active" data-view="environments">
+            <section class="ops-strip">
+              <div class="ops-item"><div class="ops-label">Runner</div><div class="ops-value">Docker / Local Shell</div></div>
+              <div class="ops-item"><div class="ops-label">Deployment Modes</div><div class="ops-value">Connected / Proxied / Air-gapped</div></div>
+              <div class="ops-item"><div class="ops-label">Authentication</div><div class="ops-value">Local RBAC</div></div>
+              <div class="ops-item"><div class="ops-label">Live Apply</div><div class="ops-value">CLI Approval Required</div></div>
             </section>
 
-            <section class="panel status-panel">
-              <div class="panel-head">
-                <div>
-                  <p class="eyebrow">Selected profile</p>
-                  <h2 id="selectedName">lab-connected</h2>
-                </div>
-                <span class="status-pill" id="selectedStatus">Ready</span>
-              </div>
-              <div class="detail-grid">
-                <div><span>Mode</span><strong id="selectedMode">connected</strong></div>
-                <div><span>Provider</span><strong id="selectedProvider">nutanix-ahv</strong></div>
-                <div><span>NKP</span><strong id="selectedVersion">v2.17.1</strong></div>
-                <div><span>Approvals</span><strong id="selectedApprovals">1 of 1</strong></div>
-              </div>
-              <div class="readiness">
-                <div class="readiness-ring" id="readinessRing"><span id="readinessValue">92</span></div>
-                <div>
-                  <p class="eyebrow">Production readiness</p>
-                  <h3 id="readinessLabel">Plan reviewed, backup current</h3>
-                  <p id="readinessNote">Live apply remains approval-gated and placeholder endpoints are blocked.</p>
-                </div>
-              </div>
-            </section>
+            <section class="summary-grid" id="summaryGrid"></section>
+            <div class="notice"><strong>Environment identity warning:</strong> Environment name 'lab-connected' is duplicated in connected.example.yaml, lab-new.yaml. Cluster name 'nkp-mgmt-connected' is duplicated in connected.example.yaml, lab-new.yaml. API endpoint VIP '10.10.10.50' is duplicated in connected.example.yaml, lab-new.yaml.</div>
 
-            <section class="panel command-panel">
-              <div class="panel-head">
-                <div>
-                  <p class="eyebrow">Operator command</p>
-                  <h2>Generated dry-run</h2>
-                </div>
-                <button class="ghost-button" type="button" data-command="copy"><i data-lucide="copy"></i><span>Copy</span></button>
-              </div>
-              <pre id="commandPreview"></pre>
-            </section>
-          </div>
-        </section>
-
-        <section class="view" data-view="designer">
-          <section class="panel designer-panel">
-            <div class="panel-head">
+            <div class="section-head">
               <div>
-                <p class="eyebrow">Environment designer</p>
-                <h2>Shape the next profile</h2>
-              </div>
-              <div class="segmented" role="tablist" aria-label="Environment type">
-                <button class="segment active" type="button" data-mode="connected">Connected</button>
-                <button class="segment" type="button" data-mode="proxied">Proxied</button>
-                <button class="segment" type="button" data-mode="air-gapped">Air-gapped</button>
+                <h2>Recommended Next Actions</h2>
+                <div class="section-copy">Highest-signal operator actions based on current state, review, drift, and production gate checks.</div>
               </div>
             </div>
-            <div class="form-grid">
-              <label>Cluster name<input id="clusterName" value="nkp-mgmt-lab"></label>
-              <label>Prism Central<input id="prismEndpoint" value="https://prism-central.example.com:9440"></label>
-              <label>Kubernetes version<select id="kubernetesVersion"><option>v1.32.3</option><option>v1.31.6</option></select></label>
-              <label>Control plane replicas<input id="controlPlane" type="number" min="1" value="3"></label>
-              <label>Worker replicas<input id="workers" type="number" min="0" value="3"></label>
-              <label>Registry namespace<input id="registryNamespace" value="nkp"></label>
-            </div>
-            <div class="generated-yaml">
-              <div class="panel-head tight">
-                <h3>Environment YAML preview</h3>
-                <button class="ghost-button" type="button" data-command="validate-form"><i data-lucide="check-circle-2"></i><span>Validate</span></button>
-              </div>
-              <pre id="yamlPreview"></pre>
-            </div>
-          </section>
-        </section>
+            <section class="next-actions" id="nextActions"></section>
 
-        <section class="view" data-view="pipeline">
-          <section class="panel">
-            <div class="panel-head">
+            <div class="section-head">
               <div>
-                <p class="eyebrow">ZeroTouch phases</p>
-                <h2>Validated operational run</h2>
+                <h2>Environments</h2>
+                <div class="section-copy">Operational cockpit for connected, proxied, and air-gapped NKP deployment profiles.</div>
               </div>
-              <button class="primary-action" type="button" data-command="run-next"><i data-lucide="play"></i><span>Run next</span></button>
             </div>
-            <div class="phase-track" id="phaseTrack"></div>
-          </section>
-        </section>
-
-        <section class="view" data-view="governance">
-          <div class="governance-grid">
             <section class="panel">
-              <div class="panel-head">
-                <div>
-                  <p class="eyebrow">Apply gates</p>
-                  <h2>Change controls</h2>
-                </div>
-                <button class="ghost-button" type="button" data-command="approve"><i data-lucide="badge-check"></i><span>Approve</span></button>
-              </div>
-              <div class="check-list" id="governanceChecks"></div>
+              <table>
+                <thead>
+                  <tr><th>Name</th><th>Type / Channel</th><th>Lifecycle / Readiness</th><th>Deploy Gate</th><th>Drift</th><th>Evidence</th><th>Next Action</th><th>Manage</th></tr>
+                </thead>
+                <tbody id="environmentRows"></tbody>
+              </table>
             </section>
-            <section class="panel">
-              <div class="panel-head">
-                <div>
-                  <p class="eyebrow">Audit stream</p>
-                  <h2>Recent events</h2>
-                </div>
-              </div>
-              <div class="audit-list" id="auditList"></div>
-            </section>
-          </div>
-        </section>
 
-        <section class="view" data-view="artifacts">
-          <section class="panel artifacts-panel">
-            <div class="panel-head">
+            <div class="section-head">
               <div>
-                <p class="eyebrow">Generated evidence</p>
-                <h2>Plans, reports, and state</h2>
-              </div>
-              <div class="field compact">
-                <i data-lucide="filter"></i>
-                <select id="artifactFilter">
-                  <option value="all">All artifacts</option>
-                  <option value="plan">Plans</option>
-                  <option value="report">Reports</option>
-                  <option value="state">State</option>
-                </select>
+                <h2>Recent Runs</h2>
+                <div class="section-copy">Latest framework executions captured under the local .zt workspace.</div>
               </div>
             </div>
-            <div class="artifact-table" id="artifactTable"></div>
+            <section class="panel">
+              <ul class="run-list" id="recentRuns"></ul>
+            </section>
+            <div class="notice">Destructive and apply actions are intentionally CLI-only. This console exposes validation, preparation, generation, verification, backup, and run inspection workflows.</div>
           </section>
-        </section>
-      </main>
+
+          <section class="view" data-view="jobs">
+            <div class="section-head"><div><h2>Jobs</h2><div class="section-copy">Execution queue, approval controls, and captured logs.</div></div></div>
+            <section class="panel">
+              <table>
+                <thead><tr><th>Job</th><th>Action</th><th>Status</th><th>Requester</th><th>Approval</th></tr></thead>
+                <tbody id="jobRows"></tbody>
+              </table>
+            </section>
+          </section>
+
+          <section class="view" data-view="runs">
+            <div class="section-head"><div><h2>Runs</h2><div class="section-copy">Latest framework execution summaries.</div></div></div>
+            <section class="panel"><ul class="run-list" id="runsList"></ul></section>
+          </section>
+
+          <section class="view" data-view="pipeline">
+            <div class="section-head"><div><h2>Pipeline</h2><div class="section-copy">ZeroTouch phase progression for a controlled NKP rollout.</div></div></div>
+            <section class="pipeline" id="pipelineSteps"></section>
+          </section>
+
+          <section class="view" data-view="cli">
+            <div class="section-head"><div><h2>CLI</h2><div class="section-copy">Apply-class commands require explicit flags and approval.</div></div></div>
+            <section class="terminal-window">
+              <div class="terminal-bar"><span class="terminal-dot"></span><span class="terminal-dot"></span><span class="terminal-dot"></span> Controlled CLI Window</div>
+              <div class="terminal-body">
+                <div class="terminal-prompt">PS C:\workspace\nkp-zerotouch-framework&gt;</div>
+                <textarea class="terminal-input" spellcheck="false">deploy --apply --config configs/environments/connected.example.yaml</textarea>
+                <div class="terminal-help">Allowed apply examples: registry --apply, deploy --apply, upgrade --apply, destroy --apply --confirm-destroy.</div>
+              </div>
+            </section>
+          </section>
+
+          <section class="view" data-view="artifacts">
+            <div class="section-head"><div><h2>Artifacts</h2><div class="section-copy">Generated plans, reports, logs, state, and configuration evidence.</div></div></div>
+            <section class="panel">
+              <table>
+                <thead><tr><th>Artifact</th><th>Type</th><th>Environment</th><th>Status</th></tr></thead>
+                <tbody id="artifactRows"></tbody>
+              </table>
+            </section>
+          </section>
+
+          <section class="view" data-view="generic">
+            <div class="section-head"><div><h2 id="genericTitle">Console Section</h2><div class="section-copy" id="genericCopy">Static demo snapshot of the local NKP ZeroTouch console.</div></div></div>
+            <section class="settings-grid" id="genericCards"></section>
+          </section>
+        </main>
+      </div>
     </div>
   </body>
 </html>
