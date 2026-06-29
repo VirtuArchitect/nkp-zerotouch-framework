@@ -78,6 +78,30 @@ registry:
     assert any("pushConcurrency" in item for item in data["errors"])
 
 
+def test_schema_rejects_unsafe_environment_name(tmp_path):
+    config = tmp_path / "unsafe-name.yaml"
+    config.write_text(
+        """
+environment:
+  name: ../bad
+  type: connected
+nkp:
+  version: v2.17.1
+nutanix:
+  prismCentralEndpoint: https://pc.example.com:9440
+  clusterName: pe-cluster
+cluster:
+  name: unsafe-name
+  kubernetesVersion: v1.32.3
+""",
+        encoding="utf-8",
+    )
+
+    data = json.loads(run_tool("validate", "--config", str(config)))
+    assert data["valid"] is False
+    assert any("environment.name" in item for item in data["errors"])
+
+
 def test_render_generate_quotes_shell_sensitive_values(tmp_path):
     config = tmp_path / "quoted.yaml"
     generated = tmp_path / "generated"
@@ -118,9 +142,13 @@ cluster:
     )
     deploy_script = (generated / "deploy.sh").read_text(encoding="utf-8")
     env_file = (generated / "nkp.env").read_text(encoding="utf-8")
+    generate_state = json.loads((state / "generate.json").read_text(encoding="utf-8"))
     assert "'image $(touch SHOULD_NOT_EXIST)'" in deploy_script
     assert "'user; touch SHOULD_NOT_EXIST'" in deploy_script
     assert "ZT_BUNDLE_PATH='/tmp/nkp bundle/nkp-v2.17.1'" in env_file
+    assert generate_state["dryRunCommand"].endswith("--dry-run --output yaml --output-directory ./generated")
+    assert "--dry-run" not in generate_state["applyCommand"]
+    assert 'if [[ "$apply_mode" == "true" ]]; then' in deploy_script
 
 
 def test_bash_generate_uses_nkp_v217_nutanix_flags():
@@ -168,6 +196,7 @@ advanced: {{}}
     subprocess.run(["bash", "scripts/zt.sh", "generate", "--config", relative_config], cwd=ROOT, check=True)
 
     deploy_script = (generated_root / "generated" / "deploy.sh").read_text(encoding="utf-8")
+    generate_state = json.loads((generated_root / "state" / "generate.json").read_text(encoding="utf-8"))
     assert "--control-plane-vm-image nkp-node-image" in deploy_script
     assert "--worker-vm-image nkp-node-image" in deploy_script
     assert "--vm-image" not in deploy_script
@@ -175,6 +204,8 @@ advanced: {{}}
     assert "--registry-mirror-url registry.example.com/nkp" in deploy_script
     assert "--registry-mirror-username" in deploy_script
     assert "--registry-mirror-password" in deploy_script
+    assert "--dry-run" in generate_state["dryRunCommand"]
+    assert "--dry-run" not in generate_state["applyCommand"]
 
 
 def test_bash_registry_uses_nkp_v217_push_bundle():

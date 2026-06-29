@@ -233,6 +233,8 @@ prepare_workspace() {
   local registry_endpoint="$7"
   local registry_namespace="$8"
 
+  validate_environment_name "$environment_name"
+
   local repo_root
   repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
   local environment_root="$repo_root/.zt/environments/$environment_name"
@@ -323,7 +325,16 @@ section_scalar() {
   "$python_bin" ./tools/zt_config.py get --config "$config_path" --path "$section.$key"
 }
 
+validate_environment_name() {
+  local value="$1"
+  if [[ ! "$value" =~ ^[A-Za-z0-9_-]+$ ]]; then
+    echo "environment.name must contain only letters, numbers, underscores, and hyphens." >&2
+    exit 1
+  fi
+}
+
 context_paths() {
+  validate_environment_name "$environment_name"
   repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
   environment_root="$repo_root/.zt/environments/$environment_name"
   bin_dir="$environment_root/bin"
@@ -345,6 +356,7 @@ assert_prepared() {
 
 load_context() {
   environment_name="$(section_scalar environment name)"
+  validate_environment_name "$environment_name"
   environment_type="$(section_scalar environment type)"
   bundle_type="$(section_scalar nkp bundleType)"
   bundle_path="$(section_scalar nkp bundlePath)"
@@ -455,7 +467,7 @@ EOF
     exit 1
   fi
   mkdir -p "$logs_dir"
-  "$generated_dir/deploy.sh" >"$logs_dir/deploy.log" 2>&1
+  "$generated_dir/deploy.sh" --apply >"$logs_dir/deploy.log" 2>&1
   check PASS "Deploy apply completed; log: $logs_dir/deploy.log"
 }
 

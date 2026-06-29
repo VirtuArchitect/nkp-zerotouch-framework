@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import json
+import re
 import shlex
 import sys
 import time
@@ -17,6 +18,7 @@ except ImportError:
 ENV_TYPES = {"connected", "proxied", "air-gapped"}
 BUNDLE_TYPES = {"standard", "air-gapped"}
 PROVIDER_TYPES = {"nutanix-ahv", "air-gapped-ahv", "proxied-ahv", "bare-metal"}
+ENVIRONMENT_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
 SCHEMA_PATH = Path(__file__).resolve().parents[1] / "configs" / "schema" / "environment.schema.json"
 
 
@@ -72,6 +74,12 @@ def format_schema_error(error):
 
 def fallback_schema_errors(data):
     errors = []
+    environment_name = raw_dotted_get(data, "environment.name")
+    if environment_name is not None:
+        if not isinstance(environment_name, str):
+            errors.append("environment.name must be a string")
+        elif not ENVIRONMENT_NAME_PATTERN.fullmatch(environment_name):
+            errors.append("environment.name must contain only letters, numbers, underscores, and hyphens")
     integer_minimums = {
         "cluster.controlPlaneReplicas": 1,
         "cluster.workerReplicas": 0,
@@ -109,7 +117,7 @@ def validate_config(data):
 
     env_type = require(errors, data, "environment.type")
     provider = dotted_get(data, "environment.provider", "nutanix-ahv")
-    require(errors, data, "environment.name")
+    env_name = require(errors, data, "environment.name")
     version = require(errors, data, "nkp.version")
     bundle_type = dotted_get(data, "nkp.bundleType")
     bundle_path = dotted_get(data, "nkp.bundlePath")
@@ -120,6 +128,10 @@ def validate_config(data):
         errors.append(f"nkp.bundleType must be one of: {', '.join(sorted(BUNDLE_TYPES))}")
     if provider and provider not in PROVIDER_TYPES:
         errors.append(f"environment.provider must be one of: {', '.join(sorted(PROVIDER_TYPES))}")
+    if env_name and not ENVIRONMENT_NAME_PATTERN.fullmatch(env_name):
+        message = "environment.name must contain only letters, numbers, underscores, and hyphens"
+        if message not in errors:
+            errors.append(message)
 
     require(errors, data, "nutanix.prismCentralEndpoint")
     require(errors, data, "nutanix.clusterName")
@@ -199,7 +211,7 @@ def shell_export(key, value):
     return f"export {key}={shlex.quote(str(value))}"
 
 
-def build_nkp_command(ctx):
+def build_nkp_command(ctx, dry_run=True):
     args = [
         "./bin/nkp",
         "create",
@@ -279,7 +291,8 @@ def build_nkp_command(ctx):
         args.append("--self-managed")
     if is_truthy(ctx["fips"]):
         args.append("--fips")
-    args.extend(["--dry-run", "--output", "yaml", "--output-directory", "./generated"])
+    if dry_run:
+        args.extend(["--dry-run", "--output", "yaml", "--output-directory", "./generated"])
     return shell_join(args)
 
 
@@ -326,7 +339,8 @@ def render_generate(config_path, generated_dir, state_dir, reports_dir, deploy_p
     }
     env_path.write_text("\n".join(shell_export(key, value) for key, value in env_values.items() if value) + "\n", encoding="utf-8")
 
-    nkp_command = build_nkp_command(ctx)
+    dry_run_command = build_nkp_command(ctx, dry_run=True)
+    apply_command = build_nkp_command(ctx, dry_run=False)
     deploy_script_path = generated / "deploy.sh"
     deploy_script_path.write_text(
         "\n".join([
@@ -337,7 +351,15 @@ def render_generate(config_path, generated_dir, state_dir, reports_dir, deploy_p
             "  # shellcheck disable=SC1091",
             "  source ./secrets/secrets.env",
             "fi",
-            nkp_command,
+            'apply_mode="${ZT_APPLY:-false}"',
+            'if [[ "${1:-}" == "--apply" ]]; then',
+            '  apply_mode="true"',
+            "fi",
+            'if [[ "$apply_mode" == "true" ]]; then',
+            f"  {apply_command}",
+            "else",
+            f"  {dry_run_command}",
+            "fi",
             "",
         ]),
         encoding="utf-8",
@@ -350,25 +372,30 @@ def render_generate(config_path, generated_dir, state_dir, reports_dir, deploy_p
     files = [str(cluster_config_path), str(env_path), str(deploy_script_path)]
     if deploy_ps:
         deploy_ps_path = generated / "deploy.ps1"
-        ps_command = nkp_command.replace("'", "''")
+        ps_dry_run_command = dry_run_command.replace("'", "''")
+        ps_apply_command = apply_command.replace("'", "''")
         deploy_ps_path.write_text(
             "\n".join([
-                "param()",
+                "param([switch]$Apply)",
                 "Set-StrictMode -Version Latest",
                 '$ErrorActionPreference = "Stop"',
                 'Set-Location (Join-Path $PSScriptRoot "..")',
                 'Write-Host "Run deploy.sh from Linux or WSL for NKP Linux binaries."',
-                f"Write-Host '{ps_command}'",
+                'if ($Apply) {',
+                f"    Write-Host '{ps_apply_command}'",
+                '} else {',
+                f"    Write-Host '{ps_dry_run_command}'",
+                '}',
                 "",
             ]),
             encoding="utf-8",
         )
         files.append(str(deploy_ps_path))
 
-    state_payload = {"generatedAt": utc_stamp(), "files": files, "dryRunCommand": nkp_command}
+    state_payload = {"generatedAt": utc_stamp(), "files": files, "dryRunCommand": dry_run_command, "applyCommand": apply_command}
     generate_state = state / "generate.json"
     generate_state.write_text(json.dumps(state_payload, indent=2) + "\n", encoding="utf-8")
-    return {"files": files, "state": str(generate_state), "dryRunCommand": nkp_command}
+    return {"files": files, "state": str(generate_state), "dryRunCommand": dry_run_command, "applyCommand": apply_command}
 
 
 def build_registry_command(ctx):

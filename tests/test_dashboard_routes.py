@@ -97,3 +97,40 @@ def test_dashboard_exposed_bootstrap_requires_token():
             rbac_path.unlink(missing_ok=True)
         else:
             rbac_path.write_text(original, encoding="utf-8")
+
+
+def test_dashboard_cli_apply_actions_require_apply_flag():
+    fallback = "configs/environments/connected.example.yaml"
+
+    try:
+        app.parse_cli_command(f"deploy --config {fallback}", fallback)
+    except ValueError as exc:
+        assert "requires --apply" in str(exc)
+    else:
+        raise AssertionError("Expected deploy without --apply to be rejected")
+
+    action, config, apply, confirm_destroy = app.parse_cli_command(f"deploy --apply --config {fallback}", fallback)
+    assert action == "deploy"
+    assert config.name == "connected.example.yaml"
+    assert apply is True
+    assert confirm_destroy is False
+
+
+def test_dashboard_cli_destroy_requires_confirmation_flag():
+    fallback = "configs/environments/connected.example.yaml"
+
+    try:
+        app.parse_cli_command(f"destroy --apply --config {fallback}", fallback)
+    except ValueError as exc:
+        assert "requires --confirm-destroy" in str(exc)
+    else:
+        raise AssertionError("Expected destroy without --confirm-destroy to be rejected")
+
+    action, config, apply, confirm_destroy = app.parse_cli_command(
+        f"destroy --apply --confirm-destroy --config {fallback}",
+        fallback,
+    )
+    assert action == "destroy"
+    assert config.name == "connected.example.yaml"
+    assert apply is True
+    assert confirm_destroy is True

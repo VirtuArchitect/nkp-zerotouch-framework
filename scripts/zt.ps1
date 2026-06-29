@@ -95,6 +95,14 @@ function Get-YamlSectionScalar {
     return $value.Trim()
 }
 
+function Assert-SafeEnvironmentName {
+    param([string]$Value)
+
+    if (-not $Value -or $Value -notmatch "^[A-Za-z0-9_-]+$") {
+        throw "environment.name must contain only letters, numbers, underscores, and hyphens."
+    }
+}
+
 function Convert-WslPathToWindowsPath {
     param([string]$Path)
 
@@ -307,6 +315,9 @@ function Invoke-Validate {
     Write-Check -Status "INFO" -Message "Config: $ConfigPath"
 
     Test-RequiredScalar -Name "environment.name" -Value $environmentName
+    if ($environmentName -and $environmentName -notmatch "^[A-Za-z0-9_-]+$") {
+        Write-Check -Status "FAIL" -Message "environment.name must contain only letters, numbers, underscores, and hyphens."
+    }
     Test-AllowedValue -Name "environment.type" -Value $environmentType -Allowed @("connected", "proxied", "air-gapped")
     Test-RequiredScalar -Name "nkp.version" -Value $nkpVersion
 
@@ -403,6 +414,7 @@ function Invoke-Prepare {
     $registryEndpoint = Get-YamlScalar -ConfigPath $ConfigPath -Key "endpoint"
     $registryNamespace = Get-YamlScalar -ConfigPath $ConfigPath -Key "namespace"
     $configFullPath = (Resolve-Path -LiteralPath $ConfigPath).Path
+    Assert-SafeEnvironmentName -Value $environmentName
 
     $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
     $environmentRoot = Join-Path $repoRoot ".zt\environments\$environmentName"
@@ -488,6 +500,7 @@ function Get-ZtContext {
     param([string]$ConfigPath)
 
     $environmentName = Get-YamlSectionScalar -ConfigPath $ConfigPath -Section "environment" -Key "name"
+    Assert-SafeEnvironmentName -Value $environmentName
     $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
     $environmentRoot = Join-Path $repoRoot ".zt\environments\$environmentName"
 
@@ -676,7 +689,7 @@ Default behavior is dry-run. Use `-Apply` only when configuration and credential
     New-ZtDirectory -Path $context.logsDir
     $deployLog = Join-Path $context.logsDir "deploy.log"
     Write-Check -Status "INFO" -Message "Applying deploy script with bash: $bashPath"
-    bash -lc "chmod +x '$bashPath' && '$bashPath'" *> $deployLog
+    bash -lc "chmod +x '$bashPath' && '$bashPath' --apply" *> $deployLog
     Write-Check -Status "PASS" -Message "Deploy apply completed; log: $deployLog"
 }
 
