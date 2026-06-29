@@ -10,9 +10,33 @@ Current release: `v0.1.0`
 
 Live demo: https://virtuarchitect.github.io/nkp-zerotouch-framework/
 
+## Current Scope
+
+| Area | Status | Notes |
+| --- | --- | --- |
+| Live demo | Simulated | GitHub Pages prototype for reviewing console workflows. It does not provision infrastructure. |
+| Local CLI phases | Implemented baseline | Validation, prepare, generate, registry, deploy, verify, backup, upgrade, destroy, and run capture are available through `scripts/zt.*`. |
+| Local dashboard | Implemented baseline | The console reads local `.zt` state, creates safe jobs, gates apply jobs, and records approvals/audit events. |
+| Live infrastructure apply | Guarded | Apply-class actions require explicit flags, approvals, real NKP bundle paths, Prism Central details, registry access, and operator review. |
+| Enterprise integrations | Probed baseline | Postgres, Vault, OIDC, and session-store settings can be modeled and health-checked; full production integration depends on local configuration. |
+
 ## Disclaimer
 
 This repository is an independent clickable MVP prototype and community automation framework. All Nutanix integrations, provisioning jobs, policy checks, environment states, and admin workflows shown in the live demo are simulated for demonstration purposes only. The live demo does not provision real Nutanix infrastructure. This project is not affiliated with, sponsored by, or endorsed by Nutanix unless explicitly stated otherwise.
+
+## How The Framework Works
+
+The framework is organized around a plan-first deployment flow:
+
+1. Define an environment in `configs/environments/*.yaml`.
+2. Validate the environment schema, mode-specific settings, bundles, tools, and reachable endpoints.
+3. Prepare a local `.zt/environments/<name>/` workspace for generated state and staged binaries.
+4. Generate reviewable artifacts such as `cluster-values.yaml`, `nkp.env`, `deploy.sh`, and plan metadata.
+5. Review plans in the dashboard, record approvals, and keep apply-class actions gated.
+6. Run guarded `registry`, `deploy`, `upgrade`, or `destroy` apply commands only after explicit operator approval.
+7. Verify cluster evidence, capture kubeconfig state, record runs, and keep backup/restore artifacts local.
+
+The CLI is the execution surface. The dashboard is the local operations and governance surface. The static live demo is a visual prototype of that console.
 
 ## Engineering Quality
 
@@ -106,8 +130,11 @@ Additional operational phases are available for secrets, backup, upgrade plannin
 - `docs/troubleshooting.md`
 - `docs/public-readiness.md`
 - `docs/implementation-status.md`
+- `docs/roadmap.md`
 - `docs/dashboard.md`
 - `docs/architecture.md`
+- `docs/architecture/data-flow.md`
+- `docs/architecture/deployment-boundaries.md`
 - `docs/container-runner.md`
 - `docs/operational-readiness.md`
 - `docs/enterprise-controls.md`
