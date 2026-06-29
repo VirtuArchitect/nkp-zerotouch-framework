@@ -7,18 +7,27 @@ import urllib.request
 from dashboard import app
 
 
-def request(opener, base_url, path, data=None, allow_error=False):
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def request(opener, base_url, path, data=None, allow_error=False, timeout=30):
     encoded = None
     if data is not None:
         encoded = urllib.parse.urlencode(data).encode("utf-8")
-    req = urllib.request.Request(f"{base_url}{path}", data=encoded)
+    req = urllib.request.Request(f"{base_url}{path}", data=encoded, headers={"Connection": "close"})
     try:
-        with opener.open(req, timeout=10) as response:
+        with opener.open(req, timeout=timeout) as response:
             return response.status, response.headers.get("Content-Type", ""), response.read().decode("utf-8")
     except urllib.error.HTTPError as exc:
         if not allow_error:
             raise
-        return exc.code, exc.headers.get("Content-Type", ""), exc.read().decode("utf-8")
+        try:
+            body = exc.read().decode("utf-8")
+            return exc.code, exc.headers.get("Content-Type", ""), body
+        finally:
+            exc.close()
 
 
 def test_dashboard_pages_and_api_routes():
@@ -39,13 +48,15 @@ def test_dashboard_pages_and_api_routes():
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     base_url = f"http://127.0.0.1:{server.server_address[1]}"
-    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+    cookie_jar = http.cookiejar.CookieJar()
+    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookie_jar))
+    no_redirect_opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookie_jar), NoRedirect)
 
     try:
         status, _, _ = request(opener, base_url, "/login")
         assert status == 200
-        status, _, _ = request(opener, base_url, "/login", {"username": "dashboard-smoke", "password": "DashboardSmoke-Local-123!"}, allow_error=True)
-        assert status in {200, 303}
+        status, _, _ = request(no_redirect_opener, base_url, "/login", {"username": "dashboard-smoke", "password": "DashboardSmoke-Local-123!"}, allow_error=True)
+        assert status == 303
 
         page_paths = ["/", "/setup", "/plan-review", "/kubeconfig", "/drift", "/locks", "/change-records", "/backups", "/restore", "/production-readiness", "/release-channels"]
         configs = app.env_configs()
