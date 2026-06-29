@@ -57,6 +57,7 @@ def test_dashboard_pages_and_api_routes():
             assert status == 200
             assert "text/html" in content_type
             assert "NKP ZeroTouch" in body
+            assert "data-theme-toggle" in body
 
         for path in ["/api/status", "/api/environments", "/api/jobs", "/api/locks", "/api/change-records"]:
             status, content_type, body = request(opener, base_url, path)

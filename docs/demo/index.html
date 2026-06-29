@@ -5,6 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="Clickable static demo of the NKP ZeroTouch Framework console.">
     <title>NKP ZeroTouch Framework Demo</title>
+    <script>
+      (() => {
+        try {
+          const storedTheme = localStorage.getItem("zt-theme");
+          if (storedTheme === "light") document.documentElement.dataset.theme = "light";
+        } catch (error) {}
+      })();
+    </script>
     <link rel="stylesheet" href="styles.css">
     <script src="app.js" defer></script>
   </head>
@@ -62,6 +70,7 @@
           <div class="topbar-meta">
             <span class="badge connected">Console Online</span>
             <span class="operator-pill">jgoulden (Admin)</span>
+            <button class="button-link theme-toggle" type="button" data-theme-toggle><span data-theme-label>Light</span></button>
             <button class="button-link" type="button" data-command="demo-login">Log out</button>
             <span>CLI apply requires approval</span>
           </div>

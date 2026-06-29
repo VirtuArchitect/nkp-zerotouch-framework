@@ -242,11 +242,31 @@ function toast(message) {
   setTimeout(() => el.remove(), 1600);
 }
 
+function currentTheme() {
+  return document.documentElement.dataset.theme === "light" ? "light" : "dark";
+}
+
+function renderThemeLabel() {
+  const label = document.querySelector("[data-theme-label]");
+  if (label) label.textContent = currentTheme() === "light" ? "Dark" : "Light";
+}
+
+function toggleTheme() {
+  const next = currentTheme() === "light" ? "dark" : "light";
+  if (next === "light") document.documentElement.dataset.theme = "light";
+  else document.documentElement.removeAttribute("data-theme");
+  try {
+    localStorage.setItem("zt-theme", next);
+  } catch (error) {}
+  renderThemeLabel();
+}
+
 document.addEventListener("click", (event) => {
   const viewLink = event.target.closest("[data-view-link]");
   if (viewLink) setView(viewLink.dataset.viewLink);
 
   const command = event.target.closest("[data-command]")?.dataset.command;
+  if (event.target.closest("[data-theme-toggle]")) toggleTheme();
   if (command === "demo-login") toast("Static demo session stays signed in");
   if (command === "action") toast("Demo action selected; live apply remains CLI-gated");
   if (command === "open") toast("Environment detail preview");
@@ -262,6 +282,7 @@ renderJobs();
 renderPipeline();
 renderArtifacts();
 renderGeneric("settings");
+renderThemeLabel();
 
 const initial = window.location.hash.replace("#", "");
 if (initial) setView(initial);

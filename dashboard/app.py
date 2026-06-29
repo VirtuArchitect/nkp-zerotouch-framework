@@ -1395,8 +1395,17 @@ def page(title, body, active="environments", user=None):
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{html.escape(title)}</title>
   <link rel="icon" type="image/svg+xml" href="/assets/veridian-mark-teal.svg">
+  <script>
+    (() => {{
+      try {{
+        const storedTheme = localStorage.getItem("zt-theme");
+        if (storedTheme === "light") document.documentElement.dataset.theme = "light";
+      }} catch (error) {{}}
+    }})();
+  </script>
   <style>
     :root {{
+      color-scheme: dark;
       --bg: #030712;
       --panel: #111827;
       --panel-2: #172033;
@@ -1408,6 +1417,37 @@ def page(title, body, active="environments", user=None):
       --line-strong: #344256;
       --nav: #030712;
       --nav-2: #080d1a;
+      --topbar-bg: rgba(3,7,18,.82);
+      --heading: #f1f5f9;
+      --brand-text: #f1f5f9;
+      --nav-item-text: #9ca3af;
+      --nav-label-text: #4b5563;
+      --nav-hover-text: #e5e7eb;
+      --operator-text: #d1d5db;
+      --control-text: #d1d5db;
+      --control-hover-text: #e5f5ff;
+      --table-hover: rgba(255,255,255,.025);
+      --input-bg: #111827;
+      --input-label: #9ca3af;
+      --pre-bg: #030712;
+      --pre-text: #dbeafe;
+      --notice-bg: rgba(3,78,162,.08);
+      --notice-border: rgba(3,78,162,.3);
+      --notice-text: #bfdbfe;
+      --scrollbar-track: #111827;
+      --scrollbar-thumb: #374151;
+      --scrollbar-thumb-hover: #4b5563;
+      --badge-connected-text: #93c5fd;
+      --badge-connected-bg: rgba(3,78,162,.18);
+      --badge-connected-border: rgba(3,78,162,.3);
+      --badge-proxied-text: #c4b5fd;
+      --badge-proxied-bg: rgba(91,33,182,.22);
+      --badge-proxied-border: rgba(124,58,237,.28);
+      --badge-airgapped-text: #fcd34d;
+      --badge-airgapped-bg: rgba(234,179,8,.12);
+      --badge-airgapped-border: rgba(234,179,8,.28);
+      --danger-text: #fca5a5;
+      --danger-hover-text: #fecaca;
       --accent: #034ea2;
       --accent-2: #21c2f8;
       --accent-soft: rgba(3, 78, 162, .16);
@@ -1419,6 +1459,59 @@ def page(title, body, active="environments", user=None):
       --bad-soft: rgba(239, 68, 68, .14);
       --shadow: none;
     }}
+    :root[data-theme="light"] {{
+      color-scheme: light;
+      --bg: #f6f8fb;
+      --panel: #ffffff;
+      --panel-2: #edf2f7;
+      --panel-3: #f8fafc;
+      --ink: #111827;
+      --muted: #4b5563;
+      --muted-2: #6b7280;
+      --line: #d6deea;
+      --line-strong: #b9c5d6;
+      --nav: #ffffff;
+      --nav-2: #f8fafc;
+      --topbar-bg: rgba(255,255,255,.9);
+      --heading: #111827;
+      --brand-text: #111827;
+      --nav-item-text: #374151;
+      --nav-label-text: #4b5563;
+      --nav-hover-text: #0f172a;
+      --operator-text: #1f2937;
+      --control-text: #1f2937;
+      --control-hover-text: #034ea2;
+      --table-hover: rgba(3,78,162,.045);
+      --input-bg: #ffffff;
+      --input-label: #374151;
+      --pre-bg: #0f172a;
+      --pre-text: #e5f0ff;
+      --notice-bg: #eaf2ff;
+      --notice-border: #b7cdf2;
+      --notice-text: #0f3d75;
+      --scrollbar-track: #e5e7eb;
+      --scrollbar-thumb: #9ca3af;
+      --scrollbar-thumb-hover: #6b7280;
+      --badge-connected-text: #0f4c9a;
+      --badge-connected-bg: #e7f0ff;
+      --badge-connected-border: #b7cdf2;
+      --badge-proxied-text: #5b21b6;
+      --badge-proxied-bg: #f1eafe;
+      --badge-proxied-border: #d8c8fb;
+      --badge-airgapped-text: #7a4f00;
+      --badge-airgapped-bg: #fff5cc;
+      --badge-airgapped-border: #ecd27a;
+      --danger-text: #b91c1c;
+      --danger-hover-text: #7f1d1d;
+      --accent-soft: rgba(3, 78, 162, .1);
+      --good: #047857;
+      --good-soft: rgba(4, 120, 87, .12);
+      --warn: #9a6700;
+      --warn-soft: rgba(154, 103, 0, .12);
+      --bad: #b91c1c;
+      --bad-soft: rgba(185, 28, 28, .1);
+      --shadow: 0 14px 36px rgba(15, 23, 42, .08);
+    }}
     * {{ box-sizing: border-box; }}
     body {{
       margin: 0;
@@ -1429,9 +1522,9 @@ def page(title, body, active="environments", user=None):
     }}
     a {{ color: var(--accent-2); text-decoration: none; }}
     ::-webkit-scrollbar {{ width: 6px; height: 6px; }}
-    ::-webkit-scrollbar-track {{ background: #111827; }}
-    ::-webkit-scrollbar-thumb {{ background: #374151; border-radius: 999px; }}
-    ::-webkit-scrollbar-thumb:hover {{ background: #4b5563; }}
+    ::-webkit-scrollbar-track {{ background: var(--scrollbar-track); }}
+    ::-webkit-scrollbar-thumb {{ background: var(--scrollbar-thumb); border-radius: 999px; }}
+    ::-webkit-scrollbar-thumb:hover {{ background: var(--scrollbar-thumb-hover); }}
     .shell {{ display: grid; grid-template-columns: 256px minmax(0, 1fr); min-height: 100vh; }}
     .sidebar {{
       background: var(--nav);
@@ -1448,31 +1541,31 @@ def page(title, body, active="environments", user=None):
       box-shadow: inset 0 0 0 1px rgba(255,255,255,.12);
     }}
     .brand-mark img {{ width: 34px; height: 34px; display: block; border-radius: 8px; }}
-    .brand-title {{ font-size: 14px; font-weight: 800; color: #f1f5f9; letter-spacing: 0; }}
+    .brand-title {{ font-size: 14px; font-weight: 800; color: var(--brand-text); letter-spacing: 0; }}
     .brand-subtitle {{ color: #6b7280; font-size: 12px; margin-top: 1px; }}
-    .nav-label {{ color: #4b5563; font-size: 11px; font-weight: 760; text-transform: uppercase; margin: 20px 12px 8px; letter-spacing: .04em; }}
+    .nav-label {{ color: var(--nav-label-text); font-size: 11px; font-weight: 760; text-transform: uppercase; margin: 20px 12px 8px; letter-spacing: .04em; }}
     .nav-item {{
       display: flex; align-items: center; gap: 10px;
       min-height: 38px; padding: 0 12px; border-radius: 8px;
-      color: #9ca3af; font-weight: 650; text-decoration: none;
+      color: var(--nav-item-text); font-weight: 650; text-decoration: none;
       border: 1px solid transparent;
       transition: background .15s ease, color .15s ease, border-color .15s ease;
     }}
-    .nav-item:hover {{ background: var(--panel); color: #e5e7eb; border-color: transparent; }}
+    .nav-item:hover {{ background: var(--panel); color: var(--nav-hover-text); border-color: transparent; }}
     .nav-item.active {{ background: var(--accent); color: #fff; border-color: transparent; }}
     .nav-dot {{ width: 8px; height: 8px; border-radius: 50%; background: transparent; }}
     .nav-item.active .nav-dot {{ background: var(--accent-2); }}
     .content {{ min-width: 0; }}
     .topbar {{
-      min-height: 64px; background: rgba(3,7,18,.82);
+      min-height: 64px; background: var(--topbar-bg);
       border-bottom: 1px solid var(--line);
       display: flex; align-items: center; justify-content: space-between;
       padding: 0 24px;
       position: sticky; top: 0; z-index: 5; backdrop-filter: blur(10px);
     }}
-    .topbar h1 {{ margin: 0; font-size: 18px; font-weight: 700; letter-spacing: 0; color: #f1f5f9; }}
+    .topbar h1 {{ margin: 0; font-size: 18px; font-weight: 700; letter-spacing: 0; color: var(--heading); }}
     .topbar-meta {{ display: flex; gap: 10px; align-items: center; color: var(--muted); font-size: 12px; flex-wrap: wrap; justify-content: flex-end; }}
-    .operator-pill {{ display: inline-flex; align-items: center; gap: 8px; min-height: 28px; padding: 0 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--panel); color: #d1d5db; font-weight: 700; }}
+    .operator-pill {{ display: inline-flex; align-items: center; gap: 8px; min-height: 28px; padding: 0 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--panel); color: var(--operator-text); font-weight: 700; }}
     .operator-pill::before {{ content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--good); }}
     main {{ max-width: 1320px; margin: 0 auto; padding: 24px 28px 42px; }}
     h2 {{ margin: 0; font-size: 16px; }}
@@ -1482,7 +1575,7 @@ def page(title, body, active="environments", user=None):
     .ops-strip {{ display: grid; grid-template-columns: repeat(4, minmax(180px, 1fr)); gap: 1px; border: 1px solid var(--line); border-radius: 8px; background: var(--line); overflow: hidden; box-shadow: var(--shadow); margin-bottom: 18px; }}
     .ops-item {{ background: var(--panel); padding: 13px 15px; }}
     .ops-label {{ color: var(--muted); font-size: 11px; font-weight: 760; text-transform: uppercase; letter-spacing: .04em; }}
-    .ops-value {{ margin-top: 5px; font-weight: 780; color: #f1f5f9; }}
+    .ops-value {{ margin-top: 5px; font-weight: 780; color: var(--heading); }}
     .metric {{
       background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
       padding: 17px; box-shadow: var(--shadow); position: relative; overflow: hidden;
@@ -1510,14 +1603,14 @@ def page(title, body, active="environments", user=None):
     th, td {{ padding: 13px 16px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; }}
     tr:last-child td {{ border-bottom: 0; }}
     th {{
-      background: var(--panel-2); color: #9ca3af;
+      background: var(--panel-2); color: var(--muted);
       font-size: 11px; font-weight: 780; text-transform: uppercase; letter-spacing: .035em;
       border-bottom: 1px solid var(--line-strong);
     }}
-    tbody tr:hover {{ background: rgba(255,255,255,.025); }}
+    tbody tr:hover {{ background: var(--table-hover); }}
     code, pre {{ font-family: "Cascadia Mono", "SFMono-Regular", Consolas, monospace; }}
     pre {{
-      margin: 0; background: #030712; color: #dbeafe;
+      margin: 0; background: var(--pre-bg); color: var(--pre-text);
       padding: 16px; overflow: auto; border-radius: 8px;
       border: 1px solid var(--line);
     }}
@@ -1529,9 +1622,9 @@ def page(title, body, active="environments", user=None):
       font-size: 12px; font-weight: 700; border: 1px solid transparent;
       white-space: nowrap;
     }}
-    .badge.connected {{ color: #93c5fd; background: rgba(3,78,162,.18); border-color: rgba(3,78,162,.3); }}
-    .badge.proxied {{ color: #c4b5fd; background: rgba(91,33,182,.22); border-color: rgba(124,58,237,.28); }}
-    .badge.air-gapped {{ color: #fcd34d; background: rgba(234,179,8,.12); border-color: rgba(234,179,8,.28); }}
+    .badge.connected {{ color: var(--badge-connected-text); background: var(--badge-connected-bg); border-color: var(--badge-connected-border); }}
+    .badge.proxied {{ color: var(--badge-proxied-text); background: var(--badge-proxied-bg); border-color: var(--badge-proxied-border); }}
+    .badge.air-gapped {{ color: var(--badge-airgapped-text); background: var(--badge-airgapped-bg); border-color: var(--badge-airgapped-border); }}
     .chip {{ display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-weight: 650; }}
     .chip::before {{ content: ""; width: 8px; height: 8px; border-radius: 50%; background: #94a3b8; }}
     .chip.ok {{ color: var(--good); }}
@@ -1544,18 +1637,18 @@ def page(title, body, active="environments", user=None):
     button {{
       min-height: 32px; border: 1px solid var(--line); background: var(--panel-2);
       padding: 0 9px; border-radius: 6px; cursor: pointer;
-      color: #d1d5db; font-weight: 700; font-size: 12px;
+      color: var(--control-text); font-weight: 700; font-size: 12px;
     }}
-    button:hover {{ background: var(--accent-soft); border-color: rgba(33,194,248,.45); color: #e5f5ff; }}
+    button:hover {{ background: var(--accent-soft); border-color: rgba(33,194,248,.45); color: var(--control-hover-text); }}
     .button-link {{
       display: inline-flex; align-items: center; min-height: 32px;
       border: 1px solid var(--line); background: var(--panel-2);
-      padding: 0 9px; border-radius: 6px; color: #d1d5db;
+      padding: 0 9px; border-radius: 6px; color: var(--control-text);
       font-weight: 700; font-size: 12px;
     }}
-    .button-link:hover {{ background: var(--accent-soft); border-color: rgba(33,194,248,.45); color: #e5f5ff; }}
-    .button-danger {{ border-color: rgba(239,68,68,.35); color: #fca5a5; }}
-    .button-danger:hover {{ background: var(--bad-soft); border-color: rgba(239,68,68,.45); color: #fecaca; }}
+    .button-link:hover {{ background: var(--accent-soft); border-color: rgba(33,194,248,.45); color: var(--control-hover-text); }}
+    .button-danger {{ border-color: rgba(239,68,68,.35); color: var(--danger-text); }}
+    .button-danger:hover {{ background: var(--bad-soft); border-color: rgba(239,68,68,.45); color: var(--danger-hover-text); }}
     .run-list {{ list-style: none; margin: 0; padding: 0; }}
     .run-list li {{
       display: flex; align-items: center; justify-content: space-between;
@@ -1565,7 +1658,7 @@ def page(title, body, active="environments", user=None):
     .muted {{ color: var(--muted); }}
     .notice {{
       margin-top: 16px; padding: 12px 14px; border-radius: 8px;
-      border: 1px solid rgba(3,78,162,.3); background: rgba(3,78,162,.08); color: #bfdbfe;
+      border: 1px solid var(--notice-border); background: var(--notice-bg); color: var(--notice-text);
       font-size: 13px;
     }}
     .login-panel {{ max-width: 520px; margin: 38px auto 0; }}
@@ -1575,10 +1668,10 @@ def page(title, body, active="environments", user=None):
     .settings-card h3 {{ margin: 0 0 8px; font-size: 15px; }}
     .settings-card p {{ margin: 0; color: var(--muted); }}
     .form-grid {{ display: grid; grid-template-columns: repeat(2, minmax(220px, 1fr)); gap: 14px; }}
-    .field label {{ display: block; color: #9ca3af; font-size: 12px; font-weight: 750; margin-bottom: 6px; text-transform: uppercase; }}
+    .field label {{ display: block; color: var(--input-label); font-size: 12px; font-weight: 750; margin-bottom: 6px; text-transform: uppercase; }}
     .field input, .field select, .field textarea {{
       width: 100%; min-height: 36px; border: 1px solid var(--line); border-radius: 6px;
-      padding: 0 10px; color: var(--ink); background: #111827;
+      padding: 0 10px; color: var(--ink); background: var(--input-bg);
     }}
     .field textarea {{ min-height: 96px; padding: 10px; resize: vertical; font: inherit; }}
     .pipeline {{ display: grid; grid-template-columns: repeat(6, minmax(120px, 1fr)); gap: 10px; }}
@@ -1599,7 +1692,7 @@ def page(title, body, active="environments", user=None):
     .next-action .button-link {{ flex: 0 0 auto; }}
     .risk-low {{ color: var(--good); }}
     .risk-medium {{ color: var(--warn); }}
-    .risk-high {{ color: #fca5a5; }}
+    .risk-high {{ color: var(--danger-text); }}
     .review-note {{ max-width: 380px; color: var(--muted); font-size: 12px; }}
     .terminal-window {{ background: #0b1220; color: #dbeafe; border-radius: 8px; border: 1px solid #253149; overflow: hidden; }}
     .terminal-bar {{ min-height: 36px; display: flex; align-items: center; gap: 8px; padding: 0 12px; background: #111827; border-bottom: 1px solid #253149; color: #93a4bd; font-size: 12px; font-weight: 700; }}
@@ -1614,6 +1707,7 @@ def page(title, body, active="environments", user=None):
     .terminal-help {{ color: #9fb1c8; margin-top: 10px; font-size: 12px; }}
     .result-layout {{ display: grid; gap: 16px; }}
     .back-link {{ display: inline-flex; align-items: center; margin-top: 16px; font-weight: 700; }}
+    .theme-toggle {{ min-width: 76px; }}
     @media (max-width: 980px) {{
       .shell {{ grid-template-columns: 1fr; }}
       .sidebar {{ display: none; }}
@@ -1652,6 +1746,7 @@ def page(title, body, active="environments", user=None):
       <div class="topbar-meta">
         <span class="badge connected">Console Online</span>
         <span class="operator-pill">{html.escape(user.get('username', 'operator session') if user else 'operator session')}</span>
+        <button class="theme-toggle" type="button" data-theme-toggle><span data-theme-label>Light</span></button>
         <a class="button-link" href="/logout">Log out</a>
         <span>CLI apply requires approval</span>
       </div>
@@ -1659,6 +1754,26 @@ def page(title, body, active="environments", user=None):
     <main>{body}</main>
   </div>
 </div>
+<script>
+  (() => {{
+    const root = document.documentElement;
+    const toggle = document.querySelector("[data-theme-toggle]");
+    const label = document.querySelector("[data-theme-label]");
+    const currentTheme = () => root.dataset.theme === "light" ? "light" : "dark";
+    const render = () => {{
+      if (!label) return;
+      label.textContent = currentTheme() === "light" ? "Dark" : "Light";
+    }};
+    render();
+    toggle?.addEventListener("click", () => {{
+      const next = currentTheme() === "light" ? "dark" : "light";
+      if (next === "light") root.dataset.theme = "light";
+      else root.removeAttribute("data-theme");
+      try {{ localStorage.setItem("zt-theme", next); }} catch (error) {{}}
+      render();
+    }});
+  }})();
+</script>
 </body>
 </html>"""
 
