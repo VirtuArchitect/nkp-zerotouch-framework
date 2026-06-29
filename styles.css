@@ -10,10 +10,13 @@
   --muted: #a3a7b7;
   --topbar-bg: rgba(3, 7, 18, .9);
   --brand-text: #f8fafc;
+  --heading: #f8fafc;
   --nav-item-text: #b9c0d4;
   --nav-label-text: #5d6380;
   --nav-hover-text: #f8fafc;
   --operator-text: #d1d5db;
+  --ops-label-text: #aeb5c9;
+  --table-heading-text: #aeb5c9;
   --control-text: #dbe2f0;
   --control-hover-text: #eff6ff;
   --table-hover: rgba(255, 255, 255, .025);
@@ -57,10 +60,13 @@
   --muted: #4b5563;
   --topbar-bg: rgba(255, 255, 255, .92);
   --brand-text: #111827;
+  --heading: #111827;
   --nav-item-text: #374151;
   --nav-label-text: #4b5563;
   --nav-hover-text: #0f172a;
   --operator-text: #1f2937;
+  --ops-label-text: #5b6473;
+  --table-heading-text: #374151;
   --control-text: #1f2937;
   --control-hover-text: #034ea2;
   --table-hover: rgba(3, 78, 162, .045);
@@ -212,7 +218,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
 }
 
 h1, h2, h3, p { margin-top: 0; }
-h1 { color: #f8fafc; font-size: 18px; margin: 0; }
+h1 { color: var(--heading); font-size: 18px; margin: 0; }
 h2 { font-size: 16px; margin: 0; }
 h3 { font-size: 15px; margin: 0 0 8px; }
 
@@ -307,7 +313,7 @@ main {
 }
 
 .ops-label {
-  color: #aeb5c9;
+  color: var(--ops-label-text);
   font-size: 11px;
   font-weight: 780;
   letter-spacing: .04em;
@@ -315,7 +321,7 @@ main {
 }
 
 .ops-value {
-  color: #fff;
+  color: var(--heading);
   font-weight: 780;
   margin-top: 5px;
 }
@@ -389,7 +395,7 @@ main {
 }
 
 .next-action strong, .env-name {
-  color: #fff;
+  color: var(--heading);
   display: block;
   font-weight: 780;
 }
@@ -419,7 +425,7 @@ tbody tr:hover { background: var(--table-hover); }
 th {
   background: var(--panel-2);
   border-bottom: 1px solid var(--line-strong);
-  color: #aeb5c9;
+  color: var(--table-heading-text);
   font-size: 11px;
   font-weight: 800;
   letter-spacing: .035em;
