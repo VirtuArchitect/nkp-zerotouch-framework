@@ -77,7 +77,7 @@ def read_json(path):
     if not path.exists():
         return None
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        return json.loads(path.read_text(encoding="utf-8-sig"))
     except Exception:
         return None
 
@@ -674,6 +674,64 @@ def environment_uniqueness_issues(extra=None, exclude=None):
     return issues
 
 
+def prepared_config_path(state):
+    raw_path = ((state.get("state") or {}).get("paths") or {}).get("config", "")
+    return Path(raw_path) if raw_path else None
+
+
+def same_config_path(left, right):
+    if not left or not right:
+        return False
+    if Path(left).name == Path(right).name:
+        return True
+    try:
+        return Path(left).resolve() == Path(right).resolve()
+    except OSError:
+        return False
+
+
+def environment_identity_issues(config, data, state):
+    env_name = str(data.get("environmentName") or config.stem)
+    current = {
+        "config": config,
+        "environment": env_name,
+        "cluster": str(data.get("clusterName", "")).strip(),
+        "api_vip": str(data.get("controlPlaneEndpointIp", "")).strip(),
+        "registry_namespace": str(data.get("registryNamespace", "")).strip(),
+    }
+    issues = environment_uniqueness_issues(extra=current, exclude=config)
+    state_config = prepared_config_path(state)
+    if state_config and not same_config_path(state_config, config):
+        issues.append(f"State was prepared from {state_config.name}, not {config.name}.")
+    state_env = ((state.get("state") or {}).get("environment") or {}).get("name", "")
+    if state_env and state_env != env_name:
+        issues.append(f"State environment name '{state_env}' does not match config environment name '{env_name}'.")
+    return issues
+
+
+def verification_status(state):
+    if not state["verification"].exists():
+        return False, "verification missing"
+    health_path = state["base"] / "reports" / "component-health.json"
+    health = read_json(health_path)
+    if isinstance(health, list):
+        issues = [
+            f"{item.get('name', 'check')}: {item.get('status', 'unknown')}"
+            for item in health
+            if str(item.get("status", "")).lower() not in {"pass", "ok"}
+        ]
+        if issues:
+            return False, "; ".join(issues[:4])
+        return True, "verification checks passed"
+    try:
+        text = state["verification"].read_text(encoding="utf-8-sig", errors="replace").lower()
+    except OSError:
+        return False, "verification report unreadable"
+    if re.search(r"(^|\n)-\s*(warn|fail|failed|error):", text):
+        return False, "verification report contains warnings or failures"
+    return True, "verification report available"
+
+
 def artifact_files():
     roots = [ZT, ROOT / "docs", ROOT / "configs"]
     files = []
@@ -687,8 +745,11 @@ def artifact_files():
 
 
 def environment_lifecycle(name, state):
-    if state["verification"].exists():
+    verification_ok, _ = verification_status(state)
+    if verification_ok:
         return "Verified", "ok"
+    if state["verification"].exists():
+        return "Verification Warning", "warn"
     if (state["base"] / "state" / "kubeconfig").exists():
         return "Kubeconfig Captured", "ok"
     if state["generate"]:
@@ -699,6 +760,7 @@ def environment_lifecycle(name, state):
 
 
 def environment_readiness(data, state):
+    verification_ok, _ = verification_status(state)
     checks = [
         bool(data.get("environmentName")),
         data.get("environmentType") in {"connected", "proxied", "air-gapped"},
@@ -709,7 +771,7 @@ def environment_readiness(data, state):
         bool(data.get("registryEndpoint")) and ".example.com" not in str(data.get("registryEndpoint", "")),
         bool(state["state"]),
         bool(state["generate"]),
-        bool(state["verification"].exists()),
+        verification_ok,
     ]
     passed = sum(1 for item in checks if item)
     return passed, len(checks), pct(passed, len(checks))
@@ -749,6 +811,8 @@ def plan_review_status(env_name, state):
         return "not generated", "warn"
     reviewed_hashes = review.get("planHashes") or {}
     current_hashes = plan_hashes(env_name)
+    if review.get("status") == "approved" and not reviewed_hashes:
+        return "legacy review missing hashes", "warn"
     if review.get("status") == "approved" and reviewed_hashes and reviewed_hashes != current_hashes:
         return "stale review", "warn"
     if review.get("status") == "approved":
@@ -864,8 +928,11 @@ def drift_status(config):
     env_state_file = state["base"] / "state" / "environment.json"
     if config.exists() and env_state_file.exists() and config.stat().st_mtime > env_state_file.stat().st_mtime:
         issues.append("environment YAML changed after prepare")
-    if not state["verification"].exists():
-        issues.append("verification report missing")
+    identity_issues = environment_identity_issues(config, data, state)
+    issues.extend(identity_issues)
+    verification_ok, verification_detail = verification_status(state)
+    if not verification_ok:
+        issues.append(verification_detail)
     return env_name, ("warn" if issues else "ok"), issues or ["no drift indicators detected"]
 
 
@@ -902,16 +969,19 @@ def production_gate(config):
     state = env_state(env_name)
     review_label, review_status = plan_review_status(env_name, state)
     _, drift_state, drift_issues = drift_status(config)
+    identity_issues = environment_identity_issues(config, data, state)
+    verification_ok, verification_detail = verification_status(state)
     channels = load_setting("release-channels", default_release_channels())
     checks = []
+    checks.append(("Environment identity", not identity_issues, "; ".join(identity_issues) if identity_issues else "config and state identity match"))
     if channel == "production":
         checks.append(("Plan review", review_status == "ok", review_label))
         checks.append(("Backup evidence", not (channels.get("production_requires_backup") == "true") or backup_exists(env_name), "backup found" if backup_exists(env_name) else "backup missing"))
     else:
-        checks.append(("Plan review", review_status in {"ok", "warn"}, review_label))
+        checks.append(("Plan review", review_status == "ok", review_label))
         checks.append(("Backup evidence", True, "not required for non-production"))
     checks.append(("Drift", drift_state == "ok", "; ".join(drift_issues)))
-    checks.append(("Verification", state["verification"].exists(), "verification report available" if state["verification"].exists() else "verification missing"))
+    checks.append(("Verification", verification_ok, verification_detail))
     ok = all(item[1] for item in checks)
     return env_name, channel, ok, checks
 
@@ -935,11 +1005,14 @@ def environment_next_action(config):
     data = read_json_from_context(config)
     env_name = str(data.get("environmentName") or config.stem)
     state = env_state(env_name)
+    identity_issues = environment_identity_issues(config, data, state)
     review_label, review_status = plan_review_status(env_name, state)
     _, drift_state, drift_issues = drift_status(config)
     _, _, gate_ok, gate_checks = production_gate(config)
     detail_href = f"/environment/view?config={quote(str(config))}"
 
+    if identity_issues:
+        return "Resolve identity", detail_href, "warn", "; ".join(identity_issues)
     if not state["state"]:
         return "Prepare workspace", detail_href, "warn", "Stage NKP inputs and create local state."
     if not state["generate"]:
@@ -953,7 +1026,8 @@ def environment_next_action(config):
         return "Clear production gate", "/production-readiness", "warn", "; ".join(failed)
     if not (state["base"] / "state" / "kubeconfig").exists():
         return "Request deploy", "/cli", "ok", "Apply gate is clear; submit controlled CLI deploy."
-    if not state["verification"].exists():
+    verification_ok, verification_detail = verification_status(state)
+    if not verification_ok:
         return "Verify cluster", detail_href, "warn", "Run verification and capture deployment evidence."
     return "Capture run summary", "/runs", "ok", "Environment has deployment evidence."
 
@@ -2041,7 +2115,7 @@ class Handler(BaseHTTPRequestHandler):
                 if len(next_action_cards) < 4:
                     next_action_cards.append(
                         f"<div class='next-action'><div><strong>{html.escape(name)}</strong>"
-                        f"<div class='env-file'>{html.escape(config.name)} · {html.escape(next_detail[:140])}</div></div>"
+                        f"<div class='env-file'>{html.escape(config.name)} &middot; {html.escape(next_detail[:140])}</div></div>"
                         f"<a class='button-link' href='{html.escape(next_href)}'>{html.escape(next_label)}</a></div>"
                     )
                 gate_detail = "deploy gate clear" if gate_ok else "; ".join(gate_reasons[:2])
@@ -2133,6 +2207,8 @@ class Handler(BaseHTTPRequestHandler):
             env_type = str(data.get("environmentType") or "unknown")
             channel = env_channel(data)
             state = env_state(name)
+            state_config = prepared_config_path(state)
+            identity_issues = environment_identity_issues(config, data, state)
             lifecycle_label, lifecycle_status = environment_lifecycle(name, state)
             ready_passed, ready_total, ready_pct = environment_readiness(data, state)
             review_label, review_status = plan_review_status(name, state)
@@ -2140,6 +2216,19 @@ class Handler(BaseHTTPRequestHandler):
             _, _, gate_ok, gate_checks = production_gate(config)
             next_label, next_href, next_status, next_detail = environment_next_action(config)
             config_arg = quote(str(config))
+            identity_status = "warn" if identity_issues else "ok"
+            identity_detail = "; ".join(identity_issues) if identity_issues else "config and state identity match"
+            state_config_display = str(state_config) if state_config else "not prepared"
+            state_root_display = str(state["base"].relative_to(ROOT) if ROOT in state["base"].parents else state["base"])
+            identity_rows = "".join(
+                [
+                    f"<tr><td>Config file</td><td><code>{html.escape(str(config.relative_to(ROOT)))}</code></td></tr>",
+                    f"<tr><td>Environment name</td><td>{html.escape(name)}</td></tr>",
+                    f"<tr><td>State directory</td><td><code>{html.escape(state_root_display)}</code></td></tr>",
+                    f"<tr><td>Prepared from</td><td><code>{html.escape(state_config_display)}</code></td></tr>",
+                    f"<tr><td>Identity status</td><td><span class='chip {identity_status}'>{html.escape(identity_detail)}</span></td></tr>",
+                ]
+            )
             actions = "".join(
                 f'<form method="post" action="/action"><input type="hidden" name="action" value="{a}"><input type="hidden" name="config" value="{html.escape(str(config))}"><button>{a}</button></form>'
                 for a in ACTION_ORDER
@@ -2183,7 +2272,7 @@ class Handler(BaseHTTPRequestHandler):
 <div class="section-head">
   <div>
     <h2>{html.escape(name)}</h2>
-    <div class="section-copy">{html.escape(str(config.relative_to(ROOT)))} · {html.escape(next_detail)}</div>
+    <div class="section-copy">{html.escape(str(config.relative_to(ROOT)))} &middot; {html.escape(next_detail)}</div>
   </div>
   <a class="button-link" href="{html.escape(next_href)}">{html.escape(next_label)}</a>
 </div>
@@ -2198,6 +2287,10 @@ class Handler(BaseHTTPRequestHandler):
     </tbody></table>
   </div>
   <div class="settings-card">
+    <h3>Environment Identity</h3>
+    <table><tbody>{identity_rows}</tbody></table>
+  </div>
+  <div class="settings-card">
     <h3>Safe Actions</h3>
     <div class="actions">{actions}</div>
     <p style="margin-top: 12px;">Safe actions run as tracked jobs and do not execute live apply operations.</p>
@@ -2205,7 +2298,7 @@ class Handler(BaseHTTPRequestHandler):
   <div class="settings-card">
     <h3>Governance</h3>
     <p><span class="chip {'ok' if gate_ok else 'warn'}">{'Deploy gate clear' if gate_ok else 'Deploy gate blocked'}</span></p>
-    <p style="margin-top: 10px;"><a href="/cli">CLI apply</a> · <a href="/plan-review">Plan review</a> · <a href="/change-records">Change records</a></p>
+    <p style="margin-top: 10px;"><a href="/cli">CLI apply</a> &middot; <a href="/plan-review">Plan review</a> &middot; <a href="/change-records">Change records</a></p>
   </div>
 </section>
 
@@ -3961,6 +4054,14 @@ Backup: `{manifest.parent}`
         if not has_permission(self.current_user(), "safe-actions"):
             self.send_html(page("Blocked", "<h2>Action blocked</h2><div class='notice'>Your role does not have safe-action permission.</div><a class='back-link' href='/'>Back to dashboard</a>", "actions"), status=403)
             return
+        if action != "validate":
+            data = read_json_from_context(config)
+            identity_issues = environment_identity_issues(config, data, env_state(str(data.get("environmentName") or config.stem)))
+            if identity_issues:
+                issue_rows = "".join(f"<li>{html.escape(issue)}</li>" for issue in identity_issues)
+                audit_event("safe_action_blocked", self.current_user(), action, "denied", {"config": str(config), "issues": identity_issues})
+                self.send_html(page("Action Blocked", f"<h2>Action blocked</h2><div class='notice'>Resolve environment identity issues before running state-changing actions.</div><ul>{issue_rows}</ul><a class='back-link' href='/'>Back to dashboard</a>", "actions"), status=409)
+                return
         command = action_command(action, config)
         if not command:
             self.send_html(page("Action Error", "<h2>Runner unavailable</h2><div class='notice'>No supported shell runner found.</div><a class='back-link' href='/'>Back to dashboard</a>", "actions"), status=500)
