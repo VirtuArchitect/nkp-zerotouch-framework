@@ -1050,6 +1050,28 @@ def create_change_record(job, user):
     return record
 
 
+def create_restore_change_record(plan_id, env_name, manifest, plan_path, metadata_path, user, blocked):
+    record_id = f"cr-{plan_id}"
+    record = {
+        "id": record_id,
+        "jobId": "",
+        "environment": env_name,
+        "action": "restore-plan",
+        "requestedBy": (user or {}).get("username", "unknown"),
+        "requestedRole": (user or {}).get("role", ""),
+        "createdAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "status": "blocked" if blocked else "planning",
+        "planHashes": {},
+        "backupManifest": str(manifest),
+        "restorePlan": str(plan_path),
+        "restoreMetadata": str(metadata_path),
+        "approvals": [],
+        "rollbackNotes": "Restore remains manual. Create a fresh backup, validate target identity, copy only reviewed components, then rerun preflight, drift, plan review, verify, and backup.",
+    }
+    write_json(change_record_path(record_id), record)
+    return record
+
+
 def list_change_records(limit=100):
     if not CHANGE_RECORDS.exists():
         return []
@@ -1222,6 +1244,56 @@ def backup_component_rows(backup_dir):
     return components
 
 
+def restore_identity_checks(env_name, manifest, manifest_data, target_state):
+    state_path = target_state / "state" / "environment.json"
+    state_data = read_json(state_path) or {}
+    state_env = ((state_data.get("environment") or {}).get("name") or "").strip()
+    state_config = str(((state_data.get("paths") or {}).get("config") or "")).strip()
+    manifest_env = str(manifest_data.get("environment", "")).strip()
+    source_path = str(manifest_data.get("source", "") or "").strip()
+    checks = []
+
+    def add(name, passed, detail, required=True):
+        status = "pass" if passed else ("fail" if required else "warn")
+        checks.append({"name": name, "status": status, "detail": detail})
+
+    add(
+        "backup manifest environment",
+        bool(manifest_env) and manifest_env == env_name,
+        f"manifest={manifest_env or 'missing'}; target={env_name}",
+    )
+    add(
+        "target state directory",
+        target_state.exists(),
+        str(target_state),
+    )
+    add(
+        "prepared environment metadata",
+        state_path.exists() and bool(state_data),
+        str(state_path),
+    )
+    add(
+        "prepared environment name",
+        bool(state_env) and state_env == env_name,
+        f"state={state_env or 'missing'}; target={env_name}",
+    )
+    add(
+        "prepared config reference",
+        bool(state_config),
+        state_config or "missing",
+        required=False,
+    )
+    if source_path:
+        add(
+            "backup source matches target",
+            same_config_path(Path(source_path), target_state),
+            f"source={source_path}; target={target_state}",
+            required=False,
+        )
+    checks.append({"name": "backup manifest path", "status": "pass" if manifest.exists() else "fail", "detail": str(manifest)})
+    return checks
+
+
 def build_restore_plan(manifest, user):
     data = read_json(manifest) or {}
     env_name = str(data.get("environment", manifest.parents[2].name if len(manifest.parents) > 2 else "unknown"))
@@ -1236,10 +1308,15 @@ def build_restore_plan(manifest, user):
     lock_active = active_lock(env_name)
     target_state = ZT / "environments" / env_name
     current_backup_required = True
+    identity_checks = restore_identity_checks(env_name, manifest, data, target_state)
 
     component_lines = "\n".join(
         f"- {item['name']}: {'present' if item['exists'] else 'missing'}; files={item['files']}; source=`{item['path']}`"
         for item in components
+    )
+    identity_lines = "\n".join(
+        f"- {item['name']}: {item['status']}; {item['detail']}"
+        for item in identity_checks
     )
     blocked = []
     if lock_active:
@@ -1248,11 +1325,16 @@ def build_restore_plan(manifest, user):
         blocked.append("Backup manifest is missing.")
     if any(not item["exists"] for item in components):
         blocked.append("One or more backup components are missing.")
+    for item in identity_checks:
+        if item["status"] == "fail":
+            blocked.append(f"Identity check failed: {item['name']} ({item['detail']}).")
     blocked_lines = "\n".join(f"- {item}" for item in blocked) or "- No blocking conditions detected by plan generation."
+    change_record = create_restore_change_record(plan_id, env_name, manifest, plan_path, metadata_path, user, blocked)
     plan = f"""# Restore Plan
 
 Created: {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}
 Requested by: {user.get('username', 'operator')}
+Change record: `{change_record['id']}`
 
 Manifest: `{manifest}`
 Environment: `{env_name}`
@@ -1262,9 +1344,14 @@ Target state: `{target_state}`
 ## Pre-Restore Controls
 
 - Create a fresh backup before restoring: {'required' if current_backup_required else 'not required'}
+- Validate target identity evidence before copying files.
 - Confirm no active lock exists: {'blocked' if lock_active else 'clear'}
-- Review change record and rollback notes before copying files.
+- Review change record `{change_record['id']}` and rollback notes before copying files.
 - Keep restore execution manual; this plan does not copy files.
+
+## Target Identity Evidence
+
+{identity_lines}
 
 ## Backup Components
 
@@ -1294,8 +1381,10 @@ Target state: `{target_state}`
         "backup": str(backup_dir),
         "targetState": str(target_state),
         "components": components,
+        "identityChecks": identity_checks,
         "lockActive": lock_active,
         "blocked": blocked,
+        "changeRecord": change_record,
         "requiresCurrentBackup": current_backup_required,
         "manualOnly": True,
     }
