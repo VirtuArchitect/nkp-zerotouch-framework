@@ -6,8 +6,8 @@ This maps the public-readiness and real-deployment tasks to the repository featu
 | --- | --- | --- |
 | Replace placeholder configs | Supported | `scripts/new-env.*`, runbooks, config reference |
 | Create real secrets files | Supported | `secrets` phase, ignored `*.secrets.yaml`, local `.zt/.../secrets/secrets.env` |
-| Test Prism connectivity | Partially automated | `validate` checks endpoint shape/reachability; dashboard health can probe Prism API authentication with runtime credentials |
-| Test registry connectivity | Partially automated | `validate` checks endpoint shape/reachability; dashboard health can probe registry `/v2/` authentication and `registry -Apply` performs real push |
+| Test Prism connectivity | Partially automated | PowerShell and Bash `validate` check endpoint shape/TCP reachability; dashboard health can probe Prism API authentication with runtime credentials |
+| Test registry connectivity | Partially automated | PowerShell and Bash `validate` check endpoint shape/TCP reachability; dashboard health can probe registry `/v2/` authentication and `registry -Apply` performs real push |
 | Run air-gapped registry apply | Supported | guarded `registry -Apply` / `--apply` |
 | Run NKP deploy apply | Supported | guarded `deploy -Apply` / `--apply` |
 | Capture kubeconfig into state | Implemented | `kubeconfig` phase writes `.zt/environments/<name>/state/kubeconfig` and redacted `kubeconfig.json` metadata |

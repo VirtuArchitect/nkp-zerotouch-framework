@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -142,6 +143,48 @@ cluster:
     data = json.loads(run_tool("validate", "--config", str(config)))
     assert data["valid"] is False
     assert any("environment.name" in item for item in data["errors"])
+
+
+def test_bash_validate_performs_tcp_endpoint_probe():
+    scratch = ROOT / ".zt-test" / f"tcp-probe-{os.getpid()}"
+    shutil.rmtree(scratch, ignore_errors=True)
+    scratch.mkdir(parents=True)
+    try:
+        bundle = _make_bundle(scratch)
+        config = scratch / "tcp-probe.yaml"
+        bundle_config_path = bundle.relative_to(ROOT).as_posix()
+        config.write_text(
+            f"""
+environment:
+  name: tcp-probe
+  type: connected
+nkp:
+  version: v2.17.0
+  bundleType: standard
+  bundlePath: {bundle_config_path}
+nutanix:
+  prismCentralEndpoint: http://127.0.0.1:9
+  clusterName: pe-cluster
+cluster:
+  name: tcp-probe-cluster
+  kubernetesVersion: v1.32.3
+advanced: {{}}
+""",
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            ["bash", "scripts/zt.sh", "validate", "--config", config.relative_to(ROOT).as_posix()],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert "Prism Central TCP check failed for http://127.0.0.1:9" in result.stdout
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
 
 
 def test_render_generate_quotes_shell_sensitive_values(tmp_path):
