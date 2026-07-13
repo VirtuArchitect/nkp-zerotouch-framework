@@ -11,7 +11,7 @@ This maps the public-readiness and real-deployment tasks to the repository featu
 | Run air-gapped registry apply | Supported | guarded `registry -Apply` / `--apply` |
 | Run NKP deploy apply | Supported | guarded `deploy -Apply` / `--apply` |
 | Capture kubeconfig into state | Implemented | `kubeconfig` phase writes `.zt/environments/<name>/state/kubeconfig` and redacted `kubeconfig.json` metadata |
-| Strengthen live verification | Partially automated | `verify` runs `kubectl get nodes/pods` and NKP queries when kubeconfig exists |
+| Strengthen live verification | Implemented baseline | `verify` writes summary, component health, structured evidence, and runs `kubectl`/NKP queries when kubeconfig exists |
 | Confirm generated NKP flags | Supported | generated `deploy.sh` and runbooks are review points |
 | Decide upgrade/destroy automation | Guarded | plan-first `upgrade` and `destroy` phases |
 | Add real CI strategy | Implemented baseline | GitHub Actions syntax/helper/security/package checks and all-environment config validation |

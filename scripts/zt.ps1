@@ -701,9 +701,15 @@ function Invoke-Verify {
     New-ZtDirectory -Path $context.reportsDir
 
     $reportPath = Join-Path $context.reportsDir "verification-summary.md"
+    $evidencePath = Join-Path $context.reportsDir "verification-evidence.json"
     $kubeconfigPath = Join-Path $context.stateDir "kubeconfig"
+    $kubeconfigMetadataPath = Join-Path $context.stateDir "kubeconfig.json"
     $kubectlPath = Join-Path $context.binDir "kubectl"
     $nkpPath = Join-Path $context.binDir "nkp"
+    $kubectlLog = Join-Path $context.logsDir "verify-kubectl.log"
+    $liveAttempted = $false
+    $liveStatus = "not-run"
+    $liveExitCode = $null
 
     $checks = @(
         [ordered]@{ name = "prepared workspace"; status = "pass"; detail = $context.environmentRoot },
@@ -731,19 +737,81 @@ function Invoke-Verify {
     $checks | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $context.reportsDir "component-health.json") -Encoding utf8
     if (Test-Path -LiteralPath $kubeconfigPath) {
         New-ZtDirectory -Path $context.logsDir
-        $kubectlLog = Join-Path $context.logsDir "verify-kubectl.log"
         $bashKubeconfig = Convert-ToBashPath -Path $kubeconfigPath
         $bashKubectl = Convert-ToBashPath -Path $kubectlPath
-        $bashLog = Convert-ToBashPath -Path $kubectlLog
-        bash -lc "{ '$bashKubectl' --kubeconfig '$bashKubeconfig' get nodes -o wide; status=\$?; '$bashKubectl' --kubeconfig '$bashKubeconfig' get nodes || status=\$?; '$bashKubectl' --kubeconfig '$bashKubeconfig' get pods -A || status=\$?; '$bashKubectl' --kubeconfig '$bashKubeconfig' get pods -A --field-selector=status.phase!=Running,status.phase!=Succeeded || true; ./bin/nkp get clusters -A --kubeconfig '$bashKubeconfig' || true; ./bin/nkp get appdeployments -A --kubeconfig '$bashKubeconfig' || true; echo __ZT_VERIFY_STATUS:\$status; } > '$bashLog' 2>&1; exit 0"
+        $bashNkp = Convert-ToBashPath -Path $nkpPath
+        $liveScript = Join-Path $context.logsDir "verify-live.sh"
+        $liveScriptContent = @'
+#!/usr/bin/env bash
+kubectl_bin="$1"
+kubeconfig="$2"
+nkp_bin="$3"
+status=0
+"$kubectl_bin" --kubeconfig "$kubeconfig" get nodes -o wide || status=$?
+"$kubectl_bin" --kubeconfig "$kubeconfig" get nodes || status=$?
+"$kubectl_bin" --kubeconfig "$kubeconfig" get pods -A || status=$?
+"$kubectl_bin" --kubeconfig "$kubeconfig" get pods -A --field-selector=status.phase!=Running,status.phase!=Succeeded || true
+"$nkp_bin" get clusters -A --kubeconfig "$kubeconfig" || true
+"$nkp_bin" get appdeployments -A --kubeconfig "$kubeconfig" || true
+echo "__ZT_VERIFY_STATUS:$status"
+exit 0
+'@
+        [System.IO.File]::WriteAllText($liveScript, ($liveScriptContent -replace "`r?`n", "`n"), [System.Text.Encoding]::ASCII)
+        $bashLiveScript = Convert-ToBashPath -Path $liveScript
+        $kubectlErrLog = Join-Path $context.logsDir "verify-kubectl.err.log"
+        $bashArgs = @($bashLiveScript, $bashKubectl, $bashKubeconfig, $bashNkp) | ForEach-Object { '"' + ($_ -replace '"', '\"') + '"' }
+        Start-Process -FilePath "bash" -ArgumentList $bashArgs -NoNewWindow -Wait -RedirectStandardOutput $kubectlLog -RedirectStandardError $kubectlErrLog
+        if (Test-Path -LiteralPath $kubectlErrLog) {
+            Get-Content -LiteralPath $kubectlErrLog | Add-Content -LiteralPath $kubectlLog
+            Remove-Item -LiteralPath $kubectlErrLog -Force
+        }
+        $liveAttempted = $true
         $liveOk = Select-String -LiteralPath $kubectlLog -Pattern "__ZT_VERIFY_STATUS:0" -Quiet
+        $statusLine = Select-String -LiteralPath $kubectlLog -Pattern "__ZT_VERIFY_STATUS:(\d+)" | Select-Object -Last 1
+        if ($statusLine -and $statusLine.Matches.Count -gt 0) {
+            $liveExitCode = [int]$statusLine.Matches[0].Groups[1].Value
+        }
         if ($liveOk) {
+            $liveStatus = "pass"
             Write-Check -Status "PASS" -Message "Live kubectl verification log: $kubectlLog"
         }
         else {
+            $liveStatus = "warn"
             Write-Check -Status "WARN" -Message "Live kubectl verification needs review; log: $kubectlLog"
         }
     }
+    $kubeconfigMetadata = $null
+    if (Test-Path -LiteralPath $kubeconfigMetadataPath) {
+        try {
+            $kubeconfigMetadata = Get-Content -LiteralPath $kubeconfigMetadataPath -Raw | ConvertFrom-Json
+        }
+        catch {
+            $kubeconfigMetadata = [ordered]@{ error = "unreadable kubeconfig metadata" }
+        }
+    }
+    $evidence = [ordered]@{
+        capturedAt = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+        environment = $context.environmentName
+        cluster = $context.clusterName
+        checks = $checks
+        liveVerification = [ordered]@{
+            attempted = $liveAttempted
+            status = $liveStatus
+            exitCode = $liveExitCode
+            log = $kubectlLog
+            commands = @(
+                "kubectl get nodes -o wide",
+                "kubectl get nodes",
+                "kubectl get pods -A",
+                "kubectl get pods -A --field-selector=status.phase!=Running,status.phase!=Succeeded",
+                "nkp get clusters -A",
+                "nkp get appdeployments -A"
+            )
+        }
+        kubeconfigMetadata = $kubeconfigMetadata
+    }
+    $evidence | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $evidencePath -Encoding utf8
+    Write-Check -Status "PASS" -Message "Wrote verification evidence: $evidencePath"
     Write-Check -Status "PASS" -Message "Wrote verification report: $reportPath"
 }
 
