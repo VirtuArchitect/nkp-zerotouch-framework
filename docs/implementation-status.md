@@ -25,6 +25,7 @@ This maps the public-readiness and real-deployment tasks to the repository featu
 | Health checks | Implemented baseline | console health page for runner, tools, bundles, Prism, registry, credential variables, authenticated API probes, and enterprise integration probes |
 | Artifact viewer | Implemented | generated plans, reports, logs, and allowed config/docs files can be opened from the console |
 | Artifact diff/review | Implemented baseline | allowed artifacts can be compared from the console before operational use |
+| Evidence pack review | Implemented baseline | console lists `.zt/evidence` manifests, redaction status, archive paths, and exposes `/api/evidence` |
 | Formal plan review | Implemented baseline | console records per-environment approve/reject status under `.zt` |
 | Setup wizard | Implemented baseline | guided first-run setup page links source, connection, inventory, network, secrets, environment, and preflight tasks |
 | Lifecycle/readiness | Implemented baseline | environment table shows lifecycle state and readiness score |

@@ -39,8 +39,8 @@ try:
     SESSION_TTL_SECONDS = int(os.environ.get("ZT_SESSION_TTL_SECONDS", "43200"))
 except ValueError:
     SESSION_TTL_SECONDS = 43200
-SAFE_ACTIONS = {"validate", "prepare", "generate", "verify", "backup", "runs"}
-ACTION_ORDER = ["validate", "prepare", "generate", "verify", "backup", "runs"]
+SAFE_ACTIONS = {"validate", "prepare", "generate", "verify", "backup", "runs", "evidence"}
+ACTION_ORDER = ["validate", "prepare", "generate", "verify", "backup", "runs", "evidence"]
 CLI_APPLY_ACTIONS = {"registry", "deploy", "upgrade", "destroy"}
 CLI_ALLOWED_ACTIONS = CLI_APPLY_ACTIONS
 VIEW_PATHS = {
@@ -49,6 +49,7 @@ VIEW_PATHS = {
     "cli": "/cli",
     "runs": "/runs",
     "artifacts": "/artifacts",
+    "evidence": "/evidence",
     "health": "/health",
     "kubeconfig": "/kubeconfig",
     "plan-review": "/plan-review",
@@ -588,6 +589,7 @@ ROUTE_PERMISSIONS = [
     ("/drift", "preflight"),
     ("/backups", "artifacts"),
     ("/restore", "artifacts"),
+    ("/evidence", "artifacts"),
     ("/production-readiness", "preflight"),
     ("/release-channels", "approval-policy"),
     ("/api", "health"),
@@ -969,6 +971,38 @@ def artifact_files():
             if path.is_file() and path.suffix.lower() in {".json", ".yaml", ".yml", ".md", ".txt", ".log", ".sh", ".ps1"}:
                 files.append(path)
     return sorted(files, key=lambda item: str(item.relative_to(ROOT) if ROOT in item.parents else item))
+
+
+def evidence_packs(limit=100):
+    packs = []
+    evidence_root = ZT / "evidence"
+    if not evidence_root.exists():
+        return packs
+    for manifest_path in evidence_root.glob("*/evidence-manifest.json"):
+        manifest = read_json(manifest_path) or {}
+        pack_dir = manifest_path.parent
+        archive_candidates = [
+            pack_dir.with_suffix(".zip"),
+            pack_dir.with_suffix(".tar.gz"),
+            evidence_root / f"{pack_dir.name}.zip",
+            evidence_root / f"{pack_dir.name}.tar.gz",
+        ]
+        archive = next((path for path in archive_candidates if path.exists()), None)
+        files = manifest.get("files") if isinstance(manifest.get("files"), list) else []
+        packs.append({
+            "name": pack_dir.name,
+            "path": str(pack_dir),
+            "manifest": str(manifest_path),
+            "archive": str(archive) if archive else "",
+            "environment": manifest.get("environment", ""),
+            "type": manifest.get("type", ""),
+            "cluster": manifest.get("cluster", ""),
+            "createdAt": manifest.get("createdAt", ""),
+            "fileCount": len(files),
+            "redaction": manifest.get("redaction", {}),
+            "updated": mtime_label(manifest_path),
+        })
+    return sorted(packs, key=lambda item: item.get("createdAt") or item.get("updated") or "", reverse=True)[:limit]
 
 
 def environment_lifecycle(name, state):
@@ -1911,6 +1945,7 @@ def page(title, body, active="environments", user=None):
     <a class="{nav_class('health')}" href="{VIEW_PATHS['health']}">Health</a>
     <div class="nav-label">Artifacts</div>
     <a class="{nav_class('artifacts')}" href="{VIEW_PATHS['artifacts']}">Artifacts</a>
+    <a class="{nav_class('evidence')}" href="{VIEW_PATHS['evidence']}">Evidence Packs</a>
     <a class="{nav_class('plan-review')}" href="{VIEW_PATHS['plan-review']}">Plan Review</a>
     <a class="{nav_class('kubeconfig')}" href="{VIEW_PATHS['kubeconfig']}">Kubeconfig</a>
     <a class="{nav_class('backups')}" href="{VIEW_PATHS['backups']}">Backups</a>
@@ -2500,6 +2535,9 @@ class Handler(BaseHTTPRequestHandler):
                 checks = preflight_checks()
                 evidence = preflight_evidence_records(100)
                 self.send_json({"checks": checks, "evidence": evidence})
+                return
+            if parsed.path == "/api/evidence":
+                self.send_json({"evidencePacks": evidence_packs(100)})
                 return
             if parsed.path == "/api/environments":
                 rows = []
@@ -3163,6 +3201,37 @@ class Handler(BaseHTTPRequestHandler):
 </section>
 """
             self.send_html(page("Artifacts - NKP ZeroTouch Framework", body, "artifacts"))
+            return
+        if parsed.path == "/evidence":
+            rows = []
+            for pack in evidence_packs(100):
+                redaction = pack.get("redaction") if isinstance(pack.get("redaction"), dict) else {}
+                redaction_status = "ok" if redaction.get("rawKubeconfigExcluded") and redaction.get("secretValuesExcluded") else "warn"
+                archive_text = pack.get("archive") or "not generated"
+                rows.append(
+                    f"<tr><td><div class='env-name'>{html.escape(pack.get('name', ''))}</div><div class='env-file'>{html.escape(pack.get('path', ''))}</div></td>"
+                    f"<td>{html.escape(pack.get('environment', '') or 'unknown')}<div class='env-file'>{html.escape(pack.get('cluster', '') or 'cluster unknown')}</div></td>"
+                    f"<td>{html.escape(pack.get('createdAt', '') or pack.get('updated', ''))}</td>"
+                    f"<td>{pack.get('fileCount', 0)}</td>"
+                    f"<td><span class='chip {redaction_status}'>{'redacted' if redaction_status == 'ok' else 'review'}</span></td>"
+                    f"<td><div class='actions'><a class='button-link' href='/artifacts/view?path={quote(pack.get('manifest', ''))}'>Manifest</a></div><div class='env-file'>{html.escape(archive_text)}</div></td></tr>"
+                )
+            body = f"""
+<div class="section-head">
+  <div>
+    <h2>Evidence Packs</h2>
+    <div class="section-copy">Reviewable evidence bundles created by the <code>evidence</code> phase under <code>.zt/evidence/</code>.</div>
+  </div>
+</div>
+<section class="panel">
+  <table>
+    <thead><tr><th>Pack</th><th>Environment</th><th>Created</th><th>Files</th><th>Redaction</th><th>Open</th></tr></thead>
+    <tbody>{''.join(rows) or '<tr><td colspan="6" class="muted">No evidence packs found. Run the evidence safe action or CLI phase first.</td></tr>'}</tbody>
+  </table>
+</section>
+<div class="notice">Evidence packs exclude raw kubeconfig and local secret values, but generated plans and logs can still contain topology, endpoints, VIPs, and environment names.</div>
+"""
+            self.send_html(page("Evidence Packs - NKP ZeroTouch Framework", body, "evidence"))
             return
         if parsed.path == "/artifacts/diff":
             query = parse_qs(parsed.query)
