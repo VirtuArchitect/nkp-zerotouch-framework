@@ -28,7 +28,7 @@ fi
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    validate|prepare|generate|registry|deploy|verify|kubeconfig|secrets|backup|upgrade|destroy|runs|ci)
+    validate|prepare|generate|registry|deploy|verify|kubeconfig|secrets|backup|upgrade|destroy|runs|evidence|ci)
       command_name="$1"
       shift
       ;;
@@ -801,6 +801,98 @@ EOF
   check PASS "Captured run summary: $run_dir"
 }
 
+evidence_phase() {
+  load_context
+  assert_prepared
+  local stamp evidence_root evidence_dir archive_path
+  stamp="$(date -u +"%Y%m%d-%H%M%S")"
+  evidence_root="$repo_root/.zt/evidence"
+  evidence_dir="$evidence_root/$environment_name-$stamp"
+  archive_path="$evidence_root/$environment_name-$stamp.tar.gz"
+  mkdir -p "$evidence_dir/environment" "$evidence_dir/preflight" "$evidence_dir/runs"
+
+  if [[ -f "$repo_root/.zt/preflight/$environment_name.json" ]]; then
+    cp "$repo_root/.zt/preflight/$environment_name.json" "$evidence_dir/preflight/"
+  fi
+  for dir_name in generated reports logs; do
+    if [[ -d "$environment_root/$dir_name" ]]; then
+      cp -a "$environment_root/$dir_name" "$evidence_dir/environment/$dir_name"
+    fi
+  done
+  mkdir -p "$evidence_dir/environment/state"
+  for file_name in environment.json staged-tools.json generate.json registry.json secrets.json kubeconfig.json; do
+    if [[ -f "$state_dir/$file_name" ]]; then
+      cp "$state_dir/$file_name" "$evidence_dir/environment/state/$file_name"
+    fi
+  done
+  if [[ -d "$repo_root/.zt/runs" ]]; then
+    "$python_bin" - "$repo_root/.zt/runs" "$evidence_dir/runs" "$environment_name" <<'PY'
+import json
+import shutil
+import sys
+from pathlib import Path
+
+runs_root = Path(sys.argv[1])
+target_root = Path(sys.argv[2])
+environment = sys.argv[3]
+for run_path in sorted(runs_root.iterdir()):
+    if not run_path.is_dir():
+        continue
+    summary_path = run_path / "summary.json"
+    try:
+        summary = json.loads(summary_path.read_text(encoding="utf-8-sig"))
+    except Exception:
+        continue
+    if summary.get("environment") == environment:
+        shutil.copytree(run_path, target_root / run_path.name, dirs_exist_ok=True)
+PY
+  fi
+
+  "$python_bin" - "$environment_name" "$environment_type" "$cluster_name" "$config_path" "$evidence_dir" <<'PY'
+import json
+import os
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+environment, environment_type, cluster, config, evidence_dir = sys.argv[1:]
+root = Path(evidence_dir)
+files = []
+for path in sorted(root.rglob("*")):
+    if path.is_file():
+        files.append(str(path.relative_to(root)).replace(os.sep, "/"))
+manifest = {
+    "createdAt": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+    "environment": environment,
+    "type": environment_type,
+    "cluster": cluster,
+    "config": config,
+    "redaction": {
+        "rawKubeconfigExcluded": True,
+        "secretValuesExcluded": True,
+        "operatorReviewRequired": True,
+    },
+    "files": files,
+}
+(root / "evidence-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+(root / "README.md").write_text(
+    "# NKP ZeroTouch Evidence Pack\n\n"
+    f"Environment: `{environment}`\n\n"
+    "This pack is intended for lab review and change evidence. It excludes raw kubeconfig and local secret values. "
+    "Review generated plans, logs, and endpoint metadata before sharing outside the lab.\n",
+    encoding="utf-8",
+)
+PY
+
+  if command -v tar >/dev/null 2>&1; then
+    (cd "$evidence_root" && tar -czf "$archive_path" "$(basename "$evidence_dir")")
+    check PASS "Created evidence archive: $archive_path"
+  else
+    check WARN "tar not found; evidence directory created without archive."
+  fi
+  check PASS "Created evidence pack: $evidence_dir"
+}
+
 ci_phase() {
   check INFO "Running local CI smoke checks."
   bash -n ./scripts/zt.sh
@@ -932,6 +1024,9 @@ case "$command_name" in
     ;;
   runs)
     runs_phase
+    ;;
+  evidence)
+    evidence_phase
     ;;
   ci)
     ci_phase

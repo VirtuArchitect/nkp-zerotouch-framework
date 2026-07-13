@@ -42,10 +42,11 @@ The workflow runs:
 - `prepare`
 - `generate`
 - optional `verify`
+- `evidence`
 
 It uploads local evidence from `.zt/preflight`, `.zt/environments/*/reports`,
 `.zt/environments/*/generated`, `.zt/environments/*/state/*.json`, `.zt/jobs`,
-and `.zt/runs`.
+`.zt/runs`, and `.zt/evidence`.
 
 The workflow deliberately does not run `registry --apply`, `deploy --apply`,
 `upgrade --apply`, `destroy --apply`, or any automated restore copy-back.
