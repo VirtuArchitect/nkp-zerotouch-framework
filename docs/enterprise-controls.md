@@ -14,6 +14,7 @@ decoupling:
 - `/api/jobs/log?id=<job-id>`
 - `/api/locks`
 - `/api/change-records`
+- `/api/production-readiness`
 
 ## Environment Locking
 

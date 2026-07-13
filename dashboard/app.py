@@ -1096,6 +1096,20 @@ def production_gate(config):
     return env_name, channel, ok, checks
 
 
+def production_gate_payload(config):
+    env_name, channel, ok, checks = production_gate(config)
+    return {
+        "name": env_name,
+        "config": str(config),
+        "channel": channel,
+        "ready": ok,
+        "checks": [
+            {"name": name, "passed": passed, "detail": detail}
+            for name, passed, detail in checks
+        ],
+    }
+
+
 def apply_gate(config, action):
     env_name, channel, ok, checks = production_gate(config)
     state = env_state(env_name)
@@ -2245,6 +2259,10 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if parsed.path == "/api/change-records":
                 self.send_json({"changeRecords": list_change_records(100)})
+                return
+            if parsed.path == "/api/production-readiness":
+                gates = [production_gate_payload(config) for config in env_configs()]
+                self.send_json({"ready": all(item["ready"] for item in gates), "environments": gates})
                 return
             self.send_json({"error": "not found"}, status=404)
             return
