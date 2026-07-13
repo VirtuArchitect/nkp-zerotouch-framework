@@ -73,6 +73,11 @@ actual copy-back procedure manual and deliberate.
 
 ## Secret and Identity Checks
 
-The console checks required runtime secret keys by presence only. OIDC metadata
-is probed for discovery readiness, while full authorization-code login remains a
-future production integration item.
+The console checks required runtime secret keys by presence and uses those
+values for optional authenticated health probes. Prism Central is probed through
+the configured endpoint with `NUTANIX_PC_USERNAME` and `NUTANIX_PC_PASSWORD`.
+Registry readiness is probed through `/v2/` with `ZT_REGISTRY_USERNAME` and
+`ZT_REGISTRY_PASSWORD`.
+
+OIDC metadata is probed for discovery readiness, while full authorization-code
+login remains a future production integration item.

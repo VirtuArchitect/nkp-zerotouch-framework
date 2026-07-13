@@ -6,8 +6,8 @@ This maps the public-readiness and real-deployment tasks to the repository featu
 | --- | --- | --- |
 | Replace placeholder configs | Supported | `scripts/new-env.*`, runbooks, config reference |
 | Create real secrets files | Supported | `secrets` phase, ignored `*.secrets.yaml`, local `.zt/.../secrets/secrets.env` |
-| Test Prism connectivity | Partially automated | `validate` checks endpoint shape/reachability; real auth requires environment values |
-| Test registry connectivity | Partially automated | `validate` checks endpoint shape/reachability; `registry -Apply` performs real push |
+| Test Prism connectivity | Partially automated | `validate` checks endpoint shape/reachability; dashboard health can probe Prism API authentication with runtime credentials |
+| Test registry connectivity | Partially automated | `validate` checks endpoint shape/reachability; dashboard health can probe registry `/v2/` authentication and `registry -Apply` performs real push |
 | Run air-gapped registry apply | Supported | guarded `registry -Apply` / `--apply` |
 | Run NKP deploy apply | Supported | guarded `deploy -Apply` / `--apply` |
 | Capture kubeconfig into state | Convention defined | place kubeconfig at `.zt/environments/<name>/state/kubeconfig` |
@@ -21,7 +21,7 @@ This maps the public-readiness and real-deployment tasks to the repository featu
 | CSRF protection | Implemented | authenticated POST forms receive and validate CSRF tokens |
 | Route-level RBAC | Implemented baseline | routes are mapped to permissions and enforced for local roles |
 | Audit events | Implemented baseline | append-only `.zt/audit/events.jsonl` for logins, settings, jobs, approvals, and environment changes |
-| Health checks | Implemented baseline | console health page for runner, tools, bundles, Prism, registry, credential variables, and enterprise integration probes |
+| Health checks | Implemented baseline | console health page for runner, tools, bundles, Prism, registry, credential variables, authenticated API probes, and enterprise integration probes |
 | Artifact viewer | Implemented | generated plans, reports, logs, and allowed config/docs files can be opened from the console |
 | Artifact diff/review | Implemented baseline | allowed artifacts can be compared from the console before operational use |
 | Formal plan review | Implemented baseline | console records per-environment approve/reject status under `.zt` |

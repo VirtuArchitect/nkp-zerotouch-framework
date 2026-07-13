@@ -3,6 +3,7 @@ import os
 import threading
 import urllib.parse
 import urllib.request
+from http.server import BaseHTTPRequestHandler
 
 from dashboard import app
 
@@ -10,6 +11,39 @@ from dashboard import app
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
+
+
+class ProbeHandler(BaseHTTPRequestHandler):
+    expected_path = "/"
+    expected_auth = ""
+    seen_paths = []
+    seen_auth = []
+
+    def log_message(self, format, *args):
+        return
+
+    def do_GET(self):
+        type(self).seen_paths.append(self.path)
+        type(self).seen_auth.append(self.headers.get("Authorization", ""))
+        if self.path == type(self).expected_path and self.headers.get("Authorization", "") == type(self).expected_auth:
+            self.send_response(200)
+        else:
+            self.send_response(401)
+        self.end_headers()
+
+
+def start_probe_server(expected_path, expected_auth):
+    class Handler(ProbeHandler):
+        pass
+
+    Handler.expected_path = expected_path
+    Handler.expected_auth = expected_auth
+    Handler.seen_paths = []
+    Handler.seen_auth = []
+    server = app.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server, Handler
 
 
 def request(opener, base_url, path, data=None, allow_error=False, timeout=30):
@@ -179,6 +213,86 @@ def test_dashboard_file_session_store_persists_and_logs_out():
             sessions_path.unlink(missing_ok=True)
         else:
             sessions_path.write_text(original_sessions, encoding="utf-8")
+
+
+def test_authenticated_prism_probe_uses_credentials():
+    old_user = os.environ.get("NUTANIX_PC_USERNAME")
+    old_password = os.environ.get("NUTANIX_PC_PASSWORD")
+    server, handler = start_probe_server("/api/nutanix/v3/versions", "Basic cGMtdXNlcjpwYy1wYXNz")
+    try:
+        os.environ["NUTANIX_PC_USERNAME"] = "pc-user"
+        os.environ["NUTANIX_PC_PASSWORD"] = "pc-pass"
+        endpoint = f"http://127.0.0.1:{server.server_address[1]}"
+
+        status, note = app.prism_authenticated_status(endpoint)
+
+        assert status == "ok"
+        assert "HTTP 200" in note
+        assert handler.seen_paths == ["/api/nutanix/v3/versions"]
+        assert handler.seen_auth == ["Basic cGMtdXNlcjpwYy1wYXNz"]
+    finally:
+        server.shutdown()
+        server.server_close()
+        if old_user is None:
+            os.environ.pop("NUTANIX_PC_USERNAME", None)
+        else:
+            os.environ["NUTANIX_PC_USERNAME"] = old_user
+        if old_password is None:
+            os.environ.pop("NUTANIX_PC_PASSWORD", None)
+        else:
+            os.environ["NUTANIX_PC_PASSWORD"] = old_password
+
+
+def test_authenticated_registry_probe_uses_credentials():
+    old_user = os.environ.get("ZT_REGISTRY_USERNAME")
+    old_password = os.environ.get("ZT_REGISTRY_PASSWORD")
+    server, handler = start_probe_server("/v2/", "Basic cmVnLXVzZXI6cmVnLXBhc3M=")
+    try:
+        os.environ["ZT_REGISTRY_USERNAME"] = "reg-user"
+        os.environ["ZT_REGISTRY_PASSWORD"] = "reg-pass"
+        endpoint = f"http://127.0.0.1:{server.server_address[1]}"
+
+        status, note = app.registry_authenticated_status(endpoint)
+
+        assert status == "ok"
+        assert "HTTP 200" in note
+        assert handler.seen_paths == ["/v2/"]
+        assert handler.seen_auth == ["Basic cmVnLXVzZXI6cmVnLXBhc3M="]
+    finally:
+        server.shutdown()
+        server.server_close()
+        if old_user is None:
+            os.environ.pop("ZT_REGISTRY_USERNAME", None)
+        else:
+            os.environ["ZT_REGISTRY_USERNAME"] = old_user
+        if old_password is None:
+            os.environ.pop("ZT_REGISTRY_PASSWORD", None)
+        else:
+            os.environ["ZT_REGISTRY_PASSWORD"] = old_password
+
+
+def test_authenticated_probes_warn_without_credentials():
+    old_pc_user = os.environ.pop("NUTANIX_PC_USERNAME", None)
+    old_pc_password = os.environ.pop("NUTANIX_PC_PASSWORD", None)
+    old_reg_user = os.environ.pop("ZT_REGISTRY_USERNAME", None)
+    old_reg_password = os.environ.pop("ZT_REGISTRY_PASSWORD", None)
+    try:
+        prism_status, prism_note = app.prism_authenticated_status("https://pc.lab.local:9440")
+        registry_status, registry_note = app.registry_authenticated_status("registry.lab.local")
+
+        assert prism_status == "warn"
+        assert "NUTANIX_PC_USERNAME/NUTANIX_PC_PASSWORD" in prism_note
+        assert registry_status == "warn"
+        assert "ZT_REGISTRY_USERNAME/ZT_REGISTRY_PASSWORD" in registry_note
+    finally:
+        if old_pc_user is not None:
+            os.environ["NUTANIX_PC_USERNAME"] = old_pc_user
+        if old_pc_password is not None:
+            os.environ["NUTANIX_PC_PASSWORD"] = old_pc_password
+        if old_reg_user is not None:
+            os.environ["ZT_REGISTRY_USERNAME"] = old_reg_user
+        if old_reg_password is not None:
+            os.environ["ZT_REGISTRY_PASSWORD"] = old_reg_password
 
 
 def test_dashboard_cli_apply_actions_require_apply_flag():
