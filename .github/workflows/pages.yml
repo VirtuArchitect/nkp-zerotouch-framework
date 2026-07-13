@@ -1,0 +1,46 @@
+name: Publish demo
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - docs/demo/**
+      - .github/workflows/pages.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: gh-pages-demo
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    if: github.repository == 'VirtuArchitect/nkp-zerotouch-framework'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Prepare demo files
+        run: |
+          rm -rf /tmp/nkp-zerotouch-demo
+          mkdir -p /tmp/nkp-zerotouch-demo
+          cp -a docs/demo/. /tmp/nkp-zerotouch-demo/
+          touch /tmp/nkp-zerotouch-demo/.nojekyll
+
+      - name: Publish gh-pages branch
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd /tmp/nkp-zerotouch-demo
+          git init
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .
+          git commit -m "Deploy live demo"
+          git branch -M gh-pages
+          git remote add origin-pages "https://github.com/${GITHUB_REPOSITORY}.git"
+          git -c http.extraheader="AUTHORIZATION: bearer ${GITHUB_TOKEN}" push --force origin-pages gh-pages

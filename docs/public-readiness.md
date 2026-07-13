@@ -7,6 +7,8 @@ Before making this repository public:
 - Confirm all committed configs use placeholder endpoints.
 - Confirm no NKP bundle binaries, image bundles, generated image lists, or proprietary artifacts are committed.
 - Confirm real deployment configs are either private or sanitized.
+- Confirm `docs/demo/` is safe for public review; it is published to the
+  `gh-pages` branch by `.github/workflows/pages.yml`.
 - Review `SECURITY.md`.
 - Add a GitHub repository description that states this is an unofficial automation framework.
 

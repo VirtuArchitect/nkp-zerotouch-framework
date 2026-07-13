@@ -44,6 +44,9 @@ foreach ($relativePath in $trackedFiles) {
         if ($match.Line -match "ZT_BOOTSTRAP_TOKEN:\s*\$\{ZT_BOOTSTRAP_TOKEN:") {
             continue
         }
+        if ($match.Line -match "GITHUB_TOKEN:\s*\$\{\{\s*secrets\.GITHUB_TOKEN\s*\}\}") {
+            continue
+        }
         $findings += [ordered]@{
             file = $relativePath
             line = $match.LineNumber
