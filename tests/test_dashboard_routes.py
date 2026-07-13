@@ -124,7 +124,7 @@ def test_dashboard_pages_and_api_routes():
         status, _, _ = request(no_redirect_opener, base_url, "/login", {"username": "dashboard-smoke", "password": "DashboardSmoke-Local-123!"}, allow_error=True)
         assert status == 303
 
-        page_paths = ["/", "/setup", "/plan-review", "/kubeconfig", "/drift", "/locks", "/change-records", "/backups", "/restore", "/production-readiness", "/release-channels"]
+        page_paths = ["/", "/setup", "/plan-review", "/kubeconfig", "/drift", "/locks", "/change-records", "/backups", "/restore", "/evidence", "/production-readiness", "/release-channels"]
         configs = app.env_configs()
         if configs:
             page_paths.append(f"/environment/view?config={urllib.parse.quote(str(configs[0]))}")
@@ -136,7 +136,7 @@ def test_dashboard_pages_and_api_routes():
             assert "NKP ZeroTouch" in body
             assert "data-theme-toggle" in body
 
-        for path in ["/api/status", "/api/preflight", "/api/environments", "/api/jobs", "/api/locks", "/api/change-records", "/api/production-readiness"]:
+        for path in ["/api/status", "/api/preflight", "/api/evidence", "/api/environments", "/api/jobs", "/api/locks", "/api/change-records", "/api/production-readiness"]:
             status, content_type, body = request(opener, base_url, path)
             assert status == 200
             assert "application/json" in content_type
@@ -174,6 +174,41 @@ def test_preflight_evidence_records_summarize_endpoint_status(tmp_path):
         assert records[0]["summary"]["warnings"] == 1
         assert records[0]["endpoints"][0]["name"] == "Prism Central"
         assert records[0]["endpoints"][0]["status"] == "warn"
+    finally:
+        app.ZT = original_zt
+
+
+def test_evidence_packs_read_manifest_and_archive(tmp_path):
+    original_zt = app.ZT
+    app.ZT = tmp_path / ".zt"
+    try:
+        pack_dir = app.ZT / "evidence" / "lab-connected-20260713-120000"
+        pack_dir.mkdir(parents=True)
+        archive = app.ZT / "evidence" / "lab-connected-20260713-120000.zip"
+        archive.write_text("archive placeholder", encoding="utf-8")
+        app.write_json(
+            pack_dir / "evidence-manifest.json",
+            {
+                "createdAt": "2026-07-13T12:00:00Z",
+                "environment": "lab-connected",
+                "type": "connected",
+                "cluster": "nkp-mgmt-connected",
+                "redaction": {
+                    "rawKubeconfigExcluded": True,
+                    "secretValuesExcluded": True,
+                    "operatorReviewRequired": True,
+                },
+                "files": ["environment/reports/verification-evidence.json"],
+            },
+        )
+
+        packs = app.evidence_packs()
+
+        assert len(packs) == 1
+        assert packs[0]["environment"] == "lab-connected"
+        assert packs[0]["archive"] == str(archive)
+        assert packs[0]["fileCount"] == 1
+        assert packs[0]["redaction"]["rawKubeconfigExcluded"] is True
     finally:
         app.ZT = original_zt
 
