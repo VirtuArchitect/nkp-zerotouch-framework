@@ -213,6 +213,69 @@ PY
   fi
 }
 
+write_preflight_evidence() {
+  local output_root
+  output_root="$("$python_bin" - <<'PY'
+from pathlib import Path
+print(Path.cwd() / ".zt" / "preflight")
+PY
+)"
+  mkdir -p "$output_root"
+  "$python_bin" - "$config_path" "$environment_name" "$environment_type" "$prism_endpoint" "$registry_endpoint" "$failures" "$warnings" "$output_root" <<'PY'
+import json
+import re
+import socket
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+from urllib.parse import urlparse
+
+config, env_name, env_type, prism, registry, failures, warnings, output_root = sys.argv[1:]
+
+def safe_key(value):
+    value = value or Path(config).stem
+    key = re.sub(r"[^A-Za-z0-9_-]+", "-", value).strip("-").lower()
+    return key or "unknown"
+
+def probe(name, endpoint, default_port, required):
+    result = {"name": name, "endpoint": endpoint or "", "required": required, "status": "warn", "detail": "not configured"}
+    if not endpoint:
+        result["status"] = "fail" if required else "warn"
+        return result
+    if ".example.com" in endpoint:
+        result["detail"] = "placeholder endpoint"
+        return result
+    try:
+        value = endpoint if "://" in endpoint else f"tcp://{endpoint}"
+        parsed = urlparse(value)
+        host = parsed.hostname
+        port = parsed.port or default_port
+        if not host:
+            raise ValueError("host missing")
+        with socket.create_connection((host, port), timeout=3):
+            pass
+        result.update({"status": "pass", "detail": f"{host}:{port}"})
+    except Exception as exc:
+        result.update({"status": "warn", "detail": str(exc)})
+    return result
+
+endpoints = [probe("Prism Central", prism, 9440, True)]
+if env_type == "air-gapped":
+    endpoints.append(probe("Registry", registry, 443, True))
+evidence = {
+    "capturedAt": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+    "config": config,
+    "environment": env_name,
+    "type": env_type,
+    "summary": {"failures": int(failures), "warnings": int(warnings)},
+    "endpoints": endpoints,
+}
+path = Path(output_root) / f"{safe_key(env_name)}.json"
+path.write_text(json.dumps(evidence, indent=2) + "\n", encoding="utf-8")
+print(path)
+PY
+}
+
 bundle_file() {
   local bundle_path="$1"
   local relative_path="$2"
@@ -829,6 +892,8 @@ case "$command_name" in
     fi
 
     printf '\nValidation summary: %s failure(s), %s warning(s).\n' "$failures" "$warnings"
+    evidence_path="$(write_preflight_evidence)"
+    check PASS "Wrote preflight evidence: $evidence_path"
 
     if [[ "$failures" -gt 0 ]]; then
       exit 1

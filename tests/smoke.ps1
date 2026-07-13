@@ -5,6 +5,9 @@ param(
 $ErrorActionPreference = "Stop"
 $null = [scriptblock]::Create((Get-Content -Raw .\scripts\zt.ps1))
 .\scripts\zt.ps1 validate -Config $Config
+if (-not (Get-ChildItem -Path ".\.zt\preflight" -Filter "*.json" -ErrorAction SilentlyContinue | Select-Object -First 1)) {
+    throw "Expected preflight evidence was not written."
+}
 .\scripts\zt.ps1 prepare -Config $Config
 .\scripts\zt.ps1 generate -Config $Config
 .\scripts\zt.ps1 registry -Config $Config

@@ -7,6 +7,7 @@ python_bin="${PYTHON_BIN:-python3}"
 bash -n ./scripts/zt.sh
 "$python_bin" ./tools/zt_config.py validate --config "$config" >/dev/null
 ./scripts/zt.sh validate --config "$config"
+test -n "$(find .zt/preflight -name '*.json' -print -quit)"
 ./scripts/zt.sh prepare --config "$config"
 ./scripts/zt.sh generate --config "$config"
 ./scripts/zt.sh registry --config "$config"

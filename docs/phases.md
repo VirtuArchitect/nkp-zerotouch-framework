@@ -5,6 +5,8 @@ The framework runs NKP deployment work in explicit phases. Infrastructure-changi
 ## validate
 
 Checks environment type, bundle type, bundle contents, mode-specific settings, and local tools.
+It also writes structured preflight evidence under `.zt/preflight/<environment>.json`,
+including the validation summary and redacted endpoint reachability metadata.
 
 ## prepare
 

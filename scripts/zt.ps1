@@ -239,6 +239,91 @@ function Test-TcpEndpoint {
     }
 }
 
+function Get-EndpointEvidence {
+    param(
+        [string]$Name,
+        [string]$Endpoint,
+        [int]$DefaultPort,
+        [bool]$Required
+    )
+
+    $result = [ordered]@{
+        name = $Name
+        endpoint = if ($Endpoint) { $Endpoint } else { "" }
+        required = $Required
+        status = "warn"
+        detail = "not configured"
+    }
+    if ([string]::IsNullOrWhiteSpace($Endpoint)) {
+        if ($Required) {
+            $result.status = "fail"
+        }
+        return $result
+    }
+    if ($Endpoint -match "\.example\.com") {
+        $result.detail = "placeholder endpoint"
+        return $result
+    }
+    try {
+        $uri = if ($Endpoint -match "^\w+://") { [uri]$Endpoint } else { [uri]"tcp://$Endpoint" }
+        $hostName = $uri.Host
+        $port = if ($uri.Port -gt 0) { $uri.Port } else { $DefaultPort }
+        $tcp = New-Object System.Net.Sockets.TcpClient
+        $async = $tcp.BeginConnect($hostName, $port, $null, $null)
+        if ($async.AsyncWaitHandle.WaitOne(3000, $false)) {
+            $tcp.EndConnect($async)
+            $result.status = "pass"
+            $result.detail = "${hostName}:${port}"
+        }
+        else {
+            $result.detail = "connection timed out"
+        }
+        $tcp.Close()
+    }
+    catch {
+        $result.detail = $_.Exception.Message
+    }
+    return $result
+}
+
+function Write-PreflightEvidence {
+    param(
+        [string]$ConfigPath,
+        [string]$EnvironmentName,
+        [string]$EnvironmentType,
+        [string]$PrismEndpoint,
+        [string]$RegistryEndpoint
+    )
+
+    $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
+    $outputRoot = Join-Path $repoRoot ".zt\preflight"
+    New-ZtDirectory -Path $outputRoot
+    $safeName = if ($EnvironmentName) { $EnvironmentName.ToLowerInvariant() -replace "[^a-z0-9_-]+", "-" } else { [IO.Path]::GetFileNameWithoutExtension($ConfigPath).ToLowerInvariant() -replace "[^a-z0-9_-]+", "-" }
+    if (-not $safeName) {
+        $safeName = "unknown"
+    }
+    $endpoints = @(
+        (Get-EndpointEvidence -Name "Prism Central" -Endpoint $PrismEndpoint -DefaultPort 9440 -Required $true)
+    )
+    if ($EnvironmentType -eq "air-gapped") {
+        $endpoints += Get-EndpointEvidence -Name "Registry" -Endpoint $RegistryEndpoint -DefaultPort 443 -Required $true
+    }
+    $evidence = [ordered]@{
+        capturedAt = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+        config = $ConfigPath
+        environment = $EnvironmentName
+        type = $EnvironmentType
+        summary = [ordered]@{
+            failures = $script:ValidationFailures
+            warnings = $script:ValidationWarnings
+        }
+        endpoints = $endpoints
+    }
+    $path = Join-Path $outputRoot "$safeName.json"
+    $evidence | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $path -Encoding utf8
+    return $path
+}
+
 function Test-NkpBundle {
     param(
         [string]$BundlePath,
@@ -369,6 +454,8 @@ function Invoke-Validate {
 
     Write-Host ""
     Write-Host "Validation summary: $script:ValidationFailures failure(s), $script:ValidationWarnings warning(s)."
+    $evidencePath = Write-PreflightEvidence -ConfigPath $ConfigPath -EnvironmentName $environmentName -EnvironmentType $environmentType -PrismEndpoint $prismCentralEndpoint -RegistryEndpoint $registryEndpoint
+    Write-Check -Status "PASS" -Message "Wrote preflight evidence: $evidencePath"
 
     if ($script:ValidationFailures -gt 0) {
         exit 1
