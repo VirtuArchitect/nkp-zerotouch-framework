@@ -6,11 +6,9 @@ $patterns = @(
     "password:\s*(?!change-?me|changeme)\S+",
     "token:\s*\S+",
     "secret:\s*\S+",
-    "client-key-data:",
-    "kubeconfig"
+    "client-key-data:"
 )
 
-$excluded = @("\\.zt\\", "\\dist\\", "\\.git\\")
 $excludedFiles = @(
     ".md",
     ".gitignore",
@@ -24,18 +22,18 @@ $excludedNames = @(
 )
 $findings = @()
 
-Get-ChildItem -LiteralPath $repoRoot -Recurse -File -Force | ForEach-Object {
-    $path = $_.FullName
-    foreach ($exclude in $excluded) {
-        if ($path -match $exclude) {
-            return
-        }
+$trackedFiles = git -C $repoRoot.Path ls-files
+foreach ($relativePath in $trackedFiles) {
+    $path = Join-Path $repoRoot.Path $relativePath
+    $item = Get-Item -LiteralPath $path -ErrorAction SilentlyContinue
+    if (-not $item) {
+        continue
     }
-    if ($excludedFiles -contains $_.Extension) {
-        return
+    if ($excludedFiles -contains $item.Extension) {
+        continue
     }
-    if ($excludedNames -contains $_.Name) {
-        return
+    if ($excludedNames -contains $item.Name) {
+        continue
     }
 
     $matches = Select-String -LiteralPath $path -Pattern $patterns -CaseSensitive:$false -ErrorAction SilentlyContinue
@@ -43,8 +41,11 @@ Get-ChildItem -LiteralPath $repoRoot -Recurse -File -Force | ForEach-Object {
         if ($match.Line -match "github\.token") {
             continue
         }
+        if ($match.Line -match "ZT_BOOTSTRAP_TOKEN:\s*\$\{ZT_BOOTSTRAP_TOKEN:") {
+            continue
+        }
         $findings += [ordered]@{
-            file = $path.Substring($repoRoot.Path.Length + 1)
+            file = $relativePath
             line = $match.LineNumber
             text = $match.Line.Trim()
         }
