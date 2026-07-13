@@ -13,3 +13,5 @@ Additional inputs:
 - Optional registry mirror endpoint.
 
 Generated deploy assets include proxy-related NKP flags when configured.
+
+Provider contract changes should follow `../authoring-guide.md`.

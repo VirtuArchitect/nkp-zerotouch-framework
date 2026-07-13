@@ -6,6 +6,8 @@ This roadmap captures public follow-up issues that should stay visible even when
 
 ### Add ADRs for architecture-sensitive changes
 
+Status: implemented baseline in `docs/architecture/decisions/`.
+
 Create initial architecture decision records under `docs/architecture/decisions/` for current baseline choices:
 
 - Local `.zt` state instead of a central database by default.
@@ -32,6 +34,8 @@ Acceptance criteria:
 
 ### Add provider implementation guides
 
+Status: implemented baseline in `providers/authoring-guide.md`.
+
 Provider folders define current extension boundaries, but new contributors need a repeatable implementation guide.
 
 Acceptance criteria:
@@ -41,6 +45,8 @@ Acceptance criteria:
 - The guide explains how connected, proxied, and air-gapped modes differ.
 
 ### Add data-flow diagrams to the README
+
+Status: implemented baseline in `README.md`.
 
 The README now explains the mental model in prose. Add a compact architecture diagram or link block near the top for visual readers.
 
@@ -52,6 +58,8 @@ Acceptance criteria:
 
 ### Strengthen restore execution controls
 
+Status: documented baseline in `docs/restore-controls.md`.
+
 Restore planning exists, but restore execution remains intentionally manual. Define the next control layer before adding any automated restore apply behavior.
 
 Acceptance criteria:
@@ -61,6 +69,8 @@ Acceptance criteria:
 - No restore apply automation is added without tests and security review.
 
 ### Publish an architecture review checklist
+
+Status: implemented baseline in `docs/architecture-review-checklist.md`.
 
 Create a checklist for reviewing future changes that affect state, generated artifacts, provider contracts, dashboard authorization, or apply semantics.
 

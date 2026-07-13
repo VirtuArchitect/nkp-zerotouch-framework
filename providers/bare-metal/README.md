@@ -16,3 +16,5 @@ Required design items before implementation:
 
 Until these items are implemented, bare metal should remain provider intent
 only and should not be used for live apply.
+
+Provider contract changes should follow `../authoring-guide.md`.

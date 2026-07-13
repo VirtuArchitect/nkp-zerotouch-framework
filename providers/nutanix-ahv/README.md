@@ -20,3 +20,5 @@ Primary inputs:
 
 Current implementation lives in `scripts/zt.ps1`, `scripts/zt.sh`, and
 `tools/zt_config.py`.
+
+Provider contract changes should follow `../authoring-guide.md`.

@@ -38,6 +38,18 @@ The framework is organized around a plan-first deployment flow:
 
 The CLI is the execution surface. The dashboard is the local operations and governance surface. The static live demo is a visual prototype of that console.
 
+```mermaid
+flowchart LR
+  YAML["Environment YAML"] --> CLI["CLI phases"]
+  CLI --> State["Local .zt state"]
+  State --> Dashboard["Dashboard governance"]
+  Dashboard --> Gate["Review and approval gates"]
+  Gate --> Apply["Guarded apply commands"]
+  State --> Demo["Static public demo"]
+```
+
+The public demo mirrors the dashboard experience only; it does not read local `.zt` state or run apply commands.
+
 ## Engineering Quality
 
 This project follows a production-grade quality bar. Changes are expected to
@@ -133,8 +145,10 @@ Additional operational phases are available for secrets, backup, upgrade plannin
 - `docs/roadmap.md`
 - `docs/dashboard.md`
 - `docs/architecture.md`
+- `docs/architecture-review-checklist.md`
 - `docs/architecture/data-flow.md`
 - `docs/architecture/deployment-boundaries.md`
+- `docs/restore-controls.md`
 - `docs/container-runner.md`
 - `docs/operational-readiness.md`
 - `docs/enterprise-controls.md`
