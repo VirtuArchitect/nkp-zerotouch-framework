@@ -146,3 +146,122 @@ def test_dashboard_cli_destroy_requires_confirmation_flag():
     assert config.name == "connected.example.yaml"
     assert apply is True
     assert confirm_destroy is True
+
+
+def test_plan_review_approval_requires_hashes(tmp_path):
+    original_zt = app.ZT
+    original_locks = app.LOCKS
+    original_change_records = app.CHANGE_RECORDS
+    app.ZT = tmp_path / ".zt"
+    app.LOCKS = app.ZT / "locks"
+    app.CHANGE_RECORDS = app.ZT / "change-records"
+    try:
+        env_name = "hashless-review"
+        state = app.env_state(env_name)
+        generated = state["base"] / "generated"
+        generated.mkdir(parents=True)
+        (generated / "deploy-plan.md").write_text("plan\n", encoding="utf-8")
+        app.write_json(state["base"] / "state" / "generate.json", {"generated": True})
+        app.write_json(state["base"] / "state" / "plan-review.json", {"status": "approved", "reviewedBy": "admin"})
+
+        label, status = app.plan_review_status(env_name, app.env_state(env_name))
+
+        assert status == "warn"
+        assert "hash" in label
+    finally:
+        app.ZT = original_zt
+        app.LOCKS = original_locks
+        app.CHANGE_RECORDS = original_change_records
+
+
+def test_production_gate_blocks_verification_warnings(tmp_path):
+    original_zt = app.ZT
+    original_locks = app.LOCKS
+    original_change_records = app.CHANGE_RECORDS
+    app.ZT = tmp_path / ".zt"
+    app.LOCKS = app.ZT / "locks"
+    app.CHANGE_RECORDS = app.ZT / "change-records"
+    try:
+        config = tmp_path / "configs" / "environments" / "verified-warning.yaml"
+        config.parent.mkdir(parents=True)
+        config.write_text(
+            """
+environment:
+  name: verified-warning
+  type: connected
+nkp:
+  version: v2.17.1
+  bundleType: standard
+  bundlePath: /bundle
+nutanix:
+  prismCentralEndpoint: https://pc.example.local:9440
+  clusterName: pe
+  subnetName: vlan
+  imageName: image
+cluster:
+  name: cluster
+  controlPlaneEndpointIp: 10.0.0.10
+registry:
+  endpoint: registry.example.local
+""",
+            encoding="utf-8",
+        )
+        env_name = "verified-warning"
+        state = app.env_state(env_name)
+        app.write_json(state["base"] / "state" / "environment.json", {"paths": {"config": str(config)}, "environment": {"name": env_name}})
+        app.write_json(state["base"] / "state" / "generate.json", {"generated": True})
+        generated = state["base"] / "generated"
+        generated.mkdir(parents=True)
+        (generated / "deploy-plan.md").write_text("plan\n", encoding="utf-8")
+        app.write_json(state["base"] / "state" / "plan-review.json", {"status": "approved", "planHashes": app.plan_hashes(env_name)})
+        reports = state["base"] / "reports"
+        reports.mkdir(parents=True)
+        (reports / "verification-summary.md").write_text("- warn: kubeconfig - missing\n", encoding="utf-8")
+        app.write_json(reports / "component-health.json", [{"name": "kubeconfig", "status": "warn", "detail": "missing"}])
+
+        _, _, ok, checks = app.production_gate(config)
+
+        assert ok is False
+        verification = [check for check in checks if check[0] == "Verification"][0]
+        assert verification[1] is False
+        assert "kubeconfig" in verification[2]
+    finally:
+        app.ZT = original_zt
+        app.LOCKS = original_locks
+        app.CHANGE_RECORDS = original_change_records
+
+
+def test_environment_identity_issues_detect_duplicates_and_state_mismatch(tmp_path):
+    original_env_dir = app.ENV_DIR
+    app.ENV_DIR = tmp_path / "configs" / "environments"
+    app.ENV_DIR.mkdir(parents=True)
+    try:
+        existing = app.ENV_DIR / "connected.example.yaml"
+        existing.write_text(
+            """
+environment:
+  name: lab-connected
+  type: connected
+cluster:
+  name: nkp-mgmt-connected
+  controlPlaneEndpointIp: 10.10.10.50
+""",
+            encoding="utf-8",
+        )
+        current = app.ENV_DIR / "lab-new.yaml"
+        data = {
+            "environmentName": "lab-connected",
+            "clusterName": "nkp-mgmt-connected",
+            "controlPlaneEndpointIp": "10.10.10.50",
+            "registryNamespace": "",
+        }
+        state = {"state": {"paths": {"config": str(existing)}, "environment": {"name": "lab-connected"}}}
+
+        issues = app.environment_identity_issues(current, data, state)
+
+        assert any("Environment name" in issue for issue in issues)
+        assert any("Cluster name" in issue for issue in issues)
+        assert any("API endpoint VIP" in issue for issue in issues)
+        assert any("prepared from connected.example.yaml" in issue for issue in issues)
+    finally:
+        app.ENV_DIR = original_env_dir
