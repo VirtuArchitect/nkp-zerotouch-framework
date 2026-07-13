@@ -11,6 +11,17 @@ bash -n ./scripts/zt.sh
 ./scripts/zt.sh generate --config "$config"
 ./scripts/zt.sh registry --config "$config"
 ./scripts/zt.sh deploy --config "$config"
+kubeconfig_tmp="$(mktemp)"
+cat >"$kubeconfig_tmp" <<'EOF'
+apiVersion: v1
+kind: Config
+clusters: []
+contexts: []
+users: []
+EOF
+./scripts/zt.sh kubeconfig --config "$config" --kubeconfig "$kubeconfig_tmp"
+rm -f "$kubeconfig_tmp"
 ./scripts/zt.sh verify --config "$config"
+test -n "$(find .zt/environments -path '*/state/kubeconfig.json' -print -quit)"
 ./scripts/zt.sh runs --config "$config"
 echo "Bash smoke test completed."
