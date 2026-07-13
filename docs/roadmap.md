@@ -23,7 +23,10 @@ Acceptance criteria:
 
 ### Complete OIDC authorization-code login flow
 
-The implementation status currently marks OIDC login as partial. Complete the full authorization-code token exchange and session mapping flow.
+The implementation status currently marks OIDC login as partial. Discovery
+metadata readiness is validated in the console; complete the full
+authorization-code token exchange and session mapping flow after approving a
+JWT/JWKS-capable runtime dependency.
 
 Acceptance criteria:
 
