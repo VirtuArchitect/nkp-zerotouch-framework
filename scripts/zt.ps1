@@ -1,6 +1,6 @@
 param(
     [Parameter(Position = 0)]
-    [ValidateSet("validate", "prepare", "generate", "registry", "deploy", "verify", "kubeconfig", "secrets", "backup", "upgrade", "destroy", "runs", "ci")]
+    [ValidateSet("validate", "prepare", "generate", "registry", "deploy", "verify", "kubeconfig", "secrets", "backup", "upgrade", "destroy", "runs", "evidence", "ci")]
     [string]$Command = "validate",
 
     [Parameter(Mandatory = $true)]
@@ -1129,6 +1129,90 @@ function Invoke-Runs {
     Write-Check -Status "PASS" -Message "Captured run summary: $runDir"
 }
 
+function Invoke-Evidence {
+    param([string]$ConfigPath)
+
+    $context = Get-ZtContext -ConfigPath $ConfigPath
+    Assert-Prepared -Context $context
+
+    $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+    $evidenceRoot = Join-Path $context.repoRoot ".zt\evidence"
+    $evidenceDir = Join-Path $evidenceRoot "$($context.environmentName)-$stamp"
+    New-ZtDirectory -Path (Join-Path $evidenceDir "environment")
+    New-ZtDirectory -Path (Join-Path $evidenceDir "preflight")
+    New-ZtDirectory -Path (Join-Path $evidenceDir "runs")
+
+    $preflight = Join-Path $context.repoRoot ".zt\preflight\$($context.environmentName).json"
+    if (Test-Path -LiteralPath $preflight) {
+        Copy-Item -LiteralPath $preflight -Destination (Join-Path $evidenceDir "preflight") -Force
+    }
+
+    foreach ($dirName in @("generated", "reports", "logs")) {
+        $source = Join-Path $context.environmentRoot $dirName
+        if (Test-Path -LiteralPath $source) {
+            Copy-Item -LiteralPath $source -Destination (Join-Path $evidenceDir "environment\$dirName") -Recurse -Force
+        }
+    }
+
+    $stateTarget = Join-Path $evidenceDir "environment\state"
+    New-ZtDirectory -Path $stateTarget
+    foreach ($fileName in @("environment.json", "staged-tools.json", "generate.json", "registry.json", "secrets.json", "kubeconfig.json")) {
+        $source = Join-Path $context.stateDir $fileName
+        if (Test-Path -LiteralPath $source) {
+            Copy-Item -LiteralPath $source -Destination (Join-Path $stateTarget $fileName) -Force
+        }
+    }
+
+    $runsRoot = Join-Path $context.repoRoot ".zt\runs"
+    if (Test-Path -LiteralPath $runsRoot) {
+        Get-ChildItem -LiteralPath $runsRoot -Directory | ForEach-Object {
+            $summaryPath = Join-Path $_.FullName "summary.json"
+            if (-not (Test-Path -LiteralPath $summaryPath)) {
+                return
+            }
+            try {
+                $summary = Get-Content -LiteralPath $summaryPath -Raw | ConvertFrom-Json
+            }
+            catch {
+                return
+            }
+            if ($summary.environment -eq $context.environmentName) {
+                Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $evidenceDir "runs\$($_.Name)") -Recurse -Force
+            }
+        }
+    }
+
+    $files = Get-ChildItem -LiteralPath $evidenceDir -Recurse -File | ForEach-Object {
+        $_.FullName.Substring($evidenceDir.Length + 1).Replace("\", "/")
+    } | Sort-Object
+    $manifest = [ordered]@{
+        createdAt = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+        environment = $context.environmentName
+        type = $context.environmentType
+        cluster = $context.clusterName
+        config = $ConfigPath
+        redaction = [ordered]@{
+            rawKubeconfigExcluded = $true
+            secretValuesExcluded = $true
+            operatorReviewRequired = $true
+        }
+        files = $files
+    }
+    $manifest | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $evidenceDir "evidence-manifest.json") -Encoding utf8
+    @"
+# NKP ZeroTouch Evidence Pack
+
+Environment: `$($context.environmentName)`
+
+This pack is intended for lab review and change evidence. It excludes raw kubeconfig and local secret values. Review generated plans, logs, and endpoint metadata before sharing outside the lab.
+"@ | Set-Content -LiteralPath (Join-Path $evidenceDir "README.md") -Encoding utf8
+
+    $archivePath = "$evidenceDir.zip"
+    Compress-Archive -LiteralPath $evidenceDir -DestinationPath $archivePath -Force
+    Write-Check -Status "PASS" -Message "Created evidence archive: $archivePath"
+    Write-Check -Status "PASS" -Message "Created evidence pack: $evidenceDir"
+}
+
 function Invoke-Ci {
     param([string]$ConfigPath)
 
@@ -1184,6 +1268,9 @@ switch ($Command) {
     }
     "runs" {
         Invoke-Runs -ConfigPath $Config
+    }
+    "evidence" {
+        Invoke-Evidence -ConfigPath $Config
     }
     "ci" {
         Invoke-Ci -ConfigPath $Config

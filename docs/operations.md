@@ -63,3 +63,38 @@ Output:
   summary.json
   summary.md
 ```
+
+## evidence
+
+Creates a shareable lab evidence pack after validate, prepare, generate, and
+optional verify.
+
+PowerShell:
+
+```powershell
+.\scripts\zt.ps1 evidence -Config .\configs\environments\connected.example.yaml
+```
+
+Bash:
+
+```bash
+./scripts/zt.sh evidence --config ./configs/environments/connected.example.yaml
+```
+
+Output:
+
+```text
+.zt/evidence/<environment>-<timestamp>/
+  README.md
+  evidence-manifest.json
+  preflight/
+  environment/generated/
+  environment/reports/
+  environment/logs/
+  environment/state/
+  runs/
+```
+
+The pack excludes raw kubeconfig and local secret values. Review the archive
+before sharing because generated plans and logs can still contain environment
+names, endpoints, VIPs, and topology.

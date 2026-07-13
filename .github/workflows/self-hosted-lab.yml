@@ -67,6 +67,7 @@ jobs:
           if [[ "$RUN_VERIFY" == "true" ]]; then
             ./scripts/zt.sh verify --config "$CONFIG_PATH"
           fi
+          ./scripts/zt.sh evidence --config "$CONFIG_PATH"
 
       - name: PowerShell lab smoke
         if: ${{ inputs.shell == 'powershell' }}
@@ -82,6 +83,7 @@ jobs:
           if ($env:RUN_VERIFY -eq "true") {
             ./scripts/zt.ps1 verify -Config $env:CONFIG_PATH
           }
+          ./scripts/zt.ps1 evidence -Config $env:CONFIG_PATH
 
       - name: Upload lab evidence
         if: always()
@@ -95,5 +97,6 @@ jobs:
             .zt/environments/**/state/*.json
             .zt/jobs/**
             .zt/runs/**
+            .zt/evidence/**
           if-no-files-found: ignore
           retention-days: 14

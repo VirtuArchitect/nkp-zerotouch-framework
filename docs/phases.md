@@ -100,3 +100,14 @@ Runs local syntax and example smoke checks.
 ## runs
 
 Captures a timestamped run summary under `.zt/runs/`.
+
+## evidence
+
+Creates a timestamped evidence pack under `.zt/evidence/` for lab review and
+change evidence. The pack includes preflight metadata, generated plans, reports,
+logs, selected redacted state files, run summaries, an `evidence-manifest.json`,
+and an archive when native archive tooling is available.
+
+The evidence pack excludes raw `state/kubeconfig` and local secret values.
+Operators should still review generated plans, logs, endpoint metadata, and
+cluster topology before sharing the pack outside the lab.

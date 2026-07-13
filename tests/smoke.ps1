@@ -30,4 +30,8 @@ if (-not (Get-ChildItem -Path ".\.zt\environments" -Recurse -Filter "verificatio
     throw "Expected verification evidence was not written."
 }
 .\scripts\zt.ps1 runs -Config $Config
+.\scripts\zt.ps1 evidence -Config $Config
+if (-not (Get-ChildItem -Path ".\.zt\evidence" -Recurse -Filter "evidence-manifest.json" -ErrorAction SilentlyContinue | Select-Object -First 1)) {
+    throw "Expected evidence manifest was not written."
+}
 Write-Host "PowerShell smoke test completed."
