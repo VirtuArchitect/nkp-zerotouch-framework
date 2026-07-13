@@ -32,6 +32,26 @@ class ProbeHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
 
+class JsonHandler(BaseHTTPRequestHandler):
+    expected_path = "/"
+    payload = {}
+
+    def log_message(self, format, *args):
+        return
+
+    def do_GET(self):
+        if self.path != type(self).expected_path:
+            self.send_response(404)
+            self.end_headers()
+            return
+        body = app.json.dumps(type(self).payload).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
 def start_probe_server(expected_path, expected_auth):
     class Handler(ProbeHandler):
         pass
@@ -44,6 +64,18 @@ def start_probe_server(expected_path, expected_auth):
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     return server, Handler
+
+
+def start_json_server(expected_path, payload):
+    class Handler(JsonHandler):
+        pass
+
+    Handler.expected_path = expected_path
+    Handler.payload = payload
+    server = app.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server
 
 
 def request(opener, base_url, path, data=None, allow_error=False, timeout=30):
@@ -293,6 +325,130 @@ def test_authenticated_probes_warn_without_credentials():
             os.environ["ZT_REGISTRY_USERNAME"] = old_reg_user
         if old_reg_password is not None:
             os.environ["ZT_REGISTRY_PASSWORD"] = old_reg_password
+
+
+def test_oidc_readiness_validates_discovery_metadata():
+    server = start_json_server(
+        "/.well-known/openid-configuration",
+        {
+            "issuer": "",
+            "authorization_endpoint": "",
+            "token_endpoint": "",
+            "jwks_uri": "",
+        },
+    )
+    try:
+        issuer = f"http://127.0.0.1:{server.server_address[1]}"
+        JsonHandler.payload = {}
+        server.RequestHandlerClass.payload = {
+            "issuer": issuer,
+            "authorization_endpoint": f"{issuer}/authorize",
+            "token_endpoint": f"{issuer}/token",
+            "jwks_uri": f"{issuer}/jwks.json",
+        }
+        status, note, metadata, checks = app.oidc_readiness({
+            "oidc_enabled": "true",
+            "oidc_issuer": issuer,
+            "oidc_client_id": "zt-console",
+            "oidc_redirect_uri": "http://localhost:18080/login/oidc/callback",
+        })
+
+        assert status == "ok"
+        assert "discovery ready" in note
+        assert metadata["issuer"] == issuer
+        assert all(passed for _, passed, _ in checks)
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_oidc_readiness_warns_on_issuer_mismatch_and_missing_endpoints():
+    server = start_json_server(
+        "/.well-known/openid-configuration",
+        {
+            "issuer": "https://different-issuer.example.test",
+            "authorization_endpoint": "",
+            "token_endpoint": "",
+        },
+    )
+    try:
+        issuer = f"http://127.0.0.1:{server.server_address[1]}"
+        status, note, _, checks = app.oidc_readiness({
+            "oidc_enabled": "true",
+            "oidc_issuer": issuer,
+            "oidc_client_id": "zt-console",
+            "oidc_redirect_uri": "http://localhost:18080/login/oidc/callback",
+        })
+
+        assert status == "warn"
+        assert "metadata incomplete" in note
+        failed = {name: detail for name, passed, detail in checks if not passed}
+        assert failed["Issuer match"] == "https://different-issuer.example.test"
+        assert failed["authorization_endpoint"] == "missing"
+        assert failed["jwks_uri"] == "missing"
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_oidc_login_page_shows_readiness_contract():
+    rbac_path = app.SETTINGS / "rbac.json"
+    integrations_path = app.SETTINGS / "integrations.json"
+    original_rbac = rbac_path.read_text(encoding="utf-8") if rbac_path.exists() else None
+    original_integrations = integrations_path.read_text(encoding="utf-8") if integrations_path.exists() else None
+    server = start_json_server(
+        "/.well-known/openid-configuration",
+        {
+            "issuer": "",
+            "authorization_endpoint": "",
+            "token_endpoint": "",
+            "jwks_uri": "",
+        },
+    )
+    try:
+        issuer = f"http://127.0.0.1:{server.server_address[1]}"
+        server.RequestHandlerClass.payload = {
+            "issuer": issuer,
+            "authorization_endpoint": f"{issuer}/authorize",
+            "token_endpoint": f"{issuer}/token",
+            "jwks_uri": f"{issuer}/jwks.json",
+        }
+        app.save_setting("integrations", {
+            **app.default_integrations(),
+            "oidc_enabled": "true",
+            "oidc_issuer": issuer,
+            "oidc_client_id": "zt-console",
+        })
+
+        dashboard_server = app.ThreadingHTTPServer(("127.0.0.1", 0), app.Handler)
+        thread = threading.Thread(target=dashboard_server.serve_forever, daemon=True)
+        thread.start()
+        base_url = f"http://127.0.0.1:{dashboard_server.server_address[1]}"
+        opener = urllib.request.build_opener()
+
+        status, content_type, body = request(opener, base_url, "/login/oidc")
+
+        assert status == 200
+        assert "text/html" in content_type
+        assert "Readiness Contract" in body
+        assert "authorization_endpoint" in body
+        assert "token validation" in body
+    finally:
+        server.shutdown()
+        server.server_close()
+        try:
+            dashboard_server.shutdown()
+            dashboard_server.server_close()
+        except UnboundLocalError:
+            pass
+        if original_rbac is None:
+            rbac_path.unlink(missing_ok=True)
+        else:
+            rbac_path.write_text(original_rbac, encoding="utf-8")
+        if original_integrations is None:
+            integrations_path.unlink(missing_ok=True)
+        else:
+            integrations_path.write_text(original_integrations, encoding="utf-8")
 
 
 def test_dashboard_cli_apply_actions_require_apply_flag():

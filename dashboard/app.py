@@ -698,14 +698,59 @@ def postgres_status(settings):
 
 
 def oidc_status(settings):
+    status, note, _, _ = oidc_readiness(settings)
+    return status, note
+
+
+def oidc_readiness(settings):
     if settings.get("oidc_enabled") != "true":
-        return "warn", "disabled"
+        return "warn", "disabled", {}, [("OIDC enabled", False, "disabled")]
     issuer = settings.get("oidc_issuer", "").rstrip("/")
     client_id = settings.get("oidc_client_id", "")
+    redirect_uri = settings.get("oidc_redirect_uri", "")
     if not issuer or not client_id:
-        return "warn", "issuer/client ID missing"
-    status, note = http_probe(f"{issuer}/.well-known/openid-configuration")
-    return status, f"discovery {note}"
+        return "warn", "issuer/client ID missing", {}, [
+            ("Issuer", bool(issuer), issuer or "missing"),
+            ("Client ID", bool(client_id), "configured" if client_id else "missing"),
+        ]
+    parsed = urlparse(issuer)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return "warn", "issuer URL invalid", {}, [("Issuer URL", False, issuer)]
+
+    discovery_url = f"{issuer}/.well-known/openid-configuration"
+    checks = [
+        ("Issuer", True, issuer),
+        ("Client ID", True, "configured"),
+        ("Redirect URI", bool(redirect_uri), redirect_uri or "missing"),
+    ]
+    try:
+        request = Request(discovery_url, headers={"Accept": "application/json"}, method="GET")
+        with urlopen(request, timeout=3) as response:
+            metadata = json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        checks.append(("Discovery", False, f"HTTP {exc.code}"))
+        return "warn", f"discovery HTTP {exc.code}", {}, checks
+    except Exception as exc:
+        checks.append(("Discovery", False, str(exc)))
+        return "warn", f"discovery failed: {exc}", {}, checks
+
+    if not isinstance(metadata, dict):
+        checks.append(("Discovery", False, "metadata is not an object"))
+        return "warn", "discovery metadata invalid", {}, checks
+
+    metadata_issuer = str(metadata.get("issuer", "")).rstrip("/")
+    issuer_ok = metadata_issuer == issuer
+    checks.append(("Issuer match", issuer_ok, metadata_issuer or "missing"))
+
+    required = ["authorization_endpoint", "token_endpoint", "jwks_uri"]
+    for key in required:
+        value = str(metadata.get(key, "")).strip()
+        value_parsed = urlparse(value)
+        checks.append((key, value_parsed.scheme in {"http", "https"} and bool(value_parsed.netloc), value or "missing"))
+
+    ready = all(passed for _, passed, _ in checks)
+    note = "discovery ready; token validation not implemented" if ready else "discovery metadata incomplete"
+    return ("ok" if ready else "warn"), note, metadata, checks
 
 
 def vault_status(settings):
@@ -2193,7 +2238,11 @@ class Handler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/login/oidc":
             settings = load_setting("integrations", default_integrations())
-            status, note = oidc_status(settings)
+            status, note, metadata, checks = oidc_readiness(settings)
+            check_rows = "".join(
+                f"<tr><td>{html.escape(name)}</td><td><span class='chip {'ok' if passed else 'warn'}'>{html.escape(detail)}</span></td></tr>"
+                for name, passed, detail in checks
+            )
             body = f"""
 <div class="login-panel">
 <div class="section-head">
@@ -2209,10 +2258,20 @@ class Handler(BaseHTTPRequestHandler):
       <tr><td>OIDC issuer</td><td>{html.escape(settings.get('oidc_issuer', '') or 'not configured')}</td></tr>
       <tr><td>Discovery</td><td><span class="chip {status}">{html.escape(note)}</span></td></tr>
       <tr><td>Client ID</td><td>{html.escape(settings.get('oidc_client_id', '') or 'not configured')}</td></tr>
+      <tr><td>Authorization endpoint</td><td>{html.escape(metadata.get('authorization_endpoint', 'not discovered') if isinstance(metadata, dict) else 'not discovered')}</td></tr>
+      <tr><td>Token endpoint</td><td>{html.escape(metadata.get('token_endpoint', 'not discovered') if isinstance(metadata, dict) else 'not discovered')}</td></tr>
+      <tr><td>JWKS URI</td><td>{html.escape(metadata.get('jwks_uri', 'not discovered') if isinstance(metadata, dict) else 'not discovered')}</td></tr>
     </tbody>
   </table>
 </section>
-<div class="notice">OIDC metadata is configured and probed here. Full authorization-code token exchange is the next implementation step before production SSO can replace local login.</div>
+<section class="panel">
+  <h3>Readiness Contract</h3>
+  <table>
+    <thead><tr><th>Check</th><th>Result</th></tr></thead>
+    <tbody>{check_rows}</tbody>
+  </table>
+</section>
+<div class="notice">OIDC metadata is configured and validated here. Full authorization-code token exchange, signed token validation, and role mapping require a reviewed JWT/OIDC runtime dependency before production SSO can replace local login.</div>
 <a class="back-link" href="/login">Back to local login</a>
 </div>
 """
