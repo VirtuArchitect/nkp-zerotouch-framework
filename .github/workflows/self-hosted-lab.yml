@@ -1,0 +1,99 @@
+name: Self-hosted lab smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      config:
+        description: Environment config path to validate on the lab runner
+        required: true
+        default: configs/environments/connected.example.yaml
+      shell:
+        description: Script surface to exercise
+        required: true
+        default: bash
+        type: choice
+        options:
+          - bash
+          - powershell
+      run_verify:
+        description: Run verify after generate when kubeconfig and tools are available
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  lab-smoke:
+    if: github.repository == 'VirtuArchitect/nkp-zerotouch-framework'
+    runs-on:
+      - self-hosted
+      - nkp
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Validate workflow input
+        shell: bash
+        env:
+          CONFIG_PATH: ${{ inputs.config }}
+        run: |
+          set -euo pipefail
+          case "$CONFIG_PATH" in
+            configs/environments/*.yaml|configs/environments/*.yml) ;;
+            *)
+              echo "Config must be a committed environment file under configs/environments/."
+              exit 1
+              ;;
+          esac
+          if [[ ! -f "$CONFIG_PATH" ]]; then
+            echo "Config file not found: $CONFIG_PATH"
+            exit 1
+          fi
+
+      - name: Bash lab smoke
+        if: ${{ inputs.shell == 'bash' }}
+        shell: bash
+        env:
+          CONFIG_PATH: ${{ inputs.config }}
+          RUN_VERIFY: ${{ inputs.run_verify }}
+        run: |
+          set -euo pipefail
+          ./scripts/zt.sh validate --config "$CONFIG_PATH"
+          ./scripts/zt.sh prepare --config "$CONFIG_PATH"
+          ./scripts/zt.sh generate --config "$CONFIG_PATH"
+          if [[ "$RUN_VERIFY" == "true" ]]; then
+            ./scripts/zt.sh verify --config "$CONFIG_PATH"
+          fi
+
+      - name: PowerShell lab smoke
+        if: ${{ inputs.shell == 'powershell' }}
+        shell: pwsh
+        env:
+          CONFIG_PATH: ${{ inputs.config }}
+          RUN_VERIFY: ${{ inputs.run_verify }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          ./scripts/zt.ps1 validate -Config $env:CONFIG_PATH
+          ./scripts/zt.ps1 prepare -Config $env:CONFIG_PATH
+          ./scripts/zt.ps1 generate -Config $env:CONFIG_PATH
+          if ($env:RUN_VERIFY -eq "true") {
+            ./scripts/zt.ps1 verify -Config $env:CONFIG_PATH
+          }
+
+      - name: Upload lab evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nkp-zt-lab-evidence
+          path: |
+            .zt/preflight/*.json
+            .zt/environments/**/reports/**
+            .zt/environments/**/generated/**
+            .zt/environments/**/state/*.json
+            .zt/jobs/**
+            .zt/runs/**
+          if-no-files-found: ignore
+          retention-days: 14
