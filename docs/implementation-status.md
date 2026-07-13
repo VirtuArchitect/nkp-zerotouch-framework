@@ -17,7 +17,7 @@ This maps the public-readiness and real-deployment tasks to the repository featu
 | Add real CI strategy | Implemented baseline | GitHub Actions syntax/helper/security/package checks and all-environment config validation |
 | Create first real profile | Supported | `scripts/new-env.*` |
 | Dashboard / console | Implemented | `dashboard/app.py`, `docs/dashboard.md` |
-| Live demo | Implemented | GitHub Pages prototype under `docs/demo/` |
+| Live demo | Implemented | GitHub Pages prototype under `docs/demo/`, published to `gh-pages` by `.github/workflows/pages.yml` |
 | CSRF protection | Implemented | authenticated POST forms receive and validate CSRF tokens |
 | Route-level RBAC | Implemented baseline | routes are mapped to permissions and enforced for local roles |
 | Audit events | Implemented baseline | append-only `.zt/audit/events.jsonl` for logins, settings, jobs, approvals, and environment changes |
