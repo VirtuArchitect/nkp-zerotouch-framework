@@ -56,6 +56,6 @@ This maps the public-readiness and real-deployment tasks to the repository featu
 | Self-hosted CI option | Documented | `docs/self-hosted-ci.md` |
 | Better tests | Implemented baseline | parser tests, smoke tests, invalid fixture |
 | Release automation | Implemented | tag workflow creates artifact and GitHub release |
-| Public polish | Implemented baseline | `SECURITY.md`, `CONTRIBUTING.md`, architecture/public-readiness docs |
+| Public polish | Implemented baseline | `SECURITY.md`, `CONTRIBUTING.md`, architecture/public-readiness docs, security threat model, dependency-risk guidance |
 
 Live infrastructure changes still require real Prism Central, registry, network, and credential values.
