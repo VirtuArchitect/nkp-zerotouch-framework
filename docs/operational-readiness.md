@@ -22,6 +22,7 @@ Before live deployment, operations teams must provide:
 - Local account and role management.
 - Environment create, edit, and delete.
 - Environment identity safeguards for duplicate names, cluster names, API VIPs, and registry namespaces.
+- CI validation for every committed environment file and duplicate identity values.
 - CSRF protection on authenticated POST forms.
 - Route-level RBAC for operations, settings, jobs, approvals, artifacts, audit, and health.
 - Safe action execution through background jobs: validate, prepare, generate, verify, backup, runs.
@@ -50,7 +51,7 @@ Before live deployment, operations teams must provide:
 
 Before exposing this console beyond a trusted operator workstation:
 
-- Run schema validation for every environment file in CI and before live apply.
+- Keep all committed environment files passing CI validation before live apply.
 - Keep generated shell scripts produced by the Python renderer; do not hand-edit
   command lines with unquoted environment values.
 - Set `ZT_BOOTSTRAP_TOKEN` whenever the dashboard is bound outside localhost

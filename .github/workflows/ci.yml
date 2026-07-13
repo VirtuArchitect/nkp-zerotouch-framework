@@ -34,12 +34,9 @@ jobs:
           $null = [scriptblock]::Create((Get-Content -Raw scripts/zt.ps1))
           $null = [scriptblock]::Create((Get-Content -Raw tests/smoke.ps1))
 
-      - name: Validate example config schema
+      - name: Validate environment configs
         run: |
-          for file in configs/environments/*.example.yaml; do
-            echo "Checking $file"
-            python tools/zt_config.py validate --config "$file"
-          done
+          python tools/zt_config.py validate-all --directory configs/environments
 
       - name: Python tests
         run: |

@@ -1,5 +1,5 @@
 environment:
-  name: lab-connected
+  name: lab-new
   type: connected
   provider: nutanix-ahv
 
@@ -19,9 +19,9 @@ nutanix:
   project: default
 
 cluster:
-  name: nkp-mgmt-connected
+  name: nkp-mgmt-lab-new
   kubernetesVersion: 1.34.3
-  controlPlaneEndpointIp: 10.10.10.50
+  controlPlaneEndpointIp: 10.10.10.51
   controlPlaneEndpointPort: 6443
   controlPlaneReplicas: 3
   workerReplicas: 3

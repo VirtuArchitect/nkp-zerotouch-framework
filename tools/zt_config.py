@@ -157,6 +157,59 @@ def validate_config(data):
     return {"valid": not errors, "errors": errors, "warnings": warnings}
 
 
+def identity_values(data, config_path):
+    return {
+        "config": str(Path(config_path)),
+        "environment": dotted_get(data, "environment.name"),
+        "cluster": dotted_get(data, "cluster.name"),
+        "api_vip": dotted_get(data, "cluster.controlPlaneEndpointIp"),
+        "registry_namespace": dotted_get(data, "registry.namespace"),
+    }
+
+
+def identity_errors(items):
+    fields = [
+        ("environment", "Environment name"),
+        ("cluster", "Cluster name"),
+        ("api_vip", "API endpoint VIP"),
+        ("registry_namespace", "Registry namespace"),
+    ]
+    errors = []
+    for key, label in fields:
+        seen = {}
+        for item in items:
+            value = str(item.get(key, "")).strip()
+            if not value:
+                continue
+            seen.setdefault(value.lower(), []).append(item)
+        for matches in seen.values():
+            if len(matches) > 1:
+                configs = ", ".join(Path(match["config"]).name for match in matches)
+                errors.append(f"{label} '{matches[0].get(key)}' is duplicated in {configs}")
+    return errors
+
+
+def validate_all_configs(directory):
+    base = Path(directory)
+    files = sorted(list(base.glob("*.yaml")) + list(base.glob("*.yml")))
+    results = []
+    identities = []
+    errors = []
+    for path in files:
+        data = load_yaml(path)
+        result = validate_config(data)
+        results.append({
+            "config": str(path),
+            "valid": result["valid"],
+            "errors": result["errors"],
+            "warnings": result["warnings"],
+        })
+        identities.append(identity_values(data, path))
+        errors.extend(f"{path.name}: {error}" for error in result["errors"])
+    errors.extend(identity_errors(identities))
+    return {"valid": not errors, "errors": errors, "configs": results}
+
+
 def context(data, config_path):
     root = {
         "environmentName": dotted_get(data, "environment.name"),
@@ -524,6 +577,9 @@ def main():
     validate = sub.add_parser("validate")
     validate.add_argument("--config", required=True)
 
+    validate_all = sub.add_parser("validate-all")
+    validate_all.add_argument("--directory", default=str(Path("configs") / "environments"))
+
     get = sub.add_parser("get")
     get.add_argument("--config", required=True)
     get.add_argument("--path", required=True)
@@ -551,6 +607,11 @@ def main():
     try:
         if args.command == "validate":
             print(json.dumps(validate_config(load_yaml(args.config)), indent=2))
+        elif args.command == "validate-all":
+            result = validate_all_configs(args.directory)
+            print(json.dumps(result, indent=2))
+            if not result["valid"]:
+                return 1
         elif args.command == "get":
             print(dotted_get(load_yaml(args.config), args.path))
         elif args.command == "context":
