@@ -26,9 +26,9 @@ Restore dry run should show:
 - Commands an operator must run before any live apply resumes.
 
 The dashboard restore plan generator now records available backup components,
-file counts, active lock status, target identity evidence, blocking signals,
-a restore-specific change record, and JSON metadata for audit. Restore execution
-remains manual.
+file counts, active lock status, target identity evidence, dry-run file impact,
+blocking signals, a restore-specific change record, and JSON metadata for audit.
+Restore execution remains manual.
 
 ## Execution Boundary
 

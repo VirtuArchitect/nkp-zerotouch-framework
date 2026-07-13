@@ -665,6 +665,9 @@ def test_restore_plan_records_controls_and_metadata(tmp_path):
             target.mkdir(parents=True)
             (target / f"{folder}.txt").write_text(folder, encoding="utf-8")
         target_state = app.ZT / "environments" / "restore-lab"
+        (target_state / "state").mkdir(parents=True, exist_ok=True)
+        (target_state / "state" / "state.txt").write_text("current", encoding="utf-8")
+        (target_state / "state" / "target-only.txt").write_text("current only", encoding="utf-8")
         app.write_json(
             target_state / "state" / "environment.json",
             {
@@ -691,10 +694,16 @@ def test_restore_plan_records_controls_and_metadata(tmp_path):
         plan_text = plan_path.read_text(encoding="utf-8")
         assert "Create a fresh backup before restoring: required" in plan_text
         assert "Target Identity Evidence" in plan_text
+        assert "Dry-Run File Impact" in plan_text
+        assert "would overwrite=1" in plan_text
         assert "Keep restore execution manual" in plan_text
         assert "state: present; files=1" in plan_text
         assert metadata["environment"] == "restore-lab"
         assert metadata["identityChecks"][0]["status"] == "pass"
+        assert metadata["dryRunImpacts"][0]["overwriteCount"] == 1
+        assert metadata["dryRunImpacts"][0]["newCount"] == 0
+        assert metadata["dryRunImpacts"][0]["targetOnlyCount"] == 2
+        assert "state.txt" in metadata["dryRunImpacts"][0]["overwritten"]
         assert metadata["changeRecord"]["action"] == "restore-plan"
         assert metadata["changeRecord"]["status"] == "planning"
         assert metadata["requiresCurrentBackup"] is True
