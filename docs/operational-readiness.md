@@ -43,6 +43,7 @@ Before live deployment, operations teams must provide:
 - Runs, artifacts, health checks, and append-only audit visibility from `.zt`.
 - Artifact viewer and diff workflow for generated plans, reports, logs, state, and configs.
 - Local connection, RBAC, database, integration, approval policy, source, inventory, network, provider, and secret-backend settings.
+- Optional file-backed console sessions for local restarts.
 - Enterprise integration contracts and health probes for Postgres, Vault, OIDC, and session-store consistency.
 
 ## Required Production Hardening
@@ -54,7 +55,7 @@ Before exposing this console beyond a trusted operator workstation:
   command lines with unquoted environment values.
 - Set `ZT_BOOTSTRAP_TOKEN` whenever the dashboard is bound outside localhost
   before the first admin account exists.
-- Move from memory sessions to file or Postgres-backed durable session storage.
+- Move from memory sessions to file-backed local sessions or Postgres-backed shared session storage.
 - Connect OIDC/SAML or enterprise SSO to a real identity provider.
 - Complete OIDC authorization-code token exchange for production login.
 - Connect console state to Postgres if multi-user operation is required.

@@ -48,6 +48,7 @@ This maps the public-readiness and real-deployment tasks to the repository featu
 | Environment uniqueness checks | Implemented baseline | environment create/edit blocks duplicate names, cluster names, API VIPs, and registry namespaces |
 | Approval policy | Implemented baseline | per-action approval thresholds, self-approval prevention, production Admin option |
 | Enterprise integrations | Probed baseline | Postgres TCP, Vault health, OIDC discovery, and session-store consistency checks under Settings > Integrations, Health, and Preflight |
+| File session store | Implemented baseline | `session_store=file` persists console sessions under `.zt/settings/sessions.json`; memory remains the default local mode |
 | Kubeconfig capture | Implemented | `kubeconfig` phase |
 | Registry push enhancements | Implemented | CA, insecure, concurrency, existing-tag behavior |
 | Containerized runner | Implemented | `Dockerfile`, `Containerfile`, `docs/container-runner.md` |

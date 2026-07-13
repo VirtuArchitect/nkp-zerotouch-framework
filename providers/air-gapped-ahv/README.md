@@ -15,3 +15,5 @@ Additional inputs:
   behavior.
 
 The registry phase generates a plan and guarded `nkp push bundle` script.
+
+Provider contract changes should follow `../authoring-guide.md`.

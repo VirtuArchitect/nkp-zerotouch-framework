@@ -14,3 +14,5 @@ Each provider should document:
 
 Provider-specific implementation can move here once the shell entrypoints are
 split into reusable provider modules.
+
+Use `authoring-guide.md` before adding or changing a provider contract.

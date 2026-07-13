@@ -40,6 +40,7 @@ Commands/results:
 
 - [ ] Not security-sensitive
 - [ ] Security review completed using `SECURITY_REVIEW.md`
+- [ ] Architecture review completed using `docs/architecture-review-checklist.md`
 - [ ] Secrets/logging checked
 - [ ] File path handling checked
 - [ ] Shell command execution checked
@@ -54,4 +55,3 @@ Notes:
 ## Untested or Residual Risk
 
 -
-
