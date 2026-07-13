@@ -104,7 +104,7 @@ def test_dashboard_pages_and_api_routes():
             assert "NKP ZeroTouch" in body
             assert "data-theme-toggle" in body
 
-        for path in ["/api/status", "/api/environments", "/api/jobs", "/api/locks", "/api/change-records"]:
+        for path in ["/api/status", "/api/environments", "/api/jobs", "/api/locks", "/api/change-records", "/api/production-readiness"]:
             status, content_type, body = request(opener, base_url, path)
             assert status == 200
             assert "application/json" in content_type
@@ -409,6 +409,50 @@ registry:
         verification = [check for check in checks if check[0] == "Verification"][0]
         assert verification[1] is False
         assert "kubeconfig" in verification[2]
+    finally:
+        app.ZT = original_zt
+        app.LOCKS = original_locks
+        app.CHANGE_RECORDS = original_change_records
+
+
+def test_production_gate_payload_serializes_checks(tmp_path):
+    original_zt = app.ZT
+    original_locks = app.LOCKS
+    original_change_records = app.CHANGE_RECORDS
+    app.ZT = tmp_path / ".zt"
+    app.LOCKS = app.ZT / "locks"
+    app.CHANGE_RECORDS = app.ZT / "change-records"
+    try:
+        config = tmp_path / "configs" / "environments" / "payload-lab.yaml"
+        config.parent.mkdir(parents=True)
+        config.write_text(
+            """
+environment:
+  name: payload-lab
+  type: connected
+nkp:
+  version: v2.17.1
+  bundleType: standard
+  bundlePath: /bundle
+nutanix:
+  prismCentralEndpoint: https://pc.example.local:9440
+  clusterName: pe
+  subnetName: vlan
+  imageName: image
+cluster:
+  name: payload-cluster
+  controlPlaneEndpointIp: 10.0.0.20
+""",
+            encoding="utf-8",
+        )
+
+        payload = app.production_gate_payload(config)
+
+        assert payload["name"] == "payload-lab"
+        assert payload["channel"] == "lab"
+        assert payload["ready"] is False
+        assert any(check["name"] == "Plan review" for check in payload["checks"])
+        assert all(set(check) == {"name", "passed", "detail"} for check in payload["checks"])
     finally:
         app.ZT = original_zt
         app.LOCKS = original_locks

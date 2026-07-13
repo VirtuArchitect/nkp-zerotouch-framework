@@ -53,6 +53,7 @@ Deployment readiness sections:
 - `Jobs`: execution queue, approval controls, job detail pages, and captured live logs.
 - `Health`: runner, tool, bundle, Prism, registry, credential environment variables, enterprise integration probes, and state-path readiness.
 - `Artifacts`: generated file browser, viewer, and diff workflow for plans, logs, reports, state, and configs.
+- `/api/production-readiness`: authenticated JSON view of the same production gate checks shown in the console.
 
 Settings sections:
 

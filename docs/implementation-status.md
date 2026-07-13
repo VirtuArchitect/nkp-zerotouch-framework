@@ -29,7 +29,7 @@ This maps the public-readiness and real-deployment tasks to the repository featu
 | Lifecycle/readiness | Implemented baseline | environment table shows lifecycle state and readiness score |
 | Kubeconfig console visibility | Implemented baseline | kubeconfig page shows capture status and command guidance |
 | Provider catalog | Implemented baseline | provider contracts live under `providers/` and are visible in Settings > Providers |
-| API layer | Implemented baseline | authenticated JSON endpoints for status, environments, jobs, logs, locks, and change records |
+| API layer | Implemented baseline | authenticated JSON endpoints for status, environments, jobs, logs, locks, change records, and production readiness |
 | Environment locking | Implemented baseline | environment locks are created for prepare, generate, registry, deploy, upgrade, and destroy jobs |
 | Plan hashing | Implemented baseline | plan review stores hashes and reports stale reviews when generated artifacts change |
 | Change records | Implemented baseline | apply requests create local change records with job ID, requester, plan hashes, and rollback notes |
