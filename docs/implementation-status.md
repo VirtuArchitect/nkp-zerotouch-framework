@@ -39,7 +39,7 @@ This maps the public-readiness and real-deployment tasks to the repository featu
 | Release channel enforcement | Implemented baseline | apply jobs use the higher of action approval count or release-channel approval count |
 | Plan review enforcement | Implemented baseline | apply requests are blocked when review is missing, rejected, or stale |
 | Change record detail | Implemented baseline | change records have detail pages with job link, hashes, requester, status, and rollback notes |
-| Restore planning | Implemented baseline | console generates guarded restore plans from backup manifests |
+| Restore planning | Implemented baseline | console generates guarded restore plans and JSON metadata from backup manifests, including component inventory and lock warnings |
 | Lock cleanup | Implemented baseline | stale locks can be cleared while active locks remain protected |
 | Production readiness gate | Implemented baseline | console reports plan review, backup, drift, channel, and verification readiness |
 | Dashboard route tests | Implemented baseline | pytest route/API smoke coverage for dashboard pages and JSON endpoints |

@@ -40,7 +40,7 @@ Before live deployment, operations teams must provide:
 - Authenticated JSON endpoints for future automation and frontend decoupling.
 - Apply gates that require current plan review and release-channel governance.
 - Production readiness view for review, backup, drift, channel, and verification status.
-- Restore plan generation from backup manifests.
+- Restore plan generation from backup manifests with component inventory, active-lock warnings, and JSON metadata.
 - Runs, artifacts, health checks, and append-only audit visibility from `.zt`.
 - Artifact viewer and diff workflow for generated plans, reports, logs, state, and configs.
 - Local connection, RBAC, database, integration, approval policy, source, inventory, network, provider, and secret-backend settings.
@@ -66,7 +66,7 @@ Before exposing this console beyond a trusted operator workstation:
 - Review and tune role separation for authoring, approving, and executing deployment changes.
 - Confirm approval policy, release-channel gates, and plan-review controls are
   enabled for production channels.
-- Add backup/restore procedures for `.zt` state and future database state.
+- Keep restore execution manual unless approval, lock, metadata, and post-restore verification controls are implemented.
 - Run deployment jobs from an isolated Linux or WSL runner with pinned NKP
   bundles, least-privilege credentials, and controlled network access.
 - Treat dashboard authenticated API health probes as readiness signals; still verify live deployment permissions before apply.
