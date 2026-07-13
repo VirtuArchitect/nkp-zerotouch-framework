@@ -664,21 +664,44 @@ def test_restore_plan_records_controls_and_metadata(tmp_path):
             target = backup_dir / folder
             target.mkdir(parents=True)
             (target / f"{folder}.txt").write_text(folder, encoding="utf-8")
+        target_state = app.ZT / "environments" / "restore-lab"
+        app.write_json(
+            target_state / "state" / "environment.json",
+            {
+                "environment": {"name": "restore-lab", "type": "connected"},
+                "paths": {
+                    "config": str(tmp_path / "restore-lab.yaml"),
+                    "environmentRoot": str(target_state),
+                },
+            },
+        )
         manifest = backup_dir / "backup-manifest.json"
-        app.write_json(manifest, {"environment": "restore-lab", "createdAt": "2026-07-13T12:00:00Z"})
+        app.write_json(
+            manifest,
+            {
+                "environment": "restore-lab",
+                "createdAt": "2026-07-13T12:00:00Z",
+                "source": str(target_state),
+            },
+        )
 
         plan_id, plan_path, metadata_path, metadata = app.build_restore_plan(manifest, {"username": "tester"})
 
         assert plan_id.startswith("restore-")
         plan_text = plan_path.read_text(encoding="utf-8")
         assert "Create a fresh backup before restoring: required" in plan_text
+        assert "Target Identity Evidence" in plan_text
         assert "Keep restore execution manual" in plan_text
         assert "state: present; files=1" in plan_text
         assert metadata["environment"] == "restore-lab"
+        assert metadata["identityChecks"][0]["status"] == "pass"
+        assert metadata["changeRecord"]["action"] == "restore-plan"
+        assert metadata["changeRecord"]["status"] == "planning"
         assert metadata["requiresCurrentBackup"] is True
         assert metadata["manualOnly"] is True
         assert metadata["blocked"] == []
         assert app.read_json(metadata_path)["components"][0]["name"] == "state"
+        assert app.read_json(app.change_record_path(metadata["changeRecord"]["id"]))["restorePlan"] == str(plan_path)
     finally:
         app.ZT = original_zt
         app.LOCKS = original_locks
@@ -706,6 +729,8 @@ def test_restore_plan_flags_active_locks_and_missing_components(tmp_path):
         assert "Confirm no active lock exists: blocked" in plan_text
         assert any("Active lock exists" in item for item in metadata["blocked"])
         assert any("backup components are missing" in item for item in metadata["blocked"])
+        assert any("Identity check failed" in item for item in metadata["blocked"])
+        assert metadata["changeRecord"]["status"] == "blocked"
     finally:
         app.ZT = original_zt
         app.LOCKS = original_locks
