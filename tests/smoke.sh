@@ -23,5 +23,6 @@ EOF
 rm -f "$kubeconfig_tmp"
 ./scripts/zt.sh verify --config "$config"
 test -n "$(find .zt/environments -path '*/state/kubeconfig.json' -print -quit)"
+test -n "$(find .zt/environments -path '*/reports/verification-evidence.json' -print -quit)"
 ./scripts/zt.sh runs --config "$config"
 echo "Bash smoke test completed."

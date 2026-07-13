@@ -56,11 +56,14 @@ Execution requires `-Apply` or `--apply`.
 Writes local verification reports:
 
 - `reports/verification-summary.md`
-- `reports/component-health.json` from PowerShell
+- `reports/component-health.json`
+- `reports/verification-evidence.json`
 
 This verifies local staged artifacts and generated state. When
 `state/kubeconfig` exists, it also captures live `kubectl` and NKP query output
-under `logs/verify-kubectl.log`.
+under `logs/verify-kubectl.log`. The structured evidence manifest records the
+local checks, live verification status, command list, log path, and redacted
+kubeconfig metadata when available.
 
 ## kubeconfig
 

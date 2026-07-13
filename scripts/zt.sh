@@ -483,6 +483,10 @@ verify_phase() {
   assert_prepared
   mkdir -p "$reports_dir"
   local report_path="$reports_dir/verification-summary.md"
+  local evidence_path="$reports_dir/verification-evidence.json"
+  local component_health_path="$reports_dir/component-health.json"
+  local live_status="not-run"
+  local live_log="$logs_dir/verify-kubectl.log"
   {
     echo "# Verification Summary"
     echo
@@ -496,19 +500,70 @@ verify_phase() {
   } >"$report_path"
   if [[ -f "$state_dir/kubeconfig" && -f "$bin_dir/kubectl" ]]; then
     mkdir -p "$logs_dir"
-    local live_status=0
-    "$bin_dir/kubectl" --kubeconfig "$state_dir/kubeconfig" get nodes -o wide >"$logs_dir/verify-kubectl.log" 2>&1 || live_status=$?
-    "$bin_dir/kubectl" --kubeconfig "$state_dir/kubeconfig" get nodes >>"$logs_dir/verify-kubectl.log" 2>&1 || live_status=$?
-    "$bin_dir/kubectl" --kubeconfig "$state_dir/kubeconfig" get pods -A >>"$logs_dir/verify-kubectl.log" 2>&1 || live_status=$?
-    "$bin_dir/kubectl" --kubeconfig "$state_dir/kubeconfig" get pods -A --field-selector=status.phase!=Running,status.phase!=Succeeded >>"$logs_dir/verify-kubectl.log" 2>&1 || true
-    "$bin_dir/nkp" get clusters -A --kubeconfig "$state_dir/kubeconfig" >>"$logs_dir/verify-kubectl.log" 2>&1 || true
-    "$bin_dir/nkp" get appdeployments -A --kubeconfig "$state_dir/kubeconfig" >>"$logs_dir/verify-kubectl.log" 2>&1 || true
+    live_status=0
+    "$bin_dir/kubectl" --kubeconfig "$state_dir/kubeconfig" get nodes -o wide >"$live_log" 2>&1 || live_status=$?
+    "$bin_dir/kubectl" --kubeconfig "$state_dir/kubeconfig" get nodes >>"$live_log" 2>&1 || live_status=$?
+    "$bin_dir/kubectl" --kubeconfig "$state_dir/kubeconfig" get pods -A >>"$live_log" 2>&1 || live_status=$?
+    "$bin_dir/kubectl" --kubeconfig "$state_dir/kubeconfig" get pods -A --field-selector=status.phase!=Running,status.phase!=Succeeded >>"$live_log" 2>&1 || true
+    "$bin_dir/nkp" get clusters -A --kubeconfig "$state_dir/kubeconfig" >>"$live_log" 2>&1 || true
+    "$bin_dir/nkp" get appdeployments -A --kubeconfig "$state_dir/kubeconfig" >>"$live_log" 2>&1 || true
     if [[ "$live_status" -eq 0 ]]; then
-      check PASS "Live kubectl verification log: $logs_dir/verify-kubectl.log"
+      check PASS "Live kubectl verification log: $live_log"
     else
-      check WARN "Live kubectl verification needs review; log: $logs_dir/verify-kubectl.log"
+      check WARN "Live kubectl verification needs review; log: $live_log"
     fi
   fi
+  "$python_bin" - "$environment_name" "$cluster_name" "$environment_root" "$state_dir" "$bin_dir" "$reports_dir" "$logs_dir" "$live_status" "$evidence_path" "$component_health_path" <<'PY'
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+environment, cluster, environment_root, state_dir, bin_dir, reports_dir, logs_dir, live_status, evidence_path, component_health_path = sys.argv[1:]
+state = Path(state_dir)
+bin_path = Path(bin_dir)
+logs = Path(logs_dir)
+checks = [
+    {"name": "prepared workspace", "status": "pass", "detail": environment_root},
+    {"name": "generated config", "status": "pass" if (state / "generate.json").exists() else "warn", "detail": "generate.json"},
+    {"name": "nkp binary", "status": "pass" if (bin_path / "nkp").exists() else "fail", "detail": str(bin_path / "nkp")},
+    {"name": "kubectl binary", "status": "pass" if (bin_path / "kubectl").exists() else "fail", "detail": str(bin_path / "kubectl")},
+    {"name": "kubeconfig", "status": "pass" if (state / "kubeconfig").exists() else "warn", "detail": str(state / "kubeconfig")},
+]
+kubeconfig_metadata = None
+metadata_path = state / "kubeconfig.json"
+if metadata_path.exists():
+    try:
+        kubeconfig_metadata = json.loads(metadata_path.read_text(encoding="utf-8-sig"))
+    except Exception:
+        kubeconfig_metadata = {"error": "unreadable kubeconfig metadata"}
+live_log = logs / "verify-kubectl.log"
+attempted = live_status != "not-run"
+evidence = {
+    "capturedAt": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+    "environment": environment,
+    "cluster": cluster,
+    "checks": checks,
+    "liveVerification": {
+        "attempted": attempted,
+        "status": "pass" if live_status == "0" else ("warn" if attempted else "not-run"),
+        "exitCode": None if not attempted else int(live_status),
+        "log": str(live_log),
+        "commands": [
+            "kubectl get nodes -o wide",
+            "kubectl get nodes",
+            "kubectl get pods -A",
+            "kubectl get pods -A --field-selector=status.phase!=Running,status.phase!=Succeeded",
+            "nkp get clusters -A",
+            "nkp get appdeployments -A",
+        ],
+    },
+    "kubeconfigMetadata": kubeconfig_metadata,
+}
+Path(component_health_path).write_text(json.dumps(checks, indent=2) + "\n", encoding="utf-8")
+Path(evidence_path).write_text(json.dumps(evidence, indent=2) + "\n", encoding="utf-8")
+PY
+  check PASS "Wrote verification evidence: $evidence_path"
   check PASS "Wrote verification report: $report_path"
 }
 

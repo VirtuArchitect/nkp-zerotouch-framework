@@ -23,5 +23,8 @@ Remove-Item -LiteralPath $kubeconfig -Force
 if (-not (Get-ChildItem -Path ".\.zt\environments" -Recurse -Filter "kubeconfig.json" -ErrorAction SilentlyContinue | Select-Object -First 1)) {
     throw "Expected kubeconfig metadata was not written."
 }
+if (-not (Get-ChildItem -Path ".\.zt\environments" -Recurse -Filter "verification-evidence.json" -ErrorAction SilentlyContinue | Select-Object -First 1)) {
+    throw "Expected verification evidence was not written."
+}
 .\scripts\zt.ps1 runs -Config $Config
 Write-Host "PowerShell smoke test completed."
