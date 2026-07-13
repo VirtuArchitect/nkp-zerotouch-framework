@@ -48,11 +48,12 @@ Deployment readiness sections:
 - `Sources`: NKP bundle paths, source path, Git URL/ref, version pin, and checksum metadata.
 - `Inventory`: AHV or future bare-metal node inventory, BMC details, boot mode, and OS image notes.
 - `Network`: management/workload CIDRs, API VIP, ingress range, DNS, NTP, proxy, and IP assignment mode.
-- `Preflight`: console-level readiness matrix across sources, inventory, network, connections, integration probes, uniqueness checks, secrets, and provider.
+- `Preflight`: console-level readiness matrix plus latest `.zt/preflight/` validation evidence across sources, inventory, network, connections, integration probes, uniqueness checks, secrets, and provider.
 - `Pipeline`: visual ZeroTouch flow from source intake through validation, preparation, generation, registry, deploy, verify, and operate.
 - `Jobs`: execution queue, approval controls, job detail pages, and captured live logs.
 - `Health`: runner, tool, bundle, Prism, registry, credential environment variables, enterprise integration probes, and state-path readiness.
 - `Artifacts`: generated file browser, viewer, and diff workflow for plans, logs, reports, state, and configs.
+- `/api/preflight`: authenticated JSON view of console preflight checks and structured validation evidence.
 - `/api/production-readiness`: authenticated JSON view of the same production gate checks shown in the console.
 
 Settings sections:

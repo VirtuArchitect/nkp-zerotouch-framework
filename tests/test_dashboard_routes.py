@@ -136,7 +136,7 @@ def test_dashboard_pages_and_api_routes():
             assert "NKP ZeroTouch" in body
             assert "data-theme-toggle" in body
 
-        for path in ["/api/status", "/api/environments", "/api/jobs", "/api/locks", "/api/change-records", "/api/production-readiness"]:
+        for path in ["/api/status", "/api/preflight", "/api/environments", "/api/jobs", "/api/locks", "/api/change-records", "/api/production-readiness"]:
             status, content_type, body = request(opener, base_url, path)
             assert status == 200
             assert "application/json" in content_type
@@ -148,6 +148,34 @@ def test_dashboard_pages_and_api_routes():
             rbac_path.unlink(missing_ok=True)
         else:
             rbac_path.write_text(original, encoding="utf-8")
+
+
+def test_preflight_evidence_records_summarize_endpoint_status(tmp_path):
+    original_zt = app.ZT
+    app.ZT = tmp_path / ".zt"
+    try:
+        app.write_json(
+            app.ZT / "preflight" / "lab-connected.json",
+            {
+                "capturedAt": "2026-07-13T19:00:00Z",
+                "config": "configs/environments/connected.example.yaml",
+                "environment": "lab-connected",
+                "type": "connected",
+                "summary": {"failures": 0, "warnings": 1},
+                "endpoints": [
+                    {"name": "Prism Central", "endpoint": "https://pc.example.local:9440", "required": True, "status": "warn", "detail": "timed out"}
+                ],
+            },
+        )
+
+        records = app.preflight_evidence_records()
+
+        assert records[0]["environment"] == "lab-connected"
+        assert records[0]["summary"]["warnings"] == 1
+        assert records[0]["endpoints"][0]["name"] == "Prism Central"
+        assert records[0]["endpoints"][0]["status"] == "warn"
+    finally:
+        app.ZT = original_zt
 
 
 def test_dashboard_exposed_bootstrap_requires_token():
