@@ -46,7 +46,7 @@ Linux or WSL:
 - Kommander application repository
 - Konvoy and Kommander image bundles
 - image artifact directory
-- Prism Central endpoint placeholder/reachability
-- air-gapped registry config
+- Prism Central endpoint placeholder/TCP reachability
+- air-gapped registry config and TCP reachability
 - proxied HTTP/HTTPS proxy config
 - local tools: `ssh`, `docker`, `podman`, `openssl`

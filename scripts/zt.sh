@@ -170,6 +170,7 @@ command_available() {
 tcp_endpoint() {
   local endpoint="$1"
   local name="$2"
+  local default_port="${3:-443}"
 
   if [[ -z "$endpoint" ]]; then
     check WARN "$name endpoint is not configured."
@@ -181,7 +182,35 @@ tcp_endpoint() {
     return
   fi
 
-  check INFO "$name reachability check is scaffolded for: $endpoint"
+  local result
+  result="$("$python_bin" - "$endpoint" "$default_port" <<'PY'
+import socket
+import sys
+from urllib.parse import urlparse
+
+endpoint = sys.argv[1]
+default_port = int(sys.argv[2])
+value = endpoint if "://" in endpoint else f"tcp://{endpoint}"
+try:
+    parsed = urlparse(value)
+    host = parsed.hostname
+    port = parsed.port or default_port
+    if not host:
+        raise ValueError("host missing")
+    with socket.create_connection((host, port), timeout=3):
+        pass
+    print(f"PASS|{host}:{port}")
+except Exception as exc:
+    print(f"WARN|{exc}")
+PY
+)"
+  local status="${result%%|*}"
+  local detail="${result#*|}"
+  if [[ "$status" == "PASS" ]]; then
+    check PASS "$name TCP reachable: $detail"
+  else
+    check WARN "$name TCP check failed for $endpoint: $detail"
+  fi
 }
 
 bundle_file() {
@@ -722,12 +751,12 @@ case "$command_name" in
       check WARN "nkp.bundlePath is not set; online tooling must provide NKP binaries."
     fi
 
-    tcp_endpoint "$prism_endpoint" "Prism Central"
+    tcp_endpoint "$prism_endpoint" "Prism Central" 9440
 
     if [[ "$environment_type" == "air-gapped" ]]; then
       required_scalar "registry.endpoint" "$registry_endpoint"
       required_scalar "registry.namespace" "$registry_namespace"
-      tcp_endpoint "$registry_endpoint" "Registry"
+      tcp_endpoint "$registry_endpoint" "Registry" 443
     fi
 
     if [[ "$environment_type" == "proxied" ]]; then
