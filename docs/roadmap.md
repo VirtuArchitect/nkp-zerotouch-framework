@@ -79,3 +79,16 @@ Acceptance criteria:
 - Checklist links to `SECURITY_REVIEW.md`, `CODE_REVIEW.md`, and architecture docs.
 - Checklist calls out generated artifact compatibility and local-state migration concerns.
 - Pull request template links to the checklist.
+
+### Add security operations documentation
+
+Status: implemented baseline in `docs/security/`.
+
+Create the security documentation needed to review public and production-facing
+changes consistently.
+
+Acceptance criteria:
+
+- Threat model documents assets, trust boundaries, threats, and mitigations.
+- Dependency-risk guidance explains when new runtime dependencies are justified.
+- Security review and incident note folders include sanitized note templates.

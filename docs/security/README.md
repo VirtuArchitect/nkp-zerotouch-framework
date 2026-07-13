@@ -21,10 +21,9 @@ Primary references:
 - `../../PENTEST_SCOPE_TEMPLATE.md` for assessment scoping.
 - `../public-readiness.md` for public repository readiness.
 
-Recommended future additions:
+Included security references:
 
 - `threat-model.md`
+- `dependency-risk.md`
 - `security-reviews/`
 - `incident-notes/`
-- `dependency-risk.md`
-
