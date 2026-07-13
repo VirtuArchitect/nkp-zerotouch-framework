@@ -409,6 +409,40 @@ def preflight_checks():
     return checks
 
 
+def preflight_evidence_records(limit=50):
+    root = ZT / "preflight"
+    if not root.exists():
+        return []
+    records = []
+    for path in sorted(root.glob("*.json"), key=lambda item: item.stat().st_mtime, reverse=True):
+        data = read_json(path)
+        if not isinstance(data, dict):
+            continue
+        endpoints = data.get("endpoints") if isinstance(data.get("endpoints"), list) else []
+        endpoint_summary = []
+        for endpoint in endpoints:
+            if not isinstance(endpoint, dict):
+                continue
+            endpoint_summary.append({
+                "name": str(endpoint.get("name", "endpoint")),
+                "status": str(endpoint.get("status", "unknown")),
+                "detail": str(endpoint.get("detail", "")),
+                "required": bool(endpoint.get("required", False)),
+            })
+        records.append({
+            "path": str(path),
+            "capturedAt": str(data.get("capturedAt", "")),
+            "environment": str(data.get("environment", path.stem)),
+            "type": str(data.get("type", "")),
+            "config": str(data.get("config", "")),
+            "summary": data.get("summary", {}) if isinstance(data.get("summary"), dict) else {},
+            "endpoints": endpoint_summary,
+        })
+        if len(records) >= limit:
+            break
+    return records
+
+
 def default_sources():
     return {
         "version": "v2.17.1",
@@ -2440,6 +2474,11 @@ class Handler(BaseHTTPRequestHandler):
                 checks = health_checks()
                 self.send_json({"status": "ok", "checks": [{"name": name, "status": status, "note": note} for name, status, note in checks]})
                 return
+            if parsed.path == "/api/preflight":
+                checks = preflight_checks()
+                evidence = preflight_evidence_records(100)
+                self.send_json({"checks": checks, "evidence": evidence})
+                return
             if parsed.path == "/api/environments":
                 rows = []
                 for config in env_configs():
@@ -3343,15 +3382,30 @@ class Handler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/preflight":
             checks = preflight_checks()
+            evidence = preflight_evidence_records(25)
             ok_count = sum(1 for item in checks if item["status"] == "ok")
             warn_count = len(checks) - ok_count
             rows = "".join(f"<tr><td>{html.escape(item['area'])}</td><td>{html.escape(item['check'])}</td><td><span class='chip {item['status']}'>{html.escape(item['status'])}</span></td><td>{html.escape(item['note'])}</td></tr>" for item in checks)
+            evidence_rows = []
+            for record in evidence:
+                endpoints = "; ".join(
+                    f"{item['name']}: {item['status']} ({item['detail']})"
+                    for item in record.get("endpoints", [])
+                ) or "no endpoint probes"
+                summary = record.get("summary", {})
+                status = "ok" if int(summary.get("failures", 0) or 0) == 0 and int(summary.get("warnings", 0) or 0) == 0 else "warn"
+                evidence_rows.append(
+                    f"<tr><td><div class='env-name'>{html.escape(record.get('environment', ''))}</div><div class='env-file'>{html.escape(record.get('config', ''))}</div></td>"
+                    f"<td><span class='chip {status}'>{html.escape(status)}</span><div class='env-file'>{html.escape(record.get('capturedAt', ''))}</div></td>"
+                    f"<td>{html.escape(str(summary.get('failures', 0)))} failure(s), {html.escape(str(summary.get('warnings', 0)))} warning(s)</td>"
+                    f"<td>{html.escape(endpoints)}</td></tr>"
+                )
             body = f"""
 <section class="summary-grid">
   {metric_card("Passed", ok_count, "readiness checks", "/preflight")}
   {metric_card("Warnings", warn_count, "items requiring attention", "/preflight")}
   {metric_card("Environments", len(env_configs()), "deployment targets", "/")}
-  {metric_card("Sources", 1, "source intake configured", "/sources")}
+  {metric_card("Evidence", len(evidence), "validation reports", "/preflight")}
 </section>
 <div class="section-head">
   <div>
@@ -3360,7 +3414,9 @@ class Handler(BaseHTTPRequestHandler):
   </div>
 </div>
 <section class="panel"><table><thead><tr><th>Area</th><th>Check</th><th>Status</th><th>Detail</th></tr></thead><tbody>{rows}</tbody></table></section>
-<div class="notice">This matrix is a console-level readiness gate. Environment-specific validation still runs through the <code>validate</code> phase.</div>
+<div class="section-head"><div><h2>Validation Evidence</h2><div class="section-copy">Latest structured evidence written by CLI validate runs under <code>.zt/preflight/</code>.</div></div></div>
+<section class="panel"><table><thead><tr><th>Environment</th><th>Status</th><th>Summary</th><th>Endpoint Evidence</th></tr></thead><tbody>{''.join(evidence_rows) or '<tr><td colspan="4" class="muted">No validation evidence yet. Run validate from Bash or PowerShell.</td></tr>'}</tbody></table></section>
+<div class="notice">This matrix is a console-level readiness gate. Environment-specific validation evidence comes from the <code>validate</code> phase.</div>
 """
             self.send_html(page("Preflight - NKP ZeroTouch Framework", body, "preflight"))
             return
