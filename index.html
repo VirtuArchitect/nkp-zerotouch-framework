@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Clickable static demo of the NKP ZeroTouch Framework console.">
+    <title>NKP ZeroTouch Framework Demo</title>
+    <script>
+      (() => {
+        try {
+          const storedTheme = localStorage.getItem("zt-theme");
+          if (storedTheme === "light") document.documentElement.dataset.theme = "light";
+        } catch (error) {}
+      })();
+    </script>
+    <link rel="stylesheet" href="styles.css">
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="sidebar">
+        <a class="brand" href="#environments" data-view-link="environments" aria-label="NKP ZeroTouch home">
+          <span class="brand-mark"><img src="assets/veridian-mark-teal.svg" alt="Veridian"></span>
+          <span>
+            <span class="brand-title">NKP ZeroTouch</span>
+            <span class="brand-subtitle">Framework</span>
+          </span>
+        </a>
+        <nav class="nav" aria-label="Console sections">
+          <div class="nav-label">Operations</div>
+          <button class="nav-item active" type="button" data-view-link="environments"><span class="nav-dot"></span>Environments</button>
+          <button class="nav-item" type="button" data-view-link="jobs">Jobs</button>
+          <button class="nav-item" type="button" data-view-link="runs">Runs</button>
+          <div class="nav-label">Readiness</div>
+          <button class="nav-item" type="button" data-view-link="setup">Setup Wizard</button>
+          <button class="nav-item" type="button" data-view-link="preflight">Preflight</button>
+          <button class="nav-item" type="button" data-view-link="drift">Drift</button>
+          <button class="nav-item" type="button" data-view-link="production">Production Gate</button>
+          <button class="nav-item" type="button" data-view-link="health">Health</button>
+          <div class="nav-label">Artifacts</div>
+          <button class="nav-item" type="button" data-view-link="artifacts">Artifacts</button>
+          <button class="nav-item" type="button" data-view-link="plan">Plan Review</button>
+          <button class="nav-item" type="button" data-view-link="kubeconfig">Kubeconfig</button>
+          <button class="nav-item" type="button" data-view-link="backups">Backups</button>
+          <button class="nav-item" type="button" data-view-link="restore">Restore</button>
+          <div class="nav-label">Deployment</div>
+          <button class="nav-item" type="button" data-view-link="sources">Sources</button>
+          <button class="nav-item" type="button" data-view-link="inventory">Inventory</button>
+          <button class="nav-item" type="button" data-view-link="network">Network</button>
+          <button class="nav-item" type="button" data-view-link="pipeline">Pipeline</button>
+          <button class="nav-item" type="button" data-view-link="cli">CLI</button>
+          <button class="nav-item" type="button" data-view-link="locks">Locks</button>
+          <div class="nav-label">Governance</div>
+          <button class="nav-item" type="button" data-view-link="actions">Safe Actions</button>
+          <button class="nav-item" type="button" data-view-link="changes">Change Records</button>
+          <button class="nav-item" type="button" data-view-link="approval">Approval Policy</button>
+          <button class="nav-item" type="button" data-view-link="channels">Release Channels</button>
+          <button class="nav-item" type="button" data-view-link="audit">Audit Trail</button>
+          <div class="nav-label">Settings</div>
+          <button class="nav-item" type="button" data-view-link="settings">Providers</button>
+        </nav>
+      </aside>
+
+      <div class="content">
+        <header class="topbar">
+          <div>
+            <h1>NKP ZeroTouch Framework</h1>
+            <div class="section-copy">Nutanix Kubernetes Platform deployment console</div>
+          </div>
+          <div class="topbar-meta">
+            <span class="badge connected">Console Online</span>
+            <span class="operator-pill">jgoulden (Admin)</span>
+            <button class="button-link theme-toggle" type="button" data-theme-toggle><span data-theme-label>Light</span></button>
+            <button class="button-link" type="button" data-command="demo-login">Log out</button>
+            <span>CLI apply requires approval</span>
+          </div>
+        </header>
+
+        <main>
+          <section class="view active" data-view="environments">
+            <section class="ops-strip">
+              <div class="ops-item"><div class="ops-label">Runner</div><div class="ops-value">Docker / Local Shell</div></div>
+              <div class="ops-item"><div class="ops-label">Deployment Modes</div><div class="ops-value">Connected / Proxied / Air-gapped</div></div>
+              <div class="ops-item"><div class="ops-label">Authentication</div><div class="ops-value">Local RBAC</div></div>
+              <div class="ops-item"><div class="ops-label">Live Apply</div><div class="ops-value">CLI Approval Required</div></div>
+            </section>
+
+            <section class="summary-grid" id="summaryGrid"></section>
+
+            <div class="section-head">
+              <div>
+                <h2>Recommended Next Actions</h2>
+                <div class="section-copy">Highest-signal operator actions based on current state, review, drift, and production gate checks.</div>
+              </div>
+            </div>
+            <section class="next-actions" id="nextActions"></section>
+
+            <div class="section-head">
+              <div>
+                <h2>Environments</h2>
+                <div class="section-copy">Operational cockpit for connected, proxied, and air-gapped NKP deployment profiles.</div>
+              </div>
+            </div>
+            <section class="panel">
+              <table>
+                <thead>
+                  <tr><th>Name</th><th>Type / Channel</th><th>Lifecycle / Readiness</th><th>Deploy Gate</th><th>Drift</th><th>Evidence</th><th>Next Action</th><th>Manage</th></tr>
+                </thead>
+                <tbody id="environmentRows"></tbody>
+              </table>
+            </section>
+
+            <div class="section-head">
+              <div>
+                <h2>Recent Runs</h2>
+                <div class="section-copy">Latest framework executions captured under the local .zt workspace.</div>
+              </div>
+            </div>
+            <section class="panel">
+              <ul class="run-list" id="recentRuns"></ul>
+            </section>
+            <div class="notice">Destructive and apply actions are intentionally CLI-only. This console exposes validation, preparation, generation, verification, backup, and run inspection workflows.</div>
+          </section>
+
+          <section class="view" data-view="jobs">
+            <div class="section-head"><div><h2>Jobs</h2><div class="section-copy">Execution queue, approval controls, and captured logs.</div></div></div>
+            <section class="panel">
+              <table>
+                <thead><tr><th>Job</th><th>Action</th><th>Status</th><th>Requester</th><th>Approval</th></tr></thead>
+                <tbody id="jobRows"></tbody>
+              </table>
+            </section>
+          </section>
+
+          <section class="view" data-view="runs">
+            <div class="section-head"><div><h2>Runs</h2><div class="section-copy">Latest framework execution summaries.</div></div></div>
+            <section class="panel"><ul class="run-list" id="runsList"></ul></section>
+          </section>
+
+          <section class="view" data-view="pipeline">
+            <div class="section-head"><div><h2>Pipeline</h2><div class="section-copy">ZeroTouch phase progression for a controlled NKP rollout.</div></div></div>
+            <section class="pipeline" id="pipelineSteps"></section>
+          </section>
+
+          <section class="view" data-view="cli">
+            <div class="section-head"><div><h2>CLI</h2><div class="section-copy">Apply-class commands require explicit flags and approval.</div></div></div>
+            <section class="terminal-window">
+              <div class="terminal-bar"><span class="terminal-dot"></span><span class="terminal-dot"></span><span class="terminal-dot"></span> Controlled CLI Window</div>
+              <div class="terminal-body">
+                <div class="terminal-prompt">PS C:\workspace\nkp-zerotouch-framework&gt;</div>
+                <textarea class="terminal-input" spellcheck="false">deploy --apply --config configs/environments/connected.example.yaml</textarea>
+                <div class="terminal-help">Allowed apply examples: registry --apply, deploy --apply, upgrade --apply, destroy --apply --confirm-destroy.</div>
+              </div>
+            </section>
+          </section>
+
+          <section class="view" data-view="artifacts">
+            <div class="section-head"><div><h2>Artifacts</h2><div class="section-copy">Generated plans, reports, logs, state, and configuration evidence.</div></div></div>
+            <section class="panel">
+              <table>
+                <thead><tr><th>Artifact</th><th>Type</th><th>Environment</th><th>Status</th></tr></thead>
+                <tbody id="artifactRows"></tbody>
+              </table>
+            </section>
+          </section>
+
+          <section class="view" data-view="generic">
+            <div class="section-head"><div><h2 id="genericTitle">Console Section</h2><div class="section-copy" id="genericCopy">Static demo snapshot of the local NKP ZeroTouch console.</div></div></div>
+            <section class="settings-grid" id="genericCards"></section>
+          </section>
+        </main>
+      </div>
+    </div>
+  </body>
+</html>
