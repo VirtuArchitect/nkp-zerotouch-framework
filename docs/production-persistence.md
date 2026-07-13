@@ -1,13 +1,15 @@
 # Production Persistence
 
 The local console currently stores runtime state under `.zt`. That is suitable
-for an operator workstation, lab validation, and development. Production
-multi-user use should move durable shared state into Postgres.
+for an operator workstation, lab validation, and development. The
+`session_store=file` setting persists local console sessions under
+`.zt/settings/sessions.json` so restarts do not require memory-only sessions.
+Production multi-user use should move durable shared state into Postgres.
 
 Recommended Postgres-backed objects:
 
 - Console accounts and role assignments.
-- Sessions or session references.
+- Sessions or session references for shared multi-user operation.
 - Jobs, approvals, retries, and cancellations.
 - Audit events.
 - Plan review decisions.

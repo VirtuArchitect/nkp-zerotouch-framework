@@ -111,6 +111,76 @@ def test_dashboard_exposed_bootstrap_requires_token():
             rbac_path.write_text(original, encoding="utf-8")
 
 
+def test_dashboard_file_session_store_persists_and_logs_out():
+    rbac_path = app.SETTINGS / "rbac.json"
+    integrations_path = app.SETTINGS / "integrations.json"
+    sessions_path = app.SETTINGS / "sessions.json"
+    original_rbac = rbac_path.read_text(encoding="utf-8") if rbac_path.exists() else None
+    original_integrations = integrations_path.read_text(encoding="utf-8") if integrations_path.exists() else None
+    original_sessions = sessions_path.read_text(encoding="utf-8") if sessions_path.exists() else None
+    original_memory_sessions = dict(app.SESSIONS)
+
+    rbac = app.default_rbac()
+    account = {
+        "username": "file-session-smoke",
+        "displayName": "File Session Smoke",
+        "role": "Admin",
+        "status": "active",
+    }
+    account.update(app.password_record("FileSessionSmoke-Local-123!"))
+    rbac["accounts"] = [account]
+    app.write_json(rbac_path, rbac)
+    app.save_setting("integrations", {**app.default_integrations(), "session_store": "file"})
+    app.SESSIONS.clear()
+
+    server = app.ThreadingHTTPServer(("127.0.0.1", 0), app.Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base_url = f"http://127.0.0.1:{server.server_address[1]}"
+    cookie_jar = http.cookiejar.CookieJar()
+    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookie_jar))
+    no_redirect_opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookie_jar), NoRedirect)
+
+    try:
+        status, _, _ = request(
+            no_redirect_opener,
+            base_url,
+            "/login",
+            {"username": "file-session-smoke", "password": "FileSessionSmoke-Local-123!"},
+            allow_error=True,
+        )
+        assert status == 303
+        persisted = app.read_json(sessions_path)
+        assert persisted and persisted.get("sessions")
+
+        app.SESSIONS.clear()
+        status, content_type, body = request(opener, base_url, "/")
+        assert status == 200
+        assert "text/html" in content_type
+        assert "file-session-smoke (Admin)" in body
+
+        status, _, _ = request(no_redirect_opener, base_url, "/logout", allow_error=True)
+        assert status == 303
+        assert not (app.read_json(sessions_path) or {}).get("sessions")
+    finally:
+        server.shutdown()
+        server.server_close()
+        app.SESSIONS.clear()
+        app.SESSIONS.update(original_memory_sessions)
+        if original_rbac is None:
+            rbac_path.unlink(missing_ok=True)
+        else:
+            rbac_path.write_text(original_rbac, encoding="utf-8")
+        if original_integrations is None:
+            integrations_path.unlink(missing_ok=True)
+        else:
+            integrations_path.write_text(original_integrations, encoding="utf-8")
+        if original_sessions is None:
+            sessions_path.unlink(missing_ok=True)
+        else:
+            sessions_path.write_text(original_sessions, encoding="utf-8")
+
+
 def test_dashboard_cli_apply_actions_require_apply_flag():
     fallback = "configs/environments/connected.example.yaml"
 

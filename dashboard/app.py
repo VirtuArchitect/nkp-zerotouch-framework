@@ -33,6 +33,10 @@ LOCKS = ZT / "locks"
 CHANGE_RECORDS = ZT / "change-records"
 ENV_DIR = ROOT / "configs" / "environments"
 SESSIONS = {}
+try:
+    SESSION_TTL_SECONDS = int(os.environ.get("ZT_SESSION_TTL_SECONDS", "43200"))
+except ValueError:
+    SESSION_TTL_SECONDS = 43200
 SAFE_ACTIONS = {"validate", "prepare", "generate", "verify", "backup", "runs"}
 ACTION_ORDER = ["validate", "prepare", "generate", "verify", "backup", "runs"]
 CLI_APPLY_ACTIONS = {"registry", "deploy", "upgrade", "destroy"}
@@ -286,6 +290,68 @@ def load_setting(name, defaults):
 def save_setting(name, data):
     data["savedAt"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     write_json(SETTINGS / f"{name}.json", data)
+
+
+def session_store_mode():
+    mode = load_setting("integrations", default_integrations()).get("session_store", "memory")
+    return mode if mode in {"memory", "file"} else "memory"
+
+
+def session_file():
+    return SETTINGS / "sessions.json"
+
+
+def session_expired(session, now=None):
+    expires_at = float(session.get("expiresAt", 0) or 0)
+    return bool(expires_at and expires_at <= (now or time.time()))
+
+
+def load_persisted_sessions():
+    data = read_json(session_file()) or {}
+    sessions = data.get("sessions", {}) if isinstance(data, dict) else {}
+    now = time.time()
+    active = {token: session for token, session in sessions.items() if isinstance(session, dict) and not session_expired(session, now)}
+    if active != sessions:
+        write_json(session_file(), {"sessions": active, "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
+    return active
+
+
+def save_persisted_sessions(sessions):
+    write_json(session_file(), {"sessions": sessions, "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
+
+
+def get_session(token):
+    if not token:
+        return None
+    if session_store_mode() == "file":
+        return load_persisted_sessions().get(token)
+    session = SESSIONS.get(token)
+    if session and session_expired(session):
+        SESSIONS.pop(token, None)
+        return None
+    return session
+
+
+def save_session(token, session):
+    session.setdefault("createdAt", time.time())
+    session["expiresAt"] = session.get("expiresAt") or (time.time() + SESSION_TTL_SECONDS)
+    if session_store_mode() == "file":
+        sessions = load_persisted_sessions()
+        sessions[token] = session
+        save_persisted_sessions(sessions)
+        return
+    SESSIONS[token] = session
+
+
+def delete_session(token):
+    if not token:
+        return
+    SESSIONS.pop(token, None)
+    if session_file().exists():
+        sessions = load_persisted_sessions()
+        if token in sessions:
+            sessions.pop(token, None)
+            save_persisted_sessions(sessions)
 
 
 def bool_label(value):
@@ -1885,7 +1951,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def current_user(self):
         token = cookie_value(self.headers, "zt_session")
-        return SESSIONS.get(token)
+        return get_session(token)
 
     def require_login(self, parsed):
         if parsed.path in {"/login", "/login/oidc", "/login/oidc/callback", "/assets/veridian-mark-teal.svg"}:
@@ -1997,7 +2063,7 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/logout":
             token = cookie_value(self.headers, "zt_session")
             audit_event("logout", self.current_user(), "session", "success")
-            SESSIONS.pop(token, None)
+            delete_session(token)
             self.send_redirect("/login", {"Set-Cookie": "zt_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax"})
             return
         if parsed.path.startswith("/api/"):
@@ -3566,8 +3632,14 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_html(page("Login Failed", "<h2>Login failed</h2><div class='notice'>Invalid username, password, or account status.</div><a class='back-link' href='/login'>Back to login</a>", "about"), status=403)
                     return
             token = secrets.token_urlsafe(32)
-            SESSIONS[token] = {"username": username, "role": account.get("role", "Operator"), "loginAt": time.time(), "csrf": secrets.token_urlsafe(32)}
-            audit_event("login", SESSIONS[token], username, "success")
+            session = {
+                "username": username,
+                "role": account.get("role", "Operator"),
+                "loginAt": time.time(),
+                "csrf": secrets.token_urlsafe(32),
+            }
+            save_session(token, session)
+            audit_event("login", session, username, "success")
             self.send_redirect("/", {"Set-Cookie": f"zt_session={token}; Path=/; HttpOnly; SameSite=Lax"})
             return
 
