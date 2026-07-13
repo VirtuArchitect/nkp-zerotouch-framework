@@ -53,7 +53,7 @@ This maps the public-readiness and real-deployment tasks to the repository featu
 | Kubeconfig capture | Implemented | `kubeconfig` phase |
 | Registry push enhancements | Implemented | CA, insecure, concurrency, existing-tag behavior |
 | Containerized runner | Implemented | `Dockerfile`, `Containerfile`, `docs/container-runner.md` |
-| Self-hosted CI option | Documented | `docs/self-hosted-ci.md` |
+| Self-hosted CI option | Implemented baseline | manual `.github/workflows/self-hosted-lab.yml` validates lab configs on trusted self-hosted runners and uploads local evidence |
 | Better tests | Implemented baseline | parser tests, smoke tests, invalid fixture |
 | Release automation | Implemented | tag workflow creates artifact and GitHub release |
 | Public polish | Implemented baseline | `SECURITY.md`, `CONTRIBUTING.md`, architecture/public-readiness docs, security threat model, dependency-risk guidance |
