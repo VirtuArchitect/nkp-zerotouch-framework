@@ -1149,6 +1149,102 @@ def backup_manifests():
     return sorted(manifests, key=lambda item: str(item["data"].get("createdAt", "")), reverse=True)
 
 
+def backup_component_rows(backup_dir):
+    components = []
+    for name in ["state", "generated", "reports"]:
+        path = backup_dir / name
+        files = [item for item in path.rglob("*") if item.is_file()] if path.exists() else []
+        components.append({
+            "name": name,
+            "path": str(path),
+            "exists": path.exists(),
+            "files": len(files),
+        })
+    return components
+
+
+def build_restore_plan(manifest, user):
+    data = read_json(manifest) or {}
+    env_name = str(data.get("environment", manifest.parents[2].name if len(manifest.parents) > 2 else "unknown"))
+    backup_dir = manifest.parent
+    restore_dir = ZT / "restore-plans"
+    restore_dir.mkdir(parents=True, exist_ok=True)
+    plan_id = f"restore-{time.strftime('%Y%m%d-%H%M%S', time.gmtime())}"
+    plan_path = restore_dir / f"{plan_id}.md"
+    metadata_path = restore_dir / f"{plan_id}.json"
+    components = backup_component_rows(backup_dir)
+    lock_path_value = lock_path(env_name)
+    lock_active = active_lock(env_name)
+    target_state = ZT / "environments" / env_name
+    current_backup_required = True
+
+    component_lines = "\n".join(
+        f"- {item['name']}: {'present' if item['exists'] else 'missing'}; files={item['files']}; source=`{item['path']}`"
+        for item in components
+    )
+    blocked = []
+    if lock_active:
+        blocked.append(f"Active lock exists at `{lock_path_value}`.")
+    if not manifest.exists():
+        blocked.append("Backup manifest is missing.")
+    if any(not item["exists"] for item in components):
+        blocked.append("One or more backup components are missing.")
+    blocked_lines = "\n".join(f"- {item}" for item in blocked) or "- No blocking conditions detected by plan generation."
+    plan = f"""# Restore Plan
+
+Created: {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}
+Requested by: {user.get('username', 'operator')}
+
+Manifest: `{manifest}`
+Environment: `{env_name}`
+Backup: `{backup_dir}`
+Target state: `{target_state}`
+
+## Pre-Restore Controls
+
+- Create a fresh backup before restoring: {'required' if current_backup_required else 'not required'}
+- Confirm no active lock exists: {'blocked' if lock_active else 'clear'}
+- Review change record and rollback notes before copying files.
+- Keep restore execution manual; this plan does not copy files.
+
+## Backup Components
+
+{component_lines}
+
+## Blocking Signals
+
+{blocked_lines}
+
+## Manual Restore Steps
+
+1. Run backup for the target environment and archive the new manifest.
+2. Stop active jobs for this environment.
+3. Confirm no active lock exists.
+4. Copy selected `state`, `generated`, or `reports` folders from the backup path.
+5. Re-run preflight and drift detection.
+6. Re-run plan review if generated artifacts changed.
+7. Run verify before any apply action.
+8. Capture a new backup after successful restore verification.
+"""
+    metadata = {
+        "id": plan_id,
+        "createdAt": time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+        "requestedBy": user.get("username", "operator"),
+        "environment": env_name,
+        "manifest": str(manifest),
+        "backup": str(backup_dir),
+        "targetState": str(target_state),
+        "components": components,
+        "lockActive": lock_active,
+        "blocked": blocked,
+        "requiresCurrentBackup": current_backup_required,
+        "manualOnly": True,
+    }
+    plan_path.write_text(plan, encoding="utf-8")
+    write_json(metadata_path, metadata)
+    return plan_id, plan_path, metadata_path, metadata
+
+
 def environment_for_config(config):
     data = read_json_from_context(config)
     return str(data.get("environmentName") or Path(config).stem)
@@ -3948,34 +4044,12 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/restore/plan":
             try:
                 manifest = resolve_artifact(form_value(form, "manifest"))
-                data = read_json(manifest) or {}
-                restore_dir = ZT / "restore-plans"
-                restore_dir.mkdir(parents=True, exist_ok=True)
-                plan_id = f"restore-{time.strftime('%Y%m%d-%H%M%S', time.gmtime())}"
-                plan_path = restore_dir / f"{plan_id}.md"
-                plan = f"""# Restore Plan
-
-Created: {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}
-Requested by: {self.current_user().get('username', 'operator')}
-
-Manifest: `{manifest}`
-Environment: `{data.get('environment', 'unknown')}`
-Backup: `{manifest.parent}`
-
-## Manual Restore Steps
-
-1. Stop active jobs for this environment.
-2. Confirm no active lock exists.
-3. Copy selected `state`, `generated`, or `reports` folders from the backup path.
-4. Re-run preflight and drift detection.
-5. Run verify before any apply action.
-"""
-                plan_path.write_text(plan, encoding="utf-8")
-                audit_event("restore_plan_created", self.current_user(), str(manifest), "success", {"plan": str(plan_path)})
+                plan_id, plan_path, metadata_path, metadata = build_restore_plan(manifest, self.current_user())
+                audit_event("restore_plan_created", self.current_user(), str(manifest), "success", {"plan": str(plan_path), "metadata": str(metadata_path), "blocked": metadata["blocked"]})
             except Exception as exc:
                 self.send_html(page("Restore Plan Error", f"<h2>Restore plan failed</h2><div class='notice'>{html.escape(str(exc))}</div><a class='back-link' href='/restore'>Back to restore</a>", "restore"), status=400)
                 return
-            body = f"<section class='metric'><div class='metric-label'>Restore Plan</div><div class='metric-value'>{html.escape(plan_id)}</div><div class='metric-foot'><span class='chip ok'>Generated</span></div></section><a class='button-link' href='/artifacts/view?path={quote(str(plan_path))}'>Open restore plan</a> <a class='back-link' href='/restore'>Back to restore</a>"
+            body = f"<section class='metric'><div class='metric-label'>Restore Plan</div><div class='metric-value'>{html.escape(plan_id)}</div><div class='metric-foot'><span class='chip ok'>Generated</span></div></section><a class='button-link' href='/artifacts/view?path={quote(str(plan_path))}'>Open restore plan</a> <a class='button-link' href='/artifacts/view?path={quote(str(metadata_path))}'>Open metadata</a> <a class='back-link' href='/restore'>Back to restore</a>"
             self.send_html(page("Restore Plan Created", body, "restore"))
             return
 

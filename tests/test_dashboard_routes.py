@@ -449,3 +449,64 @@ cluster:
         assert any("prepared from connected.example.yaml" in issue for issue in issues)
     finally:
         app.ENV_DIR = original_env_dir
+
+
+def test_restore_plan_records_controls_and_metadata(tmp_path):
+    original_zt = app.ZT
+    original_locks = app.LOCKS
+    original_change_records = app.CHANGE_RECORDS
+    app.ZT = tmp_path / ".zt"
+    app.LOCKS = app.ZT / "locks"
+    app.CHANGE_RECORDS = app.ZT / "change-records"
+    try:
+        backup_dir = app.ZT / "environments" / "restore-lab" / "backup" / "20260713-120000"
+        for folder in ["state", "generated", "reports"]:
+            target = backup_dir / folder
+            target.mkdir(parents=True)
+            (target / f"{folder}.txt").write_text(folder, encoding="utf-8")
+        manifest = backup_dir / "backup-manifest.json"
+        app.write_json(manifest, {"environment": "restore-lab", "createdAt": "2026-07-13T12:00:00Z"})
+
+        plan_id, plan_path, metadata_path, metadata = app.build_restore_plan(manifest, {"username": "tester"})
+
+        assert plan_id.startswith("restore-")
+        plan_text = plan_path.read_text(encoding="utf-8")
+        assert "Create a fresh backup before restoring: required" in plan_text
+        assert "Keep restore execution manual" in plan_text
+        assert "state: present; files=1" in plan_text
+        assert metadata["environment"] == "restore-lab"
+        assert metadata["requiresCurrentBackup"] is True
+        assert metadata["manualOnly"] is True
+        assert metadata["blocked"] == []
+        assert app.read_json(metadata_path)["components"][0]["name"] == "state"
+    finally:
+        app.ZT = original_zt
+        app.LOCKS = original_locks
+        app.CHANGE_RECORDS = original_change_records
+
+
+def test_restore_plan_flags_active_locks_and_missing_components(tmp_path):
+    original_zt = app.ZT
+    original_locks = app.LOCKS
+    original_change_records = app.CHANGE_RECORDS
+    app.ZT = tmp_path / ".zt"
+    app.LOCKS = app.ZT / "locks"
+    app.CHANGE_RECORDS = app.ZT / "change-records"
+    try:
+        backup_dir = app.ZT / "environments" / "locked-lab" / "backup" / "20260713-120000"
+        (backup_dir / "state").mkdir(parents=True)
+        manifest = backup_dir / "backup-manifest.json"
+        app.write_json(manifest, {"environment": "locked-lab", "createdAt": "2026-07-13T12:00:00Z"})
+        app.write_job({"id": "job-lock-restore", "status": "running", "action": "restore", "environment": "locked-lab"})
+        app.write_json(app.lock_path("locked-lab"), {"environment": "locked-lab", "jobId": "job-lock-restore", "action": "restore"})
+
+        _, plan_path, _, metadata = app.build_restore_plan(manifest, {"username": "tester"})
+
+        plan_text = plan_path.read_text(encoding="utf-8")
+        assert "Confirm no active lock exists: blocked" in plan_text
+        assert any("Active lock exists" in item for item in metadata["blocked"])
+        assert any("backup components are missing" in item for item in metadata["blocked"])
+    finally:
+        app.ZT = original_zt
+        app.LOCKS = original_locks
+        app.CHANGE_RECORDS = original_change_records

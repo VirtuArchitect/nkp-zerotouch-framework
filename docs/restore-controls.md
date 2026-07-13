@@ -25,6 +25,10 @@ Restore dry run should show:
 - Required post-restore checks.
 - Commands an operator must run before any live apply resumes.
 
+The dashboard restore plan generator now records available backup components,
+file counts, active lock status, blocking signals, and JSON metadata for audit.
+Restore execution remains manual.
+
 ## Execution Boundary
 
 Automated restore must not:
