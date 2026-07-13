@@ -47,7 +47,7 @@ const environments = [
     detail: "Stage NKP inputs and create local state.",
   },
   {
-    name: "lab-connected",
+    name: "lab-new",
     file: "lab-new.yaml",
     type: "connected",
     lifecycle: "Verified",
@@ -137,7 +137,7 @@ const genericSections = {
   restore: ["Restore", "Restore workflow for local ZeroTouch state.", [["Mode", "operator selected backup"], ["Safety", "review before overwrite"], ["Audit", "restore event captured"]]],
   sources: ["Sources", "NKP bundle paths, source metadata, and checksums.", [["Standard bundle", "/mnt/c/Share/nkp-bundle_v2.17.1"], ["Air-gapped bundle", "/mnt/c/Share/nkp-air-gapped-bundle_v2.17.1"], ["Git source", "VirtuArchitect/nkp-zerotouch-framework"]]],
   inventory: ["Inventory", "AHV inventory and future bare-metal provider notes.", [["Provider", "nutanix-ahv"], ["Prism Element", "pe-cluster"], ["Image", "nkp-node-image"]]],
-  network: ["Network", "Management, workload, API VIP, DNS, NTP, and proxy fields.", [["API VIP", "10.10.10.50 duplicate warning"], ["Pod CIDR", "192.168.0.0/16"], ["Service CIDR", "10.96.0.0/12"]]],
+  network: ["Network", "Management, workload, API VIP, DNS, NTP, and proxy fields.", [["API VIP", "10.10.10.51 reserved for lab-new"], ["Pod CIDR", "192.168.0.0/16"], ["Service CIDR", "10.96.0.0/12"]]],
   locks: ["Locks", "Operational locks around apply-class jobs.", [["deploy", "approval lock pending"], ["destroy", "requires confirm flag"], ["registry", "air-gapped only"]]],
   actions: ["Safe Actions", "Dashboard-safe operations that do not perform live apply.", [["validate", "safe"], ["prepare", "safe"], ["generate", "safe"], ["verify", "safe"]]],
   changes: ["Change Records", "Apply requests are captured as change records.", [["CHG-003", "deploy pending approval"], ["CHG-002", "registry pending approval"], ["CHG-001", "generate completed"]]],
@@ -165,7 +165,7 @@ function renderNextActions() {
     <div class="next-action">
       <div>
         <strong>${env.name}</strong>
-        <div class="env-file">${env.file} · ${env.detail}</div>
+        <div class="env-file">${env.file} - ${env.detail}</div>
       </div>
       <button class="button-link" type="button" data-command="action">${env.action}</button>
     </div>

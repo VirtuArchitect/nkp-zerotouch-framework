@@ -14,7 +14,7 @@ This maps the public-readiness and real-deployment tasks to the repository featu
 | Strengthen live verification | Partially automated | `verify` runs `kubectl get nodes/pods` when kubeconfig exists |
 | Confirm generated NKP flags | Supported | generated `deploy.sh` and runbooks are review points |
 | Decide upgrade/destroy automation | Guarded | plan-first `upgrade` and `destroy` phases |
-| Add real CI strategy | Implemented baseline | GitHub Actions syntax/helper/security/package checks |
+| Add real CI strategy | Implemented baseline | GitHub Actions syntax/helper/security/package checks and all-environment config validation |
 | Create first real profile | Supported | `scripts/new-env.*` |
 | Dashboard / console | Implemented | `dashboard/app.py`, `docs/dashboard.md` |
 | Live demo | Implemented | GitHub Pages prototype under `docs/demo/` |
@@ -46,6 +46,7 @@ This maps the public-readiness and real-deployment tasks to the repository featu
 | OIDC login flow | Partial | readiness route exists; full authorization-code token exchange remains future work |
 | Vault secret validation | Implemented baseline | runtime secret key presence checks and Vault health probe metadata |
 | Environment uniqueness checks | Implemented baseline | environment create/edit blocks duplicate names, cluster names, API VIPs, and registry namespaces |
+| CI environment identity checks | Implemented baseline | `tools/zt_config.py validate-all` validates committed environment files and blocks duplicate identity values |
 | Approval policy | Implemented baseline | per-action approval thresholds, self-approval prevention, production Admin option |
 | Enterprise integrations | Probed baseline | Postgres TCP, Vault health, OIDC discovery, and session-store consistency checks under Settings > Integrations, Health, and Preflight |
 | File session store | Implemented baseline | `session_store=file` persists console sessions under `.zt/settings/sessions.json`; memory remains the default local mode |

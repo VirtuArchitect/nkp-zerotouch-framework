@@ -48,6 +48,48 @@ def test_invalid_environment_type():
     assert any("environment.type" in item for item in data["errors"])
 
 
+def test_validate_all_accepts_committed_environment_configs():
+    data = json.loads(run_tool("validate-all", "--directory", "configs/environments"))
+    assert data["valid"] is True
+    assert len(data["configs"]) >= 3
+    assert not data["errors"]
+
+
+def test_validate_all_rejects_duplicate_environment_identity(tmp_path):
+    first = tmp_path / "first.yaml"
+    second = tmp_path / "second.yaml"
+    base = """
+environment:
+  name: duplicate-lab
+  type: connected
+nkp:
+  version: v2.17.1
+nutanix:
+  prismCentralEndpoint: https://pc.example.com:9440
+  clusterName: pe-cluster
+cluster:
+  name: duplicate-cluster
+  kubernetesVersion: v1.32.3
+  controlPlaneEndpointIp: 10.10.10.50
+"""
+    first.write_text(base, encoding="utf-8")
+    second.write_text(base, encoding="utf-8")
+
+    result = subprocess.run(
+        [sys.executable, str(TOOL), "validate-all", "--directory", str(tmp_path)],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 1
+    data = json.loads(result.stdout)
+    assert data["valid"] is False
+    assert any("Environment name 'duplicate-lab' is duplicated" in item for item in data["errors"])
+    assert any("Cluster name 'duplicate-cluster' is duplicated" in item for item in data["errors"])
+    assert any("API endpoint VIP '10.10.10.50' is duplicated" in item for item in data["errors"])
+
+
 def test_schema_rejects_invalid_numeric_types(tmp_path):
     config = tmp_path / "bad-types.yaml"
     config.write_text(
