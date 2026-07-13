@@ -867,6 +867,24 @@ def environment_identity_issues(config, data, state):
 def verification_status(state):
     if not state["verification"].exists():
         return False, "verification missing"
+    evidence_path = state["base"] / "reports" / "verification-evidence.json"
+    evidence = read_json(evidence_path)
+    if isinstance(evidence, dict):
+        checks = evidence.get("checks", [])
+        if isinstance(checks, list):
+            issues = [
+                f"{item.get('name', 'check')}: {item.get('status', 'unknown')}"
+                for item in checks
+                if str(item.get("status", "")).lower() not in {"pass", "ok"}
+            ]
+            if issues:
+                return False, "; ".join(issues[:4])
+        live = evidence.get("liveVerification", {})
+        if isinstance(live, dict):
+            live_status = str(live.get("status", "")).lower()
+            if live_status in {"warn", "fail", "failed", "error"}:
+                return False, f"live verification {live_status}; log: {live.get('log', 'missing')}"
+        return True, "structured verification evidence passed"
     health_path = state["base"] / "reports" / "component-health.json"
     health = read_json(health_path)
     if isinstance(health, list):

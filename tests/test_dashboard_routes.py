@@ -571,6 +571,56 @@ registry:
         app.CHANGE_RECORDS = original_change_records
 
 
+def test_verification_status_prefers_structured_evidence(tmp_path):
+    original_zt = app.ZT
+    app.ZT = tmp_path / ".zt"
+    try:
+        state = app.env_state("verified-evidence")
+        reports = state["base"] / "reports"
+        reports.mkdir(parents=True)
+        (reports / "verification-summary.md").write_text("- pass: kubeconfig - captured\n", encoding="utf-8")
+        app.write_json(reports / "component-health.json", [{"name": "legacy", "status": "warn", "detail": "old report"}])
+        app.write_json(
+            reports / "verification-evidence.json",
+            {
+                "checks": [{"name": "kubeconfig", "status": "pass", "detail": "captured"}],
+                "liveVerification": {"attempted": True, "status": "pass", "log": "verify-kubectl.log"},
+            },
+        )
+
+        ok, detail = app.verification_status(state)
+
+        assert ok is True
+        assert detail == "structured verification evidence passed"
+    finally:
+        app.ZT = original_zt
+
+
+def test_verification_status_blocks_on_live_evidence_warning(tmp_path):
+    original_zt = app.ZT
+    app.ZT = tmp_path / ".zt"
+    try:
+        state = app.env_state("verified-live-warning")
+        reports = state["base"] / "reports"
+        reports.mkdir(parents=True)
+        (reports / "verification-summary.md").write_text("- pass: kubeconfig - captured\n", encoding="utf-8")
+        app.write_json(
+            reports / "verification-evidence.json",
+            {
+                "checks": [{"name": "kubeconfig", "status": "pass", "detail": "captured"}],
+                "liveVerification": {"attempted": True, "status": "warn", "log": "verify-kubectl.log"},
+            },
+        )
+
+        ok, detail = app.verification_status(state)
+
+        assert ok is False
+        assert "live verification warn" in detail
+        assert "verify-kubectl.log" in detail
+    finally:
+        app.ZT = original_zt
+
+
 def test_production_gate_payload_serializes_checks(tmp_path):
     original_zt = app.ZT
     original_locks = app.LOCKS
