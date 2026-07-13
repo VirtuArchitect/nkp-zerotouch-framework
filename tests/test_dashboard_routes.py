@@ -178,6 +178,43 @@ def test_preflight_evidence_records_summarize_endpoint_status(tmp_path):
         app.ZT = original_zt
 
 
+def test_preflight_evidence_status_requires_clean_latest_record(tmp_path):
+    original_zt = app.ZT
+    app.ZT = tmp_path / ".zt"
+    try:
+        ok, detail = app.preflight_evidence_status("lab-connected")
+        assert ok is False
+        assert "missing" in detail
+
+        app.write_json(
+            app.ZT / "preflight" / "lab-connected.json",
+            {
+                "capturedAt": "2026-07-13T19:00:00Z",
+                "environment": "lab-connected",
+                "summary": {"failures": 0, "warnings": 1},
+                "endpoints": [{"name": "Prism Central", "status": "pass", "detail": "pc:9440"}],
+            },
+        )
+        ok, detail = app.preflight_evidence_status("lab-connected")
+        assert ok is False
+        assert "1 warning" in detail
+
+        app.write_json(
+            app.ZT / "preflight" / "lab-connected.json",
+            {
+                "capturedAt": "2026-07-13T19:05:00Z",
+                "environment": "lab-connected",
+                "summary": {"failures": 0, "warnings": 0},
+                "endpoints": [{"name": "Prism Central", "status": "pass", "detail": "pc:9440"}],
+            },
+        )
+        ok, detail = app.preflight_evidence_status("lab-connected")
+        assert ok is True
+        assert "clean" in detail
+    finally:
+        app.ZT = original_zt
+
+
 def test_dashboard_exposed_bootstrap_requires_token():
     rbac_path = app.SETTINGS / "rbac.json"
     original = rbac_path.read_text(encoding="utf-8") if rbac_path.exists() else None
@@ -593,6 +630,51 @@ registry:
         verification = [check for check in checks if check[0] == "Verification"][0]
         assert verification[1] is False
         assert "kubeconfig" in verification[2]
+    finally:
+        app.ZT = original_zt
+        app.LOCKS = original_locks
+        app.CHANGE_RECORDS = original_change_records
+
+
+def test_production_gate_blocks_missing_preflight_evidence(tmp_path):
+    original_zt = app.ZT
+    original_locks = app.LOCKS
+    original_change_records = app.CHANGE_RECORDS
+    app.ZT = tmp_path / ".zt"
+    app.LOCKS = app.ZT / "locks"
+    app.CHANGE_RECORDS = app.ZT / "change-records"
+    try:
+        config = tmp_path / "configs" / "environments" / "preflight-missing.yaml"
+        config.parent.mkdir(parents=True)
+        config.write_text(
+            """
+environment:
+  name: preflight-missing
+  type: connected
+nkp:
+  version: v2.17.1
+  bundleType: standard
+  bundlePath: /bundle
+nutanix:
+  prismCentralEndpoint: https://pc.example.local:9440
+  clusterName: pe
+  subnetName: vlan
+  imageName: image
+cluster:
+  name: cluster
+  controlPlaneEndpointIp: 10.0.0.10
+registry:
+  endpoint: registry.example.local
+""",
+            encoding="utf-8",
+        )
+
+        _, _, ok, checks = app.production_gate(config)
+
+        assert ok is False
+        preflight = [check for check in checks if check[0] == "Preflight evidence"][0]
+        assert preflight[1] is False
+        assert "missing" in preflight[2]
     finally:
         app.ZT = original_zt
         app.LOCKS = original_locks

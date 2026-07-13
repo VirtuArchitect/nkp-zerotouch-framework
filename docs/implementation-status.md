@@ -41,7 +41,7 @@ This maps the public-readiness and real-deployment tasks to the repository featu
 | Change record detail | Implemented baseline | change records have detail pages with job link, hashes, requester, status, and rollback notes |
 | Restore planning | Implemented baseline | console generates guarded restore plans and JSON metadata from backup manifests, including component inventory and lock warnings |
 | Lock cleanup | Implemented baseline | stale locks can be cleared while active locks remain protected |
-| Production readiness gate | Implemented baseline | console reports plan review, backup, drift, channel, and structured verification evidence readiness |
+| Production readiness gate | Implemented baseline | console reports plan review, preflight evidence, backup, drift, channel, and structured verification evidence readiness |
 | Dashboard route tests | Implemented baseline | pytest route/API smoke coverage for dashboard pages and JSON endpoints |
 | OIDC login flow | Partial | readiness route validates discovery metadata and required endpoints; full authorization-code token exchange remains future work |
 | Vault secret validation | Implemented baseline | runtime secret key presence checks and Vault health probe metadata |

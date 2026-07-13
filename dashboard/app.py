@@ -443,6 +443,26 @@ def preflight_evidence_records(limit=50):
     return records
 
 
+def preflight_evidence_status(env_name):
+    matching = [record for record in preflight_evidence_records(100) if record.get("environment") == env_name]
+    if not matching:
+        return False, "validation evidence missing"
+    record = matching[0]
+    summary = record.get("summary", {})
+    failures = int(summary.get("failures", 0) or 0)
+    warnings = int(summary.get("warnings", 0) or 0)
+    if failures or warnings:
+        return False, f"validation reported {failures} failure(s), {warnings} warning(s)"
+    endpoint_issues = [
+        f"{item.get('name', 'endpoint')}: {item.get('status', 'unknown')}"
+        for item in record.get("endpoints", [])
+        if str(item.get("status", "")).lower() not in {"pass", "ok"}
+    ]
+    if endpoint_issues:
+        return False, "; ".join(endpoint_issues[:4])
+    return True, f"validation evidence clean at {record.get('capturedAt', 'unknown time')}"
+
+
 def default_sources():
     return {
         "version": "v2.17.1",
@@ -1199,6 +1219,7 @@ def production_gate(config):
     review_label, review_status = plan_review_status(env_name, state)
     _, drift_state, drift_issues = drift_status(config)
     identity_issues = environment_identity_issues(config, data, state)
+    preflight_ok, preflight_detail = preflight_evidence_status(env_name)
     verification_ok, verification_detail = verification_status(state)
     channels = load_setting("release-channels", default_release_channels())
     checks = []
@@ -1209,6 +1230,7 @@ def production_gate(config):
     else:
         checks.append(("Plan review", review_status == "ok", review_label))
         checks.append(("Backup evidence", True, "not required for non-production"))
+    checks.append(("Preflight evidence", preflight_ok, preflight_detail))
     checks.append(("Drift", drift_state == "ok", "; ".join(drift_issues)))
     checks.append(("Verification", verification_ok, verification_detail))
     ok = all(item[1] for item in checks)
