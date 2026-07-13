@@ -24,6 +24,7 @@ deployment.
 - Registry plan or push evidence captured when required.
 - Deploy apply job and approval evidence captured.
 - Kubeconfig captured into `.zt/environments/<name>/state/kubeconfig`.
+- Kubeconfig metadata captured in `.zt/environments/<name>/state/kubeconfig.json`.
 - `verify` output captured.
 - Run summary captured under `.zt/runs`.
 

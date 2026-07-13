@@ -58,7 +58,19 @@ Writes local verification reports:
 - `reports/verification-summary.md`
 - `reports/component-health.json` from PowerShell
 
-Today this verifies local staged artifacts and generated state. Cluster-live checks are the next layer once real kubeconfig output is wired in.
+This verifies local staged artifacts and generated state. When
+`state/kubeconfig` exists, it also captures live `kubectl` and NKP query output
+under `logs/verify-kubectl.log`.
+
+## kubeconfig
+
+Captures a post-deploy kubeconfig into local environment state:
+
+- `state/kubeconfig`
+- `state/kubeconfig.json`
+
+The metadata file records capture time, source path, target path, file size, and
+SHA256 hash. It does not include kubeconfig contents.
 
 ## secrets
 

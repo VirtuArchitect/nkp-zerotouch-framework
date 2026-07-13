@@ -10,8 +10,8 @@ This maps the public-readiness and real-deployment tasks to the repository featu
 | Test registry connectivity | Partially automated | `validate` checks endpoint shape/reachability; dashboard health can probe registry `/v2/` authentication and `registry -Apply` performs real push |
 | Run air-gapped registry apply | Supported | guarded `registry -Apply` / `--apply` |
 | Run NKP deploy apply | Supported | guarded `deploy -Apply` / `--apply` |
-| Capture kubeconfig into state | Convention defined | place kubeconfig at `.zt/environments/<name>/state/kubeconfig` |
-| Strengthen live verification | Partially automated | `verify` runs `kubectl get nodes/pods` when kubeconfig exists |
+| Capture kubeconfig into state | Implemented | `kubeconfig` phase writes `.zt/environments/<name>/state/kubeconfig` and redacted `kubeconfig.json` metadata |
+| Strengthen live verification | Partially automated | `verify` runs `kubectl get nodes/pods` and NKP queries when kubeconfig exists |
 | Confirm generated NKP flags | Supported | generated `deploy.sh` and runbooks are review points |
 | Decide upgrade/destroy automation | Guarded | plan-first `upgrade` and `destroy` phases |
 | Add real CI strategy | Implemented baseline | GitHub Actions syntax/helper/security/package checks and all-environment config validation |
@@ -27,7 +27,7 @@ This maps the public-readiness and real-deployment tasks to the repository featu
 | Formal plan review | Implemented baseline | console records per-environment approve/reject status under `.zt` |
 | Setup wizard | Implemented baseline | guided first-run setup page links source, connection, inventory, network, secrets, environment, and preflight tasks |
 | Lifecycle/readiness | Implemented baseline | environment table shows lifecycle state and readiness score |
-| Kubeconfig console visibility | Implemented baseline | kubeconfig page shows capture status and command guidance |
+| Kubeconfig console visibility | Implemented baseline | kubeconfig page shows capture status, metadata evidence, and command guidance |
 | Provider catalog | Implemented baseline | provider contracts live under `providers/` and are visible in Settings > Providers |
 | API layer | Implemented baseline | authenticated JSON endpoints for status, environments, jobs, logs, locks, change records, and production readiness |
 | Environment locking | Implemented baseline | environment locks are created for prepare, generate, registry, deploy, upgrade, and destroy jobs |

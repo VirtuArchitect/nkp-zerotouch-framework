@@ -734,8 +734,15 @@ function Invoke-Verify {
         $kubectlLog = Join-Path $context.logsDir "verify-kubectl.log"
         $bashKubeconfig = Convert-ToBashPath -Path $kubeconfigPath
         $bashKubectl = Convert-ToBashPath -Path $kubectlPath
-        bash -lc "'$bashKubectl' --kubeconfig '$bashKubeconfig' get nodes -o wide; '$bashKubectl' --kubeconfig '$bashKubeconfig' get nodes; '$bashKubectl' --kubeconfig '$bashKubeconfig' get pods -A; '$bashKubectl' --kubeconfig '$bashKubeconfig' get pods -A --field-selector=status.phase!=Running,status.phase!=Succeeded || true; ./bin/nkp get clusters -A --kubeconfig '$bashKubeconfig' || true; ./bin/nkp get appdeployments -A --kubeconfig '$bashKubeconfig' || true" *> $kubectlLog
-        Write-Check -Status "PASS" -Message "Live kubectl verification log: $kubectlLog"
+        $bashLog = Convert-ToBashPath -Path $kubectlLog
+        bash -lc "{ '$bashKubectl' --kubeconfig '$bashKubeconfig' get nodes -o wide; status=\$?; '$bashKubectl' --kubeconfig '$bashKubeconfig' get nodes || status=\$?; '$bashKubectl' --kubeconfig '$bashKubeconfig' get pods -A || status=\$?; '$bashKubectl' --kubeconfig '$bashKubeconfig' get pods -A --field-selector=status.phase!=Running,status.phase!=Succeeded || true; ./bin/nkp get clusters -A --kubeconfig '$bashKubeconfig' || true; ./bin/nkp get appdeployments -A --kubeconfig '$bashKubeconfig' || true; echo __ZT_VERIFY_STATUS:\$status; } > '$bashLog' 2>&1; exit 0"
+        $liveOk = Select-String -LiteralPath $kubectlLog -Pattern "__ZT_VERIFY_STATUS:0" -Quiet
+        if ($liveOk) {
+            Write-Check -Status "PASS" -Message "Live kubectl verification log: $kubectlLog"
+        }
+        else {
+            Write-Check -Status "WARN" -Message "Live kubectl verification needs review; log: $kubectlLog"
+        }
     }
     Write-Check -Status "PASS" -Message "Wrote verification report: $reportPath"
 }
@@ -753,7 +760,18 @@ function Invoke-Kubeconfig {
     }
     $target = Join-Path $context.stateDir "kubeconfig"
     Copy-Item -LiteralPath $Kubeconfig -Destination $target -Force
+    $targetItem = Get-Item -LiteralPath $target
+    $metadata = [ordered]@{
+        capturedAt = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+        source = (Resolve-Path -LiteralPath $Kubeconfig).Path
+        target = $target
+        sizeBytes = $targetItem.Length
+        sha256 = (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash.ToLowerInvariant()
+        redacted = $true
+    }
+    $metadata | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $context.stateDir "kubeconfig.json") -Encoding utf8
     Write-Check -Status "PASS" -Message "Captured kubeconfig: $target"
+    Write-Check -Status "PASS" -Message "Wrote kubeconfig metadata: $(Join-Path $context.stateDir "kubeconfig.json")"
 }
 
 function Invoke-Secrets {

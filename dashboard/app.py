@@ -2786,11 +2786,19 @@ class Handler(BaseHTTPRequestHandler):
                 name = data.get("environmentName") or config.stem
                 state = env_state(name)
                 kubeconfig = state["base"] / "state" / "kubeconfig"
+                metadata = read_json(state["base"] / "state" / "kubeconfig.json") or {}
+                captured_at = metadata.get("capturedAt", "not captured")
+                size = metadata.get("sizeBytes", "")
+                sha = str(metadata.get("sha256", ""))
+                evidence = "not captured"
+                if metadata:
+                    evidence = f"{captured_at}; {size} bytes; sha256 {sha[:12]}..."
                 command = f".\\scripts\\zt.ps1 kubeconfig -Config .\\configs\\environments\\{config.name} -Kubeconfig <path>"
                 rows.append(
                     f"<tr><td><div class='env-name'>{html.escape(name)}</div><div class='env-file'>{html.escape(config.name)}</div></td>"
                     f"<td><span class='chip {'ok' if kubeconfig.exists() else 'warn'}'>{'Captured' if kubeconfig.exists() else 'Missing'}</span></td>"
                     f"<td><span class='muted'>{html.escape(str(kubeconfig.relative_to(ROOT) if ROOT in kubeconfig.parents else kubeconfig))}</span></td>"
+                    f"<td><span class='muted'>{html.escape(evidence)}</span></td>"
                     f"<td><code>{html.escape(command)}</code></td></tr>"
                 )
             body = f"""
@@ -2802,11 +2810,11 @@ class Handler(BaseHTTPRequestHandler):
 </div>
 <section class="panel">
   <table>
-    <thead><tr><th>Environment</th><th>Status</th><th>State Path</th><th>Capture Command</th></tr></thead>
-    <tbody>{''.join(rows) or '<tr><td colspan="4" class="muted">No environments found.</td></tr>'}</tbody>
+    <thead><tr><th>Environment</th><th>Status</th><th>State Path</th><th>Evidence</th><th>Capture Command</th></tr></thead>
+    <tbody>{''.join(rows) or '<tr><td colspan="5" class="muted">No environments found.</td></tr>'}</tbody>
   </table>
 </section>
-<div class="notice">After deploy, capture kubeconfig into the environment state directory, then run verify to collect live cluster evidence.</div>
+<div class="notice">After deploy, capture kubeconfig into the environment state directory. The console stores metadata only; kubeconfig contents remain local and are never rendered.</div>
 """
             self.send_html(page("Kubeconfig - NKP ZeroTouch Framework", body, "kubeconfig"))
             return

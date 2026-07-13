@@ -467,13 +467,18 @@ verify_phase() {
   } >"$report_path"
   if [[ -f "$state_dir/kubeconfig" && -f "$bin_dir/kubectl" ]]; then
     mkdir -p "$logs_dir"
-    "$bin_dir/kubectl" --kubeconfig "$state_dir/kubeconfig" get nodes -o wide >"$logs_dir/verify-kubectl.log" 2>&1
-    "$bin_dir/kubectl" --kubeconfig "$state_dir/kubeconfig" get nodes >>"$logs_dir/verify-kubectl.log" 2>&1
-    "$bin_dir/kubectl" --kubeconfig "$state_dir/kubeconfig" get pods -A >>"$logs_dir/verify-kubectl.log" 2>&1
+    local live_status=0
+    "$bin_dir/kubectl" --kubeconfig "$state_dir/kubeconfig" get nodes -o wide >"$logs_dir/verify-kubectl.log" 2>&1 || live_status=$?
+    "$bin_dir/kubectl" --kubeconfig "$state_dir/kubeconfig" get nodes >>"$logs_dir/verify-kubectl.log" 2>&1 || live_status=$?
+    "$bin_dir/kubectl" --kubeconfig "$state_dir/kubeconfig" get pods -A >>"$logs_dir/verify-kubectl.log" 2>&1 || live_status=$?
     "$bin_dir/kubectl" --kubeconfig "$state_dir/kubeconfig" get pods -A --field-selector=status.phase!=Running,status.phase!=Succeeded >>"$logs_dir/verify-kubectl.log" 2>&1 || true
     "$bin_dir/nkp" get clusters -A --kubeconfig "$state_dir/kubeconfig" >>"$logs_dir/verify-kubectl.log" 2>&1 || true
     "$bin_dir/nkp" get appdeployments -A --kubeconfig "$state_dir/kubeconfig" >>"$logs_dir/verify-kubectl.log" 2>&1 || true
-    check PASS "Live kubectl verification log: $logs_dir/verify-kubectl.log"
+    if [[ "$live_status" -eq 0 ]]; then
+      check PASS "Live kubectl verification log: $logs_dir/verify-kubectl.log"
+    else
+      check WARN "Live kubectl verification needs review; log: $logs_dir/verify-kubectl.log"
+    fi
   fi
   check PASS "Wrote verification report: $report_path"
 }
@@ -490,7 +495,29 @@ kubeconfig_phase() {
     exit 1
   fi
   cp "$kubeconfig_source" "$state_dir/kubeconfig"
+  "$python_bin" - "$kubeconfig_source" "$state_dir/kubeconfig" "$state_dir/kubeconfig.json" <<'PY'
+import hashlib
+import json
+import os
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+source = Path(sys.argv[1])
+target = Path(sys.argv[2])
+metadata_path = Path(sys.argv[3])
+metadata = {
+    "capturedAt": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+    "source": str(source.resolve()),
+    "target": str(target),
+    "sizeBytes": target.stat().st_size,
+    "sha256": hashlib.sha256(target.read_bytes()).hexdigest(),
+    "redacted": True,
+}
+metadata_path.write_text(json.dumps(metadata, indent=2) + os.linesep, encoding="utf-8")
+PY
   check PASS "Captured kubeconfig: $state_dir/kubeconfig"
+  check PASS "Wrote kubeconfig metadata: $state_dir/kubeconfig.json"
 }
 
 secrets_phase() {
