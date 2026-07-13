@@ -1244,6 +1244,39 @@ def backup_component_rows(backup_dir):
     return components
 
 
+def relative_file_set(path):
+    if not path.exists():
+        return set()
+    return {str(item.relative_to(path)) for item in path.rglob("*") if item.is_file()}
+
+
+def restore_dry_run_impacts(backup_dir, target_state):
+    impacts = []
+    for name in ["state", "generated", "reports"]:
+        backup_path = backup_dir / name
+        target_path = target_state / name
+        backup_files = relative_file_set(backup_path)
+        target_files = relative_file_set(target_path)
+        overwritten = sorted(backup_files & target_files)
+        new_files = sorted(backup_files - target_files)
+        target_only = sorted(target_files - backup_files)
+        impacts.append({
+            "name": name,
+            "source": str(backup_path),
+            "target": str(target_path),
+            "backupFiles": len(backup_files),
+            "targetFiles": len(target_files),
+            "overwriteCount": len(overwritten),
+            "newCount": len(new_files),
+            "targetOnlyCount": len(target_only),
+            "overwritten": overwritten[:25],
+            "newFiles": new_files[:25],
+            "targetOnly": target_only[:25],
+            "truncated": len(overwritten) > 25 or len(new_files) > 25 or len(target_only) > 25,
+        })
+    return impacts
+
+
 def restore_identity_checks(env_name, manifest, manifest_data, target_state):
     state_path = target_state / "state" / "environment.json"
     state_data = read_json(state_path) or {}
@@ -1309,6 +1342,7 @@ def build_restore_plan(manifest, user):
     target_state = ZT / "environments" / env_name
     current_backup_required = True
     identity_checks = restore_identity_checks(env_name, manifest, data, target_state)
+    dry_run_impacts = restore_dry_run_impacts(backup_dir, target_state)
 
     component_lines = "\n".join(
         f"- {item['name']}: {'present' if item['exists'] else 'missing'}; files={item['files']}; source=`{item['path']}`"
@@ -1317,6 +1351,12 @@ def build_restore_plan(manifest, user):
     identity_lines = "\n".join(
         f"- {item['name']}: {item['status']}; {item['detail']}"
         for item in identity_checks
+    )
+    dry_run_lines = "\n".join(
+        f"- {item['name']}: backup files={item['backupFiles']}; target files={item['targetFiles']}; "
+        f"would overwrite={item['overwriteCount']}; would create={item['newCount']}; "
+        f"target-only review={item['targetOnlyCount']}"
+        for item in dry_run_impacts
     )
     blocked = []
     if lock_active:
@@ -1353,6 +1393,10 @@ Target state: `{target_state}`
 
 {identity_lines}
 
+## Dry-Run File Impact
+
+{dry_run_lines}
+
 ## Backup Components
 
 {component_lines}
@@ -1382,6 +1426,7 @@ Target state: `{target_state}`
         "targetState": str(target_state),
         "components": components,
         "identityChecks": identity_checks,
+        "dryRunImpacts": dry_run_impacts,
         "lockActive": lock_active,
         "blocked": blocked,
         "changeRecord": change_record,
