@@ -13,8 +13,10 @@ import subprocess
 import sys
 import threading
 import time
+from base64 import b64encode
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.error import HTTPError
 from urllib.parse import parse_qs, quote, urlparse
 from urllib.request import Request, urlopen
 
@@ -634,8 +636,50 @@ def http_probe(url, headers=None, timeout=3):
         request = Request(url, headers=headers or {}, method="GET")
         with urlopen(request, timeout=timeout) as response:
             return "ok", f"HTTP {response.status}"
+    except HTTPError as exc:
+        return "warn", f"HTTP {exc.code}"
     except Exception as exc:
         return "warn", str(exc)
+
+
+def endpoint_url(endpoint, path):
+    if not endpoint:
+        return ""
+    base = endpoint if endpoint.startswith(("http://", "https://")) else f"https://{endpoint}"
+    return f"{base.rstrip('/')}/{path.lstrip('/')}"
+
+
+def basic_auth_header(username, password):
+    token = b64encode(f"{username}:{password}".encode("utf-8")).decode("ascii")
+    return {"Authorization": f"Basic {token}"}
+
+
+def prism_authenticated_status(endpoint):
+    username = os.environ.get("NUTANIX_PC_USERNAME", "")
+    password = os.environ.get("NUTANIX_PC_PASSWORD", "")
+    if not endpoint or ".example.com" in endpoint:
+        return "warn", "endpoint not configured"
+    if not username or not password:
+        return "warn", "NUTANIX_PC_USERNAME/NUTANIX_PC_PASSWORD not set"
+    status, note = http_probe(
+        endpoint_url(endpoint, "/api/nutanix/v3/versions"),
+        headers=basic_auth_header(username, password),
+    )
+    return status, f"authenticated probe {note}"
+
+
+def registry_authenticated_status(endpoint):
+    username = os.environ.get("ZT_REGISTRY_USERNAME", "")
+    password = os.environ.get("ZT_REGISTRY_PASSWORD", "")
+    if not endpoint or ".example.com" in endpoint:
+        return "warn", "endpoint not configured"
+    if not username or not password:
+        return "warn", "ZT_REGISTRY_USERNAME/ZT_REGISTRY_PASSWORD not set"
+    status, note = http_probe(
+        endpoint_url(endpoint, "/v2/"),
+        headers=basic_auth_header(username, password),
+    )
+    return status, f"authenticated probe {note}"
 
 
 def postgres_status(settings):
@@ -1128,6 +1172,10 @@ def health_checks():
     checks.append(("Registry", "ok" if reg_ok else "warn", reg_note))
     checks.append(("Prism credentials", "ok" if os.environ.get("NUTANIX_PC_USERNAME") and os.environ.get("NUTANIX_PC_PASSWORD") else "warn", "environment variables present" if os.environ.get("NUTANIX_PC_USERNAME") and os.environ.get("NUTANIX_PC_PASSWORD") else "NUTANIX_PC_USERNAME/NUTANIX_PC_PASSWORD not set"))
     checks.append(("Registry credentials", "ok" if os.environ.get("ZT_REGISTRY_USERNAME") and os.environ.get("ZT_REGISTRY_PASSWORD") else "warn", "environment variables present" if os.environ.get("ZT_REGISTRY_USERNAME") and os.environ.get("ZT_REGISTRY_PASSWORD") else "ZT_REGISTRY_USERNAME/ZT_REGISTRY_PASSWORD not set"))
+    prism_auth = prism_authenticated_status(connections.get("prism", ""))
+    checks.append(("Prism authenticated API", prism_auth[0], prism_auth[1]))
+    registry_auth = registry_authenticated_status(connections.get("registry", ""))
+    checks.append(("Registry authenticated API", registry_auth[0], registry_auth[1]))
     for name, status, note in integration_checks():
         checks.append((f"Integration: {name}", status, note))
     return checks

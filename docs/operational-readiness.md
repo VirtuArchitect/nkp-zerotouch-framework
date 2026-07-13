@@ -46,6 +46,7 @@ Before live deployment, operations teams must provide:
 - Local connection, RBAC, database, integration, approval policy, source, inventory, network, provider, and secret-backend settings.
 - Optional file-backed console sessions for local restarts.
 - Enterprise integration contracts and health probes for Postgres, Vault, OIDC, and session-store consistency.
+- Authenticated dashboard health probes for Prism Central and registry endpoints when runtime credentials are present.
 
 ## Required Production Hardening
 
@@ -68,7 +69,7 @@ Before exposing this console beyond a trusted operator workstation:
 - Add backup/restore procedures for `.zt` state and future database state.
 - Run deployment jobs from an isolated Linux or WSL runner with pinned NKP
   bundles, least-privilege credentials, and controlled network access.
-- Extend health checks from TCP and credential-environment validation to authenticated Prism Central and registry API validation.
+- Treat dashboard authenticated API health probes as readiness signals; still verify live deployment permissions before apply.
 
 ## Recommended Operating Model
 
@@ -93,5 +94,5 @@ Keep live apply operations deliberate and controlled:
 - No production SSO provider connected yet.
 - No external Postgres service connected yet.
 - No external Vault service connected yet.
-- No live Prism Central authentication validation yet.
+- No live Prism Central authorization validation against a real NKP lab yet.
 - No end-to-end deployment proof against a real NKP lab yet.
