@@ -362,3 +362,79 @@ def test_secret_env_shell_quotes_values(tmp_path):
     assert "export NUTANIX_USER='admin user'" in output
     assert "export NUTANIX_PASSWORD='$(touch SHOULD_NOT_EXIST)'" in output
     assert 'export ZT_REGISTRY_PASSWORD=' in output
+
+
+def test_operator_controlled_docs_baseline_is_present():
+    expected_tag = f"v{(ROOT / 'VERSION').read_text(encoding='utf-8').strip()}"
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    runbook_index = ROOT / "docs" / "runbooks" / "README.md"
+    template = ROOT / "docs" / "runbooks" / "RUNBOOK-TEMPLATE.md"
+    uat_docs = [
+        ROOT / "docs" / "uat" / "UAT-PLAN.md",
+        ROOT / "docs" / "uat" / "UAT-CASES.md",
+        ROOT / "docs" / "uat" / "UAT-EVIDENCE.md",
+        ROOT / "docs" / "governance" / "PRODUCTION-READINESS-BOUNDARY.md",
+    ]
+    required_runbooks = {
+        "RB-001": ROOT / "docs" / "runbooks" / "RB-001-connected-deployment.md",
+        "RB-002": ROOT / "docs" / "runbooks" / "RB-002-proxied-deployment.md",
+        "RB-003": ROOT / "docs" / "runbooks" / "RB-003-air-gapped-deployment.md",
+        "RB-004": ROOT / "docs" / "runbooks" / "RB-004-pre-deployment-validation.md",
+        "RB-005": ROOT / "docs" / "runbooks" / "RB-005-offline-bundle-preparation.md",
+        "RB-006": ROOT / "docs" / "runbooks" / "RB-006-deployment-execution.md",
+        "RB-007": ROOT / "docs" / "runbooks" / "RB-007-failed-deployment-recovery.md",
+        "RB-008": ROOT / "docs" / "runbooks" / "RB-008-post-deployment-validation.md",
+        "RB-009": ROOT / "docs" / "runbooks" / "RB-009-upgrade-update-artifacts.md",
+        "RB-010": ROOT / "docs" / "runbooks" / "RB-010-rollback-abort.md",
+    }
+    required_headings = [
+        "## Metadata",
+        "## Purpose",
+        "## Scope",
+        "## Preconditions",
+        "## Required Role/RBAC",
+        "## Required Inputs",
+        "## Dependencies",
+        "## Risk/Impact",
+        "## Point Of No Return",
+        "## Procedure",
+        "## Validation",
+        "## Expected Result",
+        "## Failure Conditions",
+        "## Recovery/Rollback",
+        "## Evidence To Capture",
+        "## Audit Requirements",
+        "## Escalation",
+        "## References",
+        "## Evidence Mapping",
+    ]
+
+    assert "[runbook control matrix](docs/runbooks/README.md)" in readme
+    assert "Target maturity: **operator-controlled / deployment-controlled**" in readme
+    assert "| Production validated | NO |" in readme
+
+    index_text = runbook_index.read_text(encoding="utf-8")
+    assert expected_tag in index_text
+    assert "Control Matrix" in index_text
+    assert "Point of no return" in index_text
+    assert template.exists()
+    assert expected_tag in template.read_text(encoding="utf-8")
+
+    seen_ids = set()
+    for runbook_id, path in required_runbooks.items():
+        text = path.read_text(encoding="utf-8")
+        assert expected_tag in text, f"{path.relative_to(ROOT)} must reference {expected_tag}"
+        assert f"| Runbook ID | {runbook_id} |" in text
+        assert runbook_id not in seen_ids
+        seen_ids.add(runbook_id)
+        assert f"[{runbook_id}](" in index_text
+        for heading in required_headings:
+            assert heading in text, f"{path.relative_to(ROOT)} missing {heading}"
+
+    for path in uat_docs:
+        text = path.read_text(encoding="utf-8")
+        assert expected_tag in text, f"{path.relative_to(ROOT)} must reference {expected_tag}"
+
+    boundary = (ROOT / "docs" / "governance" / "PRODUCTION-READINESS-BOUNDARY.md").read_text(encoding="utf-8")
+    assert "Production validated | NO" in boundary
+    assert "Production-ready status from static demo evidence" in boundary

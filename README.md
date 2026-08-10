@@ -20,6 +20,33 @@ Live demo: https://virtuarchitect.github.io/nkp-zerotouch-framework/
 | Live infrastructure apply | Guarded | Apply-class actions require explicit flags, approvals, real NKP bundle paths, Prism Central details, registry access, and operator review. |
 | Enterprise integrations | Probed baseline | Postgres, Vault, OIDC, and session-store settings can be modeled and health-checked; full production integration depends on local configuration. |
 
+## Operational Maturity
+
+Target maturity: **operator-controlled / deployment-controlled**.
+
+Current maturity: MVP/community automation framework with a simulated public
+demo, local CLI phases, local dashboard governance, and guarded apply-class
+execution paths. Production claims require environment-specific UAT evidence and
+organization acceptance.
+
+| Operational status | Status |
+|---|---|
+| Architecture documented | PASS |
+| Installation documented | PASS |
+| Security boundaries documented | PASS |
+| UAT procedure available | PASS |
+| UAT executed | LAB/PARTIAL |
+| Operator runbooks | PASS |
+| Recovery tested | PARTIAL |
+| Production validated | NO |
+| Vendor supported | NO |
+
+Use the [runbook control matrix](docs/runbooks/README.md), the
+[UAT plan](docs/uat/UAT-PLAN.md), the [UAT cases](docs/uat/UAT-CASES.md), the
+[UAT evidence checklist](docs/uat/UAT-EVIDENCE.md), and the
+[production readiness boundary](docs/governance/PRODUCTION-READINESS-BOUNDARY.md)
+before treating any deployment as operator-controlled or production-assessable.
+
 ## Disclaimer
 
 This repository is an independent clickable MVP prototype and community automation framework. All Nutanix integrations, provisioning jobs, policy checks, environment states, and admin workflows shown in the live demo are simulated for demonstration purposes only. The live demo does not provision real Nutanix infrastructure. This project is not affiliated with, sponsored by, or endorsed by Nutanix unless explicitly stated otherwise.
@@ -136,6 +163,11 @@ Additional operational phases are available for secrets, backup, upgrade plannin
 ## Documentation
 
 - `docs/config-reference.md`
+- `docs/runbooks/README.md`
+- `docs/uat/UAT-PLAN.md`
+- `docs/uat/UAT-CASES.md`
+- `docs/uat/UAT-EVIDENCE.md`
+- `docs/governance/PRODUCTION-READINESS-BOUNDARY.md`
 - `docs/runbook-connected.md`
 - `docs/runbook-proxied.md`
 - `docs/runbook-air-gapped.md`
