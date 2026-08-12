@@ -65,7 +65,7 @@ Settings sections:
 
 - `Providers`: default provider intent and runner type.
 - `Secrets`: metadata for local-file or external secret backends. Secret values are not stored by the dashboard.
-- `Integrations`: Postgres, Vault, OIDC, and session-store integration metadata with endpoint/discovery health probes.
+- `Integrations`: Postgres, Vault, OIDC, and session-store integration metadata with endpoint/discovery health probes. OIDC handoff now issues short-lived state/nonce cookies and the callback validates state before failing closed until signed token validation is implemented.
 
 Environment safeguards:
 
