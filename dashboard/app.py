@@ -210,6 +210,39 @@ def form_value(form, name, default=""):
     return form.get(name, [default])[0].strip()
 
 
+def postgres_dsn_contains_password(dsn):
+    if not dsn:
+        return False
+    try:
+        return urlparse(dsn).password is not None
+    except ValueError:
+        return False
+
+
+def redact_postgres_dsn(dsn):
+    if not dsn:
+        return ""
+    try:
+        parsed = urlparse(dsn)
+        if parsed.password is None:
+            return dsn
+        host = parsed.hostname or ""
+        if ":" in host and not host.startswith("["):
+            host = f"[{host}]"
+        netloc = host
+        if parsed.username:
+            netloc = f"{parsed.username}:***@{netloc}"
+        try:
+            port = parsed.port
+        except ValueError:
+            port = None
+        if port:
+            netloc = f"{netloc}:{port}"
+        return parsed._replace(netloc=netloc).geturl()
+    except ValueError:
+        return dsn
+
+
 def safe_key(value):
     key = value.strip().lower().replace(" ", "-")
     return "".join(ch for ch in key if ch.isalnum() or ch in {"-", "_"})
@@ -779,6 +812,8 @@ def postgres_status(settings):
     dsn = settings.get("postgres_dsn", "")
     if not dsn:
         return "warn", "DSN missing"
+    if postgres_dsn_contains_password(dsn):
+        return "warn", "DSN must not include password; use Vault or environment secrets"
     parsed = urlparse(dsn)
     host = parsed.hostname
     if not host:
@@ -4240,6 +4275,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/settings/integrations":
             settings = load_setting("integrations", default_integrations())
+            postgres_dsn_value = redact_postgres_dsn(settings.get("postgres_dsn", ""))
             integration_status = {name: (status, note) for name, status, note in integration_checks()}
             postgres_ok, postgres_note = integration_status.get("Postgres", ("warn", "disabled"))
             vault_ok, vault_note = integration_status.get("Vault", ("warn", "disabled"))
@@ -4265,7 +4301,7 @@ class Handler(BaseHTTPRequestHandler):
       <tbody>
         <tr><td>Session store</td><td><div class="field"><select name="session_store"><option value="memory" {'selected' if settings.get('session_store') == 'memory' else ''}>memory</option><option value="file" {'selected' if settings.get('session_store') == 'file' else ''}>file</option><option value="postgres" {'selected' if settings.get('session_store') == 'postgres' else ''}>postgres contract only</option></select></div></td></tr>
         <tr><td>Enable Postgres</td><td><div class="field"><select name="postgres_enabled"><option value="false" {'selected' if settings.get('postgres_enabled') != 'true' else ''}>false</option><option value="true" {'selected' if settings.get('postgres_enabled') == 'true' else ''}>true</option></select></div></td></tr>
-        <tr><td>Postgres DSN</td><td><div class="field"><input name="postgres_dsn" value="{html.escape(settings.get('postgres_dsn', ''))}" placeholder="postgresql://zt_console@db/nkp_zerotouch"></div></td></tr>
+        <tr><td>Postgres DSN</td><td><div class="field"><input name="postgres_dsn" value="{html.escape(postgres_dsn_value)}" placeholder="postgresql://zt_console@db/nkp_zerotouch"></div></td></tr>
         <tr><td>Enable OIDC</td><td><div class="field"><select name="oidc_enabled"><option value="false" {'selected' if settings.get('oidc_enabled') != 'true' else ''}>false</option><option value="true" {'selected' if settings.get('oidc_enabled') == 'true' else ''}>true</option></select></div></td></tr>
         <tr><td>OIDC issuer</td><td><div class="field"><input name="oidc_issuer" value="{html.escape(settings.get('oidc_issuer', ''))}"></div></td></tr>
         <tr><td>OIDC client ID</td><td><div class="field"><input name="oidc_client_id" value="{html.escape(settings.get('oidc_client_id', ''))}"></div></td></tr>
@@ -4280,6 +4316,7 @@ class Handler(BaseHTTPRequestHandler):
   </form>
 </section>
 <div class="notice">These settings provide concrete integration contracts. External Postgres, Vault, and OIDC services must still be deployed and connected in the target environment. Postgres session storage is not active yet; selecting it records intent while runtime sessions continue to use memory.</div>
+<div class="notice">Do not include database passwords in the Postgres DSN. Store credentials in Vault or environment-scoped secrets and keep this field to endpoint metadata only.</div>
 """
             self.send_html(page("Integrations - NKP ZeroTouch Framework", body, "integrations"))
             return
@@ -4377,6 +4414,11 @@ class Handler(BaseHTTPRequestHandler):
 
         if parsed.path == "/settings/integrations/save":
             data = {key: form_value(form, key) for key in ["session_store", "postgres_enabled", "postgres_dsn", "oidc_enabled", "oidc_issuer", "oidc_client_id", "oidc_redirect_uri", "vault_enabled", "vault_addr", "vault_mount", "vault_secret_path"]}
+            if postgres_dsn_contains_password(data.get("postgres_dsn", "")):
+                audit_event("integrations_saved", self.current_user(), "integrations", "denied", {"reason": "postgres_dsn_password"})
+                body = "<h2>Integration Settings Rejected</h2><div class='notice'>Postgres DSN must not include a password. Store database credentials in Vault or environment-scoped secrets and save only passwordless endpoint metadata here.</div><a class='back-link' href='/settings/integrations'>Back to integrations</a>"
+                self.send_html(page("Integrations Rejected", body, "integrations"), status=400)
+                return
             save_setting("integrations", data)
             audit_event("integrations_saved", self.current_user(), "integrations", "success")
             body = "<section class='metric'><div class='metric-label'>Settings Saved</div><div class='metric-value'>Integrations</div><div class='metric-foot'><span class='chip ok'>Saved locally</span></div></section><a class='back-link' href='/settings/integrations'>Back to integrations</a>"
