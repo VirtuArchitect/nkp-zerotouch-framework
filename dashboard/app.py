@@ -446,15 +446,90 @@ def verify_hs256_jwt(token, secret):
         raise ValueError("id_token signature validation failed")
 
 
+def base64url_uint(value):
+    raw = base64url_decode(value)
+    if not raw:
+        raise ValueError("JWK integer value missing")
+    return int.from_bytes(raw, "big")
+
+
+def oidc_jwks(metadata):
+    embedded = metadata.get("jwks") if isinstance(metadata, dict) else None
+    if isinstance(embedded, dict):
+        return embedded
+    jwks_uri = metadata.get("jwks_uri", "") if isinstance(metadata, dict) else ""
+    if not jwks_uri:
+        raise ValueError("OIDC JWKS URI missing")
+    request = Request(jwks_uri, headers={"Accept": "application/json"})
+    with urlopen(request, timeout=5) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("OIDC JWKS response was not an object")
+    return payload
+
+
+def select_jwks_rsa_key(header, metadata):
+    keys = oidc_jwks(metadata).get("keys", [])
+    if not isinstance(keys, list):
+        raise ValueError("OIDC JWKS keys missing")
+    kid = str(header.get("kid", ""))
+    candidates = []
+    for key in keys:
+        if not isinstance(key, dict):
+            continue
+        if key.get("kty") != "RSA":
+            continue
+        if key.get("use") not in {"", None, "sig"}:
+            continue
+        if key.get("alg") not in {"", None, "RS256"}:
+            continue
+        if kid and str(key.get("kid", "")) != kid:
+            continue
+        candidates.append(key)
+    if kid and not candidates:
+        raise ValueError("OIDC JWKS key id not found")
+    if not kid and len(candidates) != 1:
+        raise ValueError("OIDC JWKS key id is required when multiple RSA signing keys exist")
+    return candidates[0]
+
+
+def verify_rs256_jwt(token, header, metadata):
+    parts = token.split(".")
+    if len(parts) != 3:
+        raise ValueError("JWT must contain header, payload, and signature")
+    key = select_jwks_rsa_key(header, metadata)
+    n = base64url_uint(str(key.get("n", "")))
+    e = base64url_uint(str(key.get("e", "")))
+    key_bytes = (n.bit_length() + 7) // 8
+    if key_bytes < 256:
+        raise ValueError("OIDC RSA signing key must be at least 2048 bits")
+    signature = base64url_decode(parts[2])
+    if len(signature) != key_bytes:
+        raise ValueError("id_token signature validation failed")
+    decoded = pow(int.from_bytes(signature, "big"), e, n).to_bytes(key_bytes, "big")
+    digest_info_prefix = bytes.fromhex("3031300d060960864801650304020105000420")
+    digest = hashlib.sha256(".".join(parts[:2]).encode("ascii")).digest()
+    expected_tail = digest_info_prefix + digest
+    padding_len = key_bytes - len(expected_tail) - 3
+    if padding_len < 8:
+        raise ValueError("id_token signature validation failed")
+    expected = b"\x00\x01" + (b"\xff" * padding_len) + b"\x00" + expected_tail
+    if not hmac.compare_digest(decoded, expected):
+        raise ValueError("id_token signature validation failed")
+
+
 def oidc_validate_id_token(id_token, settings, metadata, expected_nonce, now=None):
     if not id_token:
         raise ValueError("token response did not include id_token")
     header = jwt_json_part(id_token, 0)
     claims = jwt_json_part(id_token, 1)
     alg = header.get("alg", "")
-    if alg != "HS256":
-        raise ValueError("id_token alg must be HS256 for the built-in validator")
-    verify_hs256_jwt(id_token, oidc_client_secret())
+    if alg == "HS256":
+        verify_hs256_jwt(id_token, oidc_client_secret())
+    elif alg == "RS256":
+        verify_rs256_jwt(id_token, header, metadata)
+    else:
+        raise ValueError("id_token alg must be HS256 or RS256 for the built-in validator")
 
     current = int(now or time.time())
     issuer = str(settings.get("oidc_issuer", "")).rstrip("/")
@@ -1475,7 +1550,7 @@ def oidc_readiness(settings):
         checks.append((key, value_parsed.scheme in {"http", "https"} and bool(value_parsed.netloc), value or "missing"))
 
     ready = all(passed for _, passed, _ in checks)
-    note = "discovery ready; callback validates HS256 id_tokens and local RBAC mapping" if ready else "discovery metadata incomplete"
+    note = "discovery ready; callback validates HS256 and RS256/JWKS id_tokens with local RBAC mapping" if ready else "discovery metadata incomplete"
     return ("ok" if ready else "warn"), note, metadata, checks
 
 
@@ -3425,7 +3500,7 @@ class Handler(BaseHTTPRequestHandler):
     <tbody>{check_rows}</tbody>
   </table>
 </section>
-<div class="notice">OIDC metadata is configured and validated here. The built-in callback completes authorization-code exchange for signed HS256 <code>id_token</code> responses, validates nonce, issuer, audience, and expiry, then maps the identity to an active local RBAC account. RSA/JWKS providers fail closed until a reviewed JWT crypto dependency is added.</div>
+<div class="notice">OIDC metadata is configured and validated here. The built-in callback completes authorization-code exchange for signed HS256 or RS256/JWKS <code>id_token</code> responses, validates nonce, issuer, audience, expiry, and signature, then maps the identity to an active local RBAC account.</div>
 <a class="back-link" href="/login">Back to local login</a>
 </div>
 """

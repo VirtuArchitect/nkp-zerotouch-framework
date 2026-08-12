@@ -39,16 +39,16 @@ Before adding a dependency:
 
 ## Current Known Dependency Decision
 
-Full OIDC authorization-code login is intentionally not completed in the
-dependency-light baseline. Correct production OIDC requires signed token
-validation against provider JWKS and should use a reviewed JWT/OIDC library
-rather than ad hoc cryptography.
+OIDC authorization-code login now supports signed HS256 and RS256/JWKS
+`id_token` validation in the dependency-light baseline. The built-in validator
+checks issuer, audience, state, nonce, expiry, signature, local RBAC mapping,
+JWKS key ID selection, and 2048-bit minimum RSA signing keys without adding a
+runtime dependency.
 
-The dashboard may validate signed authorization handoff state and fail closed
-without new dependencies, but it must not create a logged-in session until token
-exchange, signed JWT validation, nonce validation, and role mapping are backed
-by a reviewed implementation.
-
-If OIDC becomes the next priority, request approval to add an appropriate
-runtime dependency and include tests for success, invalid state, invalid issuer,
-invalid audience, expiry, and missing role mapping.
+Production SSO still requires deployment-specific identity provider
+configuration, claim mapping, secret handling, durable sessions, and external
+validation evidence. If broader JWT algorithms, encrypted tokens, advanced key
+rotation behavior, or IdP-specific profile handling become required, add a
+reviewed JWT/OIDC library and include tests for invalid issuer, invalid
+audience, expired tokens, unknown key IDs, algorithm confusion, and missing role
+mapping.

@@ -23,13 +23,12 @@ Acceptance criteria:
 
 ### Complete OIDC authorization-code login flow
 
-Status: implemented baseline for HS256 `id_token` providers; RSA/JWKS support
-still requires a reviewed JWT crypto dependency.
+Status: implemented baseline for HS256 and RS256/JWKS `id_token` providers.
 
 Acceptance criteria:
 
 - OIDC discovery is validated before login.
-- Authorization-code callback validates state, nonce, issuer, audience, and token expiry.
+- Authorization-code callback validates state, nonce, issuer, audience, token expiry, and token signature.
 - OIDC identity maps to local roles without storing provider secrets in Git.
 - Tests cover success, invalid state, invalid issuer, and missing role mapping.
 
