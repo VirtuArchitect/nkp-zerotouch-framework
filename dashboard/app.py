@@ -1075,6 +1075,7 @@ def default_approval_policy():
         "registry_approvals": "1",
         "upgrade_approvals": "1",
         "destroy_approvals": "2",
+        "restore_approvals": "2",
         "prevent_self_approval": "true",
         "production_requires_admin": "true",
     }
@@ -2252,6 +2253,77 @@ Target state: `{target_state}`
     return plan_id, plan_path, metadata_path, metadata
 
 
+def resolve_restore_metadata(raw_path):
+    if not raw_path:
+        raise ValueError("Missing restore metadata path.")
+    candidate = Path(raw_path)
+    if not candidate.is_absolute():
+        candidate = ROOT / candidate
+    resolved = candidate.resolve()
+    restore_root = (ZT / "restore-plans").resolve()
+    if resolved.parent != restore_root or resolved.suffix != ".json":
+        raise ValueError("Restore metadata path is outside .zt/restore-plans.")
+    if not resolved.exists():
+        raise ValueError("Restore metadata not found.")
+    data = read_json(resolved) or {}
+    if not data.get("manualOnly"):
+        raise ValueError("Restore metadata is not marked as manual-only.")
+    return resolved, data
+
+
+def create_restore_request(metadata_path, user):
+    metadata_path, metadata = resolve_restore_metadata(metadata_path)
+    env_name = metadata.get("environment", "")
+    blocked = list(metadata.get("blocked", []))
+    if blocked:
+        raise ValueError("Restore request is blocked: " + "; ".join(blocked))
+    if active_lock(env_name):
+        raise ValueError(f"Restore request is blocked by an active lock for {env_name}.")
+    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    job_id = f"{time.strftime('%Y%m%d-%H%M%S', time.gmtime())}-{secrets.token_hex(3)}"
+    command_text = (
+        f"print({json.dumps(f'Manual restore authorization approved for {env_name}.')}); "
+        f"print({json.dumps(f'Restore plan: {metadata.get('id', '')}')}); "
+        "print('No files were copied by this job. Complete the reviewed manual restore steps, then run preflight, drift, plan review, verify, and backup.')"
+    )
+    job = {
+        "id": job_id,
+        "kind": "restore",
+        "action": "restore",
+        "config": metadata.get("manifest", ""),
+        "environment": env_name,
+        "status": "pending_approval",
+        "requestedBy": user.get("username", "unknown") if user else "unknown",
+        "requestedRole": user.get("role", "") if user else "",
+        "approvalRequired": True,
+        "requiredApprovals": approval_requirement("restore"),
+        "approvals": [],
+        "createdAt": now,
+        "updatedAt": now,
+        "command": [sys.executable, "-c", command_text],
+        "commandLabel": f"manual restore authorization for {env_name}",
+        "restorePlan": str(metadata_path.with_suffix(".md")),
+        "restoreMetadata": str(metadata_path),
+        "changeRecord": (metadata.get("changeRecord") or {}).get("id", ""),
+    }
+    write_job(job)
+    append_job_log(job_id, "[pending restore approval]\n")
+    change_record_id = job.get("changeRecord")
+    if change_record_id:
+        record_path = change_record_path(change_record_id)
+        record = read_json(record_path) or {}
+        record.update({
+            "status": "pending_approval",
+            "jobId": job_id,
+            "restoreJob": job_id,
+            "updatedAt": now,
+            "approvalRequired": True,
+            "requiredApprovals": job["requiredApprovals"],
+        })
+        write_json(record_path, record)
+    return job
+
+
 def environment_for_config(config):
     data = read_json_from_context(config)
     return str(data.get("environmentName") or Path(config).stem)
@@ -2521,7 +2593,7 @@ def run_job_background(job_id):
         return
     command = job.get("command", [])
     env_name = job.get("environment", "")
-    lock_required = job.get("action") in {"prepare", "generate", "registry", "deploy", "upgrade", "destroy"}
+    lock_required = job.get("action") in {"prepare", "generate", "registry", "deploy", "upgrade", "destroy", "restore"}
     if lock_required:
         locked, reason = acquire_lock(env_name, job)
         if not locked:
@@ -3872,7 +3944,7 @@ class Handler(BaseHTTPRequestHandler):
     <tbody>{''.join(rows) or '<tr><td colspan="4" class="muted">No backup manifests found. Run backup for an environment first.</td></tr>'}</tbody>
   </table>
 </section>
-<div class="notice">Restore remains a controlled manual workflow. Review the manifest, then restore selected state/generated/report folders deliberately.</div>
+<div class="notice">Restore remains a controlled manual workflow. Generate a restore plan, request approval when the plan has no blockers, then restore selected state/generated/report folders deliberately.</div>
 """
             self.send_html(page("Backups - NKP ZeroTouch Framework", body, "backups"))
             return
@@ -3891,7 +3963,7 @@ class Handler(BaseHTTPRequestHandler):
 <div class="section-head">
   <div>
     <h2>Restore Planning</h2>
-    <div class="section-copy">Generate controlled restore plans from backup manifests. Actual restore remains manual.</div>
+    <div class="section-copy">Generate controlled restore plans from backup manifests and request approval for manual restore authorization. Actual file copy remains manual.</div>
   </div>
 </div>
 <section class="panel">
@@ -3900,7 +3972,7 @@ class Handler(BaseHTTPRequestHandler):
     <tbody>{''.join(rows) or '<tr><td colspan="4" class="muted">No backups available.</td></tr>'}</tbody>
   </table>
 </section>
-<div class="notice">Restore plans are written under <code>.zt/restore-plans/</code>. Review the plan before manually copying state back into place.</div>
+<div class="notice">Restore plans are written under <code>.zt/restore-plans/</code>. Review the plan and approval job before manually copying state back into place.</div>
 """
             self.send_html(page("Restore - NKP ZeroTouch Framework", body, "restore"))
             return
@@ -4577,6 +4649,7 @@ class Handler(BaseHTTPRequestHandler):
         <tr><td>Registry approvals</td><td><div class="field"><input name="registry_approvals" value="{html.escape(policy.get('registry_approvals', '1'))}"></div></td></tr>
         <tr><td>Upgrade approvals</td><td><div class="field"><input name="upgrade_approvals" value="{html.escape(policy.get('upgrade_approvals', '1'))}"></div></td></tr>
         <tr><td>Destroy approvals</td><td><div class="field"><input name="destroy_approvals" value="{html.escape(policy.get('destroy_approvals', '2'))}"></div></td></tr>
+        <tr><td>Restore approvals</td><td><div class="field"><input name="restore_approvals" value="{html.escape(policy.get('restore_approvals', '2'))}"></div></td></tr>
         <tr><td>Prevent self approval</td><td><div class="field"><select name="prevent_self_approval"><option value="true" {'selected' if policy.get('prevent_self_approval') == 'true' else ''}>true</option><option value="false" {'selected' if policy.get('prevent_self_approval') == 'false' else ''}>false</option></select></div></td></tr>
         <tr><td>Production requires Admin</td><td><div class="field"><select name="production_requires_admin"><option value="true" {'selected' if policy.get('production_requires_admin') == 'true' else ''}>true</option><option value="false" {'selected' if policy.get('production_requires_admin') == 'false' else ''}>false</option></select></div></td></tr>
         <tr><td></td><td><button>Save approval policy</button></td></tr>
@@ -4584,7 +4657,7 @@ class Handler(BaseHTTPRequestHandler):
     </table>
   </form>
 </section>
-<div class="notice">Apply jobs remain pending until the configured approval threshold is met. Destroy defaults to two approvals.</div>
+<div class="notice">Apply and restore jobs remain pending until the configured approval threshold is met. Destroy and restore default to two approvals.</div>
 """
             self.send_html(page("Approval Policy - NKP ZeroTouch Framework", body, "approval-policy"))
             return
@@ -5026,7 +5099,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if parsed.path == "/approval-policy/save":
-            data = {key: form_value(form, key) for key in ["deploy_approvals", "registry_approvals", "upgrade_approvals", "destroy_approvals", "prevent_self_approval", "production_requires_admin"]}
+            data = {key: form_value(form, key) for key in ["deploy_approvals", "registry_approvals", "upgrade_approvals", "destroy_approvals", "restore_approvals", "prevent_self_approval", "production_requires_admin"]}
             save_setting("approval-policy", data)
             audit_event("approval_policy_saved", self.current_user(), "approval-policy", "success")
             body = "<section class='metric'><div class='metric-label'>Settings Saved</div><div class='metric-value'>Approval Policy</div><div class='metric-foot'><span class='chip ok'>Saved locally</span></div></section><a class='back-link' href='/approval-policy'>Back to approval policy</a>"
@@ -5290,8 +5363,26 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as exc:
                 self.send_html(page("Restore Plan Error", f"<h2>Restore plan failed</h2><div class='notice'>{html.escape(str(exc))}</div><a class='back-link' href='/restore'>Back to restore</a>", "restore"), status=400)
                 return
-            body = f"<section class='metric'><div class='metric-label'>Restore Plan</div><div class='metric-value'>{html.escape(plan_id)}</div><div class='metric-foot'><span class='chip ok'>Generated</span></div></section><a class='button-link' href='/artifacts/view?path={quote(str(plan_path))}'>Open restore plan</a> <a class='button-link' href='/artifacts/view?path={quote(str(metadata_path))}'>Open metadata</a> <a class='back-link' href='/restore'>Back to restore</a>"
+            request_control = (
+                f"<form method='post' action='/restore/request'><input type='hidden' name='metadata' value='{html.escape(str(metadata_path))}'><button>Request restore approval</button></form>"
+                if not metadata.get("blocked") else
+                "<div class='notice'>Restore request is blocked until the generated metadata has no blocking signals.</div>"
+            )
+            body = f"<section class='metric'><div class='metric-label'>Restore Plan</div><div class='metric-value'>{html.escape(plan_id)}</div><div class='metric-foot'><span class='chip ok'>Generated</span></div></section><a class='button-link' href='/artifacts/view?path={quote(str(plan_path))}'>Open restore plan</a> <a class='button-link' href='/artifacts/view?path={quote(str(metadata_path))}'>Open metadata</a> {request_control} <a class='back-link' href='/restore'>Back to restore</a>"
             self.send_html(page("Restore Plan Created", body, "restore"))
+            return
+
+        if parsed.path == "/restore/request":
+            metadata = Path(form_value(form, "metadata"))
+            try:
+                job = create_restore_request(metadata, self.current_user())
+                audit_event("restore_request_created", self.current_user(), job["id"], "success", {"metadata": str(metadata), "environment": job.get("environment", "")})
+            except ValueError as exc:
+                audit_event("restore_request_rejected", self.current_user(), str(metadata), "denied", {"reason": str(exc)})
+                self.send_html(page("Restore Request Blocked", f"<h2>Restore request blocked</h2><div class='notice'>{html.escape(str(exc))}</div><a class='back-link' href='/restore'>Back to restore</a>", "restore"), status=409)
+                return
+            body = f"<section class='metric'><div class='metric-label'>Restore Request</div><div class='metric-value'>{html.escape(job['id'])}</div><div class='metric-foot'><span class='chip warn'>Pending approval</span></div></section><a class='button-link' href='/jobs/view?id={html.escape(job['id'])}'>Open approval job</a> <a class='back-link' href='/restore'>Back to restore</a>"
+            self.send_html(page("Restore Request Created", body, "restore"))
             return
 
         if parsed.path == "/jobs/approve":

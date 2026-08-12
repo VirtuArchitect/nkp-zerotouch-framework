@@ -2015,9 +2015,11 @@ cluster:
 
 def test_restore_plan_records_controls_and_metadata(tmp_path):
     original_zt = app.ZT
+    original_jobs = app.JOBS
     original_locks = app.LOCKS
     original_change_records = app.CHANGE_RECORDS
     app.ZT = tmp_path / ".zt"
+    app.JOBS = app.ZT / "jobs"
     app.LOCKS = app.ZT / "locks"
     app.CHANGE_RECORDS = app.ZT / "change-records"
     try:
@@ -2073,17 +2075,32 @@ def test_restore_plan_records_controls_and_metadata(tmp_path):
         assert metadata["blocked"] == []
         assert app.read_json(metadata_path)["components"][0]["name"] == "state"
         assert app.read_json(app.change_record_path(metadata["changeRecord"]["id"]))["restorePlan"] == str(plan_path)
+
+        job = app.create_restore_request(metadata_path, {"username": "tester", "role": "Admin"})
+        assert job["kind"] == "restore"
+        assert job["action"] == "restore"
+        assert job["status"] == "pending_approval"
+        assert job["requiredApprovals"] == app.approval_requirement("restore")
+        assert job["environment"] == "restore-lab"
+        assert job["restoreMetadata"] == str(metadata_path)
+        assert app.read_job(job["id"])["commandLabel"] == "manual restore authorization for restore-lab"
+        updated_change = app.read_json(app.change_record_path(metadata["changeRecord"]["id"]))
+        assert updated_change["status"] == "pending_approval"
+        assert updated_change["restoreJob"] == job["id"]
     finally:
         app.ZT = original_zt
+        app.JOBS = original_jobs
         app.LOCKS = original_locks
         app.CHANGE_RECORDS = original_change_records
 
 
 def test_restore_plan_flags_active_locks_and_missing_components(tmp_path):
     original_zt = app.ZT
+    original_jobs = app.JOBS
     original_locks = app.LOCKS
     original_change_records = app.CHANGE_RECORDS
     app.ZT = tmp_path / ".zt"
+    app.JOBS = app.ZT / "jobs"
     app.LOCKS = app.ZT / "locks"
     app.CHANGE_RECORDS = app.ZT / "change-records"
     try:
@@ -2094,7 +2111,7 @@ def test_restore_plan_flags_active_locks_and_missing_components(tmp_path):
         app.write_job({"id": "job-lock-restore", "status": "running", "action": "restore", "environment": "locked-lab"})
         app.write_json(app.lock_path("locked-lab"), {"environment": "locked-lab", "jobId": "job-lock-restore", "action": "restore"})
 
-        _, plan_path, _, metadata = app.build_restore_plan(manifest, {"username": "tester"})
+        _, plan_path, metadata_path, metadata = app.build_restore_plan(manifest, {"username": "tester"})
 
         plan_text = plan_path.read_text(encoding="utf-8")
         assert "Confirm no active lock exists: blocked" in plan_text
@@ -2102,7 +2119,14 @@ def test_restore_plan_flags_active_locks_and_missing_components(tmp_path):
         assert any("backup components are missing" in item for item in metadata["blocked"])
         assert any("Identity check failed" in item for item in metadata["blocked"])
         assert metadata["changeRecord"]["status"] == "blocked"
+        try:
+            app.create_restore_request(metadata_path, {"username": "tester", "role": "Admin"})
+        except ValueError as exc:
+            assert "Restore request is blocked" in str(exc)
+        else:
+            raise AssertionError("Expected blocked restore plan to reject restore request")
     finally:
         app.ZT = original_zt
+        app.JOBS = original_jobs
         app.LOCKS = original_locks
         app.CHANGE_RECORDS = original_change_records

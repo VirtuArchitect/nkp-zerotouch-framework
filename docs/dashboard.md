@@ -30,11 +30,14 @@ Apply/destructive actions use the controlled CLI window and require approval:
 - `deploy -Apply`
 - `upgrade -Apply`
 - `destroy -Apply -ConfirmDestroy`
+- Restore authorization from a clean restore plan
 
 Job and approval model:
 
 - Safe jobs are written under `.zt/jobs/<job-id>/` and start immediately.
 - Apply jobs are written with `pending_approval` status.
+- Restore authorization jobs are written with `pending_approval` status and do
+  not copy files; they record approval for the manual restore runbook path.
 - Users with approval permission can approve or reject apply jobs from `Jobs`.
 - Job detail pages show the validated command, status, approval metadata, and captured log output.
 - Active job detail pages auto-refresh while queued, running, or waiting for approval.
@@ -65,6 +68,8 @@ Deployment readiness sections:
 - `Jobs`: execution queue, approval controls, job detail pages, and captured live logs.
 - `Health`: runner, tool, bundle, Prism, registry, credential environment variables, enterprise integration probes, and state-path readiness.
 - `Artifacts`: generated file browser, viewer, and diff workflow for plans, logs, reports, state, and configs.
+- `Restore`: backup manifest review, restore plan generation, blocked-signal
+  checks, and approval request creation for manual restore authorization.
 - `Evidence Packs`: review page for `.zt/evidence/` manifests, redaction status, archive paths, and pack metadata created by the `evidence` phase. The public demo mirrors this view with simulated evidence-pack data.
 - `/api/preflight`: authenticated JSON view of console preflight checks and structured validation evidence.
 - `/api/evidence`: authenticated JSON view of generated evidence pack manifests and archive metadata.

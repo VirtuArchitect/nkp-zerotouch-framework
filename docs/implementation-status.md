@@ -37,12 +37,12 @@ This maps the public-readiness and real-deployment tasks to the repository featu
 | Plan hashing | Implemented baseline | plan review stores hashes and reports stale reviews when generated artifacts change |
 | Change records | Implemented baseline | apply requests create local change records with job ID, requester, plan hashes, and rollback notes |
 | Drift detection | Implemented baseline | console reports stale reviews, YAML-after-prepare changes, missing generate, and missing verification |
-| Backup/restore UI | Implemented baseline | console lists backup manifests; restore remains manual and controlled |
+| Backup/restore UI | Implemented baseline | console lists backup manifests, creates guarded restore plans, and can request approval for manual restore authorization |
 | Release channels | Implemented baseline | configurable dev/lab/pilot/production channel metadata |
 | Release channel enforcement | Implemented baseline | apply jobs use the higher of action approval count or release-channel approval count |
 | Plan review enforcement | Implemented baseline | apply requests are blocked when review is missing, rejected, or stale |
 | Change record detail | Implemented baseline | change records have detail pages with job link, hashes, requester, status, and rollback notes |
-| Restore planning | Implemented baseline | console generates guarded restore plans and JSON metadata from backup manifests, including component inventory and lock warnings |
+| Restore planning | Implemented baseline | console generates guarded restore plans and JSON metadata from backup manifests, including component inventory, lock warnings, change records, and approval-gated no-copy authorization jobs |
 | Lock cleanup | Implemented baseline | stale locks can be cleared while active locks remain protected |
 | Production readiness gate | Implemented baseline | console reports plan review, preflight evidence, backup, drift, channel, and structured verification evidence readiness |
 | Dashboard route tests | Implemented baseline | pytest route/API smoke coverage for dashboard pages and JSON endpoints |

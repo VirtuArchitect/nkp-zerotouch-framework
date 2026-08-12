@@ -1,6 +1,10 @@
 # Restore Controls
 
-Restore remains plan-first and manual by default. Do not add automated restore apply behavior until these controls are implemented and reviewed.
+Restore remains plan-first and manual by default. The dashboard can create an
+approval-gated restore authorization job from clean restore metadata, but that
+job does not copy files or mutate environment state. Do not add automated
+restore apply behavior until copy semantics, conflict handling, and post-restore
+verification controls are implemented and reviewed.
 
 ## Restore Execution Requirements
 
@@ -11,7 +15,7 @@ Before restore execution is automated, the framework must require:
 - A current backup before restore begins.
 - Environment identity checks proving the target config and state directory match.
 - No active lock for the target environment.
-- Approval policy for restore actions.
+- Approval policy for restore authorization jobs.
 - A change record linking requester, approvals, backup manifest, restore plan, and rollback notes.
 - Audit events for plan generation, approval, execution start, success, failure, and cancellation.
 
@@ -25,10 +29,12 @@ Restore dry run should show:
 - Required post-restore checks.
 - Commands an operator must run before any live apply resumes.
 
-The dashboard restore plan generator now records available backup components,
-file counts, active lock status, target identity evidence, dry-run file impact,
+The dashboard restore plan generator records available backup components, file
+counts, active lock status, target identity evidence, dry-run file impact,
 blocking signals, a restore-specific change record, and JSON metadata for audit.
-Restore execution remains manual.
+When the metadata has no blocking signals, an operator can request restore
+approval. The approved job records the authorization and required follow-up
+checks, then exits without copying files.
 
 ## Execution Boundary
 
@@ -50,4 +56,5 @@ After restore, operators should rerun:
 4. Verification.
 5. Backup.
 
-Restore execution needs tests and security review before it moves beyond plan generation.
+Automated restore execution still needs implementation, tests, and security
+review before it moves beyond approval-gated manual authorization.
