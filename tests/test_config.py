@@ -438,3 +438,14 @@ def test_operator_controlled_docs_baseline_is_present():
     boundary = (ROOT / "docs" / "governance" / "PRODUCTION-READINESS-BOUNDARY.md").read_text(encoding="utf-8")
     assert "Production validated | NO" in boundary
     assert "Production-ready status from static demo evidence" in boundary
+
+
+def test_live_demo_surfaces_uat_readiness_boundary():
+    demo_index = (ROOT / "docs" / "demo" / "index.html").read_text(encoding="utf-8")
+    demo_app = (ROOT / "docs" / "demo" / "app.js").read_text(encoding="utf-8")
+
+    assert 'data-view-link="uat"' in demo_index
+    assert 'data-view="uat"' in demo_index
+    assert "UAT evidence is an operational readiness signal, not production validation." in demo_index
+    assert "const uatCases" in demo_app
+    assert "renderUat();" in demo_app

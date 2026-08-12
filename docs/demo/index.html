@@ -35,6 +35,7 @@
           <button class="nav-item" type="button" data-view-link="setup">Setup Wizard</button>
           <button class="nav-item" type="button" data-view-link="preflight">Preflight</button>
           <button class="nav-item" type="button" data-view-link="drift">Drift</button>
+          <button class="nav-item" type="button" data-view-link="uat">UAT</button>
           <button class="nav-item" type="button" data-view-link="production">Production Gate</button>
           <button class="nav-item" type="button" data-view-link="health">Health</button>
           <div class="nav-label">Artifacts</div>
@@ -174,6 +175,23 @@
               </table>
             </section>
             <div class="notice">Evidence packs exclude raw kubeconfig and local secret values. Generated plans and logs can still contain topology, VIPs, endpoints, and environment names.</div>
+          </section>
+
+          <section class="view" data-view="uat">
+            <section class="summary-grid" id="uatMetrics"></section>
+            <div class="section-head">
+              <div>
+                <h2>UAT Readiness</h2>
+                <div class="section-copy">Maps documented UAT cases to local evidence records, evidence packs, jobs, backups, and run history.</div>
+              </div>
+            </div>
+            <section class="panel">
+              <table>
+                <thead><tr><th>Case</th><th>Status</th><th>Required Result</th><th>Evidence Requirement</th></tr></thead>
+                <tbody id="uatRows"></tbody>
+              </table>
+            </section>
+            <div class="notice">UAT evidence is an operational readiness signal, not production validation. Partial coverage means the console found a candidate local signal; an operator still needs reviewed outcomes, exceptions, owners, and environment-specific acceptance before calling UAT complete.</div>
           </section>
 
           <section class="view" data-view="generic">

@@ -158,6 +158,21 @@ const evidencePacks = [
   },
 ];
 
+const uatCases = [
+  ["UAT-001", "Connected config validation", "partial", "2 validation evidence records", "Validation pass or accepted warnings", "Config hash and validation output"],
+  ["UAT-002", "Proxied config validation", "partial", "proxy/no-proxy checks captured", "Proxy/no-proxy checks reviewed", "Config hash, proxy review, validation output"],
+  ["UAT-003", "Air-gapped config validation", "partial", "bundle and registry warnings captured", "Bundle and registry requirements verified", "Config hash, bundle checksum, validation output"],
+  ["UAT-004", "Prepare workspace", "partial", "3 configured environments", ".zt workspace created for approved config", "Prepare output and workspace path"],
+  ["UAT-005", "Generate artifacts", "partial", "1 environment with generated artifacts", "Reviewable artifacts created", "Generated files and config hash"],
+  ["UAT-006", "Point-of-no-return review", "missing", "approval record required", "Operator identifies apply boundary", "Approval or tabletop record"],
+  ["UAT-007", "Registry planning/execution", "missing", "registry evidence required", "Registry action is approved or simulated", "Registry output or simulation marker"],
+  ["UAT-008", "Deployment execution", "missing", "deployment evidence required", "Deploy action is approved or simulated", "Command output and target/simulation evidence"],
+  ["UAT-009", "Post-deployment validation", "partial", "verification evidence found", "Verify output captured", "Verify output and acceptance result"],
+  ["UAT-010", "Failed deployment recovery", "partial", "2 evidence packs available", "Failure is classified before rerun", "Failure transcript and recovery decision"],
+  ["UAT-011", "Rollback/abort", "missing", "decision record required", "Abort or rollback path is documented", "Decision record and final state"],
+  ["UAT-012", "Dashboard governance", "partial", "3 run records, 3 job records", "Approval/audit/run records are visible", "Dashboard record or screenshot"],
+];
+
 const genericSections = {
   setup: ["Setup Wizard", "Create a deployment profile from connected, proxied, or air-gapped templates.", [["Source template", "connected.example.yaml"], ["Identity checks", "duplicate names blocked"], ["Next step", "prepare workspace"]]],
   preflight: ["Preflight", "Readiness matrix across bundle, network, credentials, and provider checks.", [["Bundle", "NKP v2.17.1 discovered"], ["Prism Central", "placeholder endpoint warning"], ["Registry", "required for air-gapped"]]],
@@ -262,6 +277,36 @@ function renderEvidence() {
   `).join("");
 }
 
+function renderUat() {
+  const partial = uatCases.filter(([, , status]) => status === "partial").length;
+  const missing = uatCases.filter(([, , status]) => status === "missing").length;
+  const coverage = uatCases.length - missing;
+  $("#uatMetrics").innerHTML = [
+    ["UAT Cases", uatCases.length, "documented acceptance checks"],
+    ["Partial Evidence", partial, "cases with local signals"],
+    ["Missing Evidence", missing, "cases needing proof"],
+    ["Evidence Coverage", coverage, "case(s) with signals"],
+  ].map(([label, value, foot]) => `
+    <a class="metric" href="#uat" data-command="metric">
+      <div class="metric-label">${label}</div>
+      <div class="metric-value">${value}</div>
+      <div class="metric-foot">${foot}</div>
+    </a>
+  `).join("");
+
+  $("#uatRows").innerHTML = uatCases.map(([id, title, status, detail, required, evidence]) => {
+    const chipClass = status === "pass" ? "ok" : status === "partial" ? "warn" : "fail";
+    return `
+      <tr>
+        <td><div class="env-name">${id}</div><div class="env-file">${title}</div></td>
+        <td><span class="chip ${chipClass}">${status}</span><div class="env-file">${detail}</div></td>
+        <td>${required}</td>
+        <td>${evidence}</td>
+      </tr>
+    `;
+  }).join("");
+}
+
 function renderGeneric(sectionKey) {
   const [title, copy, cards] = genericSections[sectionKey] || genericSections.settings;
   $("#genericTitle").textContent = title;
@@ -272,7 +317,7 @@ function renderGeneric(sectionKey) {
 }
 
 function setView(viewName) {
-  const dedicated = ["environments", "jobs", "runs", "pipeline", "cli", "artifacts", "evidence"];
+  const dedicated = ["environments", "jobs", "runs", "pipeline", "cli", "artifacts", "evidence", "uat"];
   const targetView = dedicated.includes(viewName) ? viewName : "generic";
   $$(".view").forEach((view) => view.classList.toggle("active", view.dataset.view === targetView));
   $$("[data-view-link]").forEach((item) => item.classList.toggle("active", item.dataset.viewLink === viewName));
@@ -329,6 +374,7 @@ renderJobs();
 renderPipeline();
 renderArtifacts();
 renderEvidence();
+renderUat();
 renderGeneric("settings");
 renderThemeLabel();
 
