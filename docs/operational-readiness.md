@@ -64,7 +64,7 @@ Before exposing this console beyond a trusted operator workstation:
   and `ZT_LOGIN_LOCKOUT_SECONDS`.
 - Set `ZT_COOKIE_SECURE=true` whenever the dashboard is served through HTTPS or
   an HTTPS-terminating reverse proxy so browser cookies are marked `Secure`.
-- Move from memory sessions to file-backed local sessions. Treat Postgres-backed shared session storage as future work until a reviewed storage backend is implemented.
+- Move from memory sessions to file-backed local sessions for workstation restarts, or to Postgres-backed sessions for shared operator consoles when `psycopg` or `psycopg2` is installed in the dashboard runtime.
 - Connect OIDC/SAML or enterprise SSO to a real identity provider.
 - Complete OIDC authorization-code token exchange for production login.
 - Connect console state to Postgres if multi-user operation is required.
@@ -99,7 +99,7 @@ Keep live apply operations deliberate and controlled:
 ## Current Gaps
 
 - No production SSO provider connected yet.
-- No external Postgres service or Postgres-backed dashboard session backend connected yet.
+- No external Postgres service is connected in this repository; Postgres-backed dashboard sessions require deployment-specific database provisioning and runtime driver installation.
 - No external Vault service connected yet.
 - No live Prism Central authorization validation against a real NKP lab yet.
 - No end-to-end deployment proof against a real NKP lab yet.

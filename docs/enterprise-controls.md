@@ -82,3 +82,8 @@ Registry readiness is probed through `/v2/` with `ZT_REGISTRY_USERNAME` and
 
 OIDC metadata is probed for discovery readiness, while full authorization-code
 login remains a future production integration item.
+
+Postgres can be used for dashboard sessions when `session_store=postgres`, a
+password-free DSN is saved, and optional `psycopg` or `psycopg2` is installed in
+the dashboard runtime. Store any required database password in
+`ZT_POSTGRES_PASSWORD`, not in the saved DSN.

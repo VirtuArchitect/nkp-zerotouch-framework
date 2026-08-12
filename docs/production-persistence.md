@@ -4,14 +4,20 @@ The local console currently stores runtime state under `.zt`. That is suitable
 for an operator workstation, lab validation, and development. The
 `session_store=file` setting persists local console sessions under
 `.zt/settings/sessions.json` so restarts do not require memory-only sessions.
-The `session_store=postgres` setting is a contract marker only; runtime sessions
-continue to use memory until a reviewed Postgres session backend is implemented.
-Production multi-user use should move durable shared state into Postgres.
+The `session_store=postgres` setting stores console session records in Postgres
+when Postgres is enabled, a password-free DSN is saved under Settings >
+Integrations, and optional `psycopg` or `psycopg2` is installed in the dashboard
+runtime. If the database account requires a password, provide it through
+`ZT_POSTGRES_PASSWORD`; do not embed it in the saved DSN. Production multi-user
+use should move durable shared state into Postgres.
 
-Recommended Postgres-backed objects:
+Current Postgres-backed object:
+
+- Console sessions in `zt_console_sessions`.
+
+Recommended future Postgres-backed objects:
 
 - Console accounts and role assignments.
-- Sessions or session references for shared multi-user operation.
 - Jobs, approvals, retries, and cancellations.
 - Audit events.
 - Plan review decisions.
@@ -27,10 +33,12 @@ page.
 Migration approach:
 
 1. Keep environment YAML as the deployment source of truth.
-2. Add a storage interface around `.zt` reads/writes.
-3. Implement a Postgres backend for jobs, audit, approvals, and reviews.
-4. Keep generated artifacts on disk or object storage with database metadata.
-5. Add backup and restore procedures for both database state and generated
+2. Use Postgres-backed sessions for shared console deployments that need durable
+   server-side login state.
+3. Add a storage interface around remaining `.zt` reads/writes.
+4. Implement a Postgres backend for jobs, audit, approvals, and reviews.
+5. Keep generated artifacts on disk or object storage with database metadata.
+6. Add backup and restore procedures for both database state and generated
    artifacts.
 
 ## Production Readiness Checklist
