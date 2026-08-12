@@ -11,15 +11,15 @@ runtime. If the database account requires a password, provide it through
 `ZT_POSTGRES_PASSWORD`; do not embed it in the saved DSN. Production multi-user
 use should move durable shared state into Postgres.
 
-Current Postgres-backed object:
+Current Postgres-backed objects:
 
 - Console sessions in `zt_console_sessions`.
+- Optional audit event mirror records in `zt_console_audit_events`.
 
 Recommended future Postgres-backed objects:
 
 - Console accounts and role assignments.
 - Jobs, approvals, retries, and cancellations.
-- Audit events.
 - Plan review decisions.
 - Environment metadata indexes.
 - Health snapshots and integration probe results.
@@ -35,10 +35,12 @@ Migration approach:
 1. Keep environment YAML as the deployment source of truth.
 2. Use Postgres-backed sessions for shared console deployments that need durable
    server-side login state.
-3. Add a storage interface around remaining `.zt` reads/writes.
-4. Implement a Postgres backend for jobs, audit, approvals, and reviews.
-5. Keep generated artifacts on disk or object storage with database metadata.
-6. Add backup and restore procedures for both database state and generated
+3. Enable the Postgres audit mirror for deployments that require central audit
+   search while keeping `.zt/audit/events.jsonl` as the local append-only log.
+4. Add a storage interface around remaining `.zt` reads/writes.
+5. Implement a Postgres backend for jobs, approvals, and reviews.
+6. Keep generated artifacts on disk or object storage with database metadata.
+7. Add backup and restore procedures for both database state and generated
    artifacts.
 
 ## Production Readiness Checklist

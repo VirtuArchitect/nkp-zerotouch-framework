@@ -40,6 +40,7 @@ ENV_DIR = ROOT / "configs" / "environments"
 SESSIONS = {}
 LOGIN_FAILURES = {}
 POSTGRES_SESSION_TABLE = "zt_console_sessions"
+POSTGRES_AUDIT_TABLE = "zt_console_audit_events"
 try:
     SESSION_TTL_SECONDS = int(os.environ.get("ZT_SESSION_TTL_SECONDS", "43200"))
 except ValueError:
@@ -631,6 +632,29 @@ def session_store_status(settings):
     return "ok", "memory"
 
 
+def postgres_backend_status(settings):
+    if settings.get("postgres_enabled") != "true":
+        return "warn", "enable Postgres"
+    dsn = settings.get("postgres_dsn", "")
+    if not dsn:
+        return "warn", "Postgres DSN missing"
+    if postgres_dsn_contains_password(dsn):
+        return "warn", "Postgres DSN must not include password"
+    driver, _ = postgres_session_driver()
+    if not driver:
+        return "warn", "optional psycopg or psycopg2 required"
+    return "ok", "Postgres backend available"
+
+
+def audit_mirror_status(settings):
+    if settings.get("audit_mirror", "local") != "postgres":
+        return "ok", "local audit log"
+    status, note = postgres_backend_status(settings)
+    if status != "ok":
+        return "warn", f"postgres audit mirror unavailable: {note}"
+    return "ok", "local + postgres audit mirror"
+
+
 def postgres_session_driver():
     for module_name in ("psycopg", "psycopg2"):
         try:
@@ -648,8 +672,9 @@ def postgres_session_backend_available(settings=None):
 
 def postgres_session_connect(settings=None):
     settings = settings or load_setting("integrations", default_integrations())
-    if not postgres_session_backend_available(settings):
-        raise RuntimeError("Postgres session backend is not configured.")
+    status, note = postgres_backend_status(settings)
+    if status != "ok":
+        raise RuntimeError(f"Postgres backend is not configured: {note}")
     dsn = settings.get("postgres_dsn", "")
     driver, _ = postgres_session_driver()
     kwargs = {"connect_timeout": 3}
@@ -742,6 +767,59 @@ def delete_postgres_session(token, conn=None):
     finally:
         if owned_conn:
             conn.close()
+
+
+def ensure_postgres_audit_table(conn):
+    postgres_execute(
+        conn,
+        f"""
+        CREATE TABLE IF NOT EXISTS {POSTGRES_AUDIT_TABLE} (
+            id BIGSERIAL PRIMARY KEY,
+            event_time TIMESTAMPTZ NOT NULL,
+            event TEXT NOT NULL,
+            status TEXT NOT NULL,
+            username TEXT NOT NULL,
+            role TEXT NOT NULL,
+            target TEXT NOT NULL,
+            detail_json TEXT NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+    )
+    conn.commit()
+
+
+def mirror_audit_event_to_postgres(entry):
+    settings = load_setting("integrations", default_integrations())
+    if settings.get("audit_mirror", "local") != "postgres":
+        return False
+    status, _ = audit_mirror_status(settings)
+    if status != "ok":
+        return False
+    conn = postgres_session_connect(settings)
+    try:
+        ensure_postgres_audit_table(conn)
+        postgres_execute(
+            conn,
+            f"""
+            INSERT INTO {POSTGRES_AUDIT_TABLE}
+                (event_time, event, status, username, role, target, detail_json)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                entry.get("timestamp", ""),
+                entry.get("event", ""),
+                entry.get("status", ""),
+                entry.get("user", ""),
+                entry.get("role", ""),
+                entry.get("target", ""),
+                json.dumps(entry.get("detail", {}), separators=(",", ":")),
+            ),
+        )
+        conn.commit()
+        return True
+    finally:
+        conn.close()
 
 
 def session_file():
@@ -1014,6 +1092,7 @@ def default_release_channels():
 def default_integrations():
     return {
         "session_store": "memory",
+        "audit_mirror": "local",
         "postgres_enabled": "false",
         "postgres_dsn": "",
         "oidc_enabled": "false",
@@ -1124,6 +1203,10 @@ def audit_event(event, user=None, target="", status="info", detail=None):
         "detail": detail or {},
     }
     append_jsonl(AUDIT / "events.jsonl", entry)
+    try:
+        mirror_audit_event_to_postgres(entry)
+    except Exception:
+        pass
 
 
 def recent_audit_events(limit=100):
@@ -1378,11 +1461,13 @@ def integration_checks():
     oidc = oidc_status(settings)
     vault = vault_status(settings)
     session_status, session_note = session_store_status(settings)
+    audit_status, audit_note = audit_mirror_status(settings)
     return [
         ("Postgres", postgres[0], postgres[1]),
         ("OIDC", oidc[0], oidc[1]),
         ("Vault", vault[0], vault[1]),
         ("Session store", session_status, session_note),
+        ("Audit mirror", audit_status, audit_note),
     ]
 
 
@@ -4796,6 +4881,7 @@ class Handler(BaseHTTPRequestHandler):
             vault_ok, vault_note = integration_status.get("Vault", ("warn", "disabled"))
             oidc_ok, oidc_note = integration_status.get("OIDC", ("warn", "disabled"))
             session_ok, session_note = integration_status.get("Session store", ("warn", "memory"))
+            audit_ok, audit_note = integration_status.get("Audit mirror", ("warn", "local audit log"))
             body = f"""
 <div class="section-head">
   <div>
@@ -4808,6 +4894,7 @@ class Handler(BaseHTTPRequestHandler):
   <div class="ops-item"><div class="ops-label">Vault</div><div class="ops-value"><span class="chip {vault_ok}">{html.escape(vault_note)}</span></div></div>
   <div class="ops-item"><div class="ops-label">OIDC</div><div class="ops-value"><span class="chip {oidc_ok}">{html.escape(oidc_note)}</span></div></div>
   <div class="ops-item"><div class="ops-label">Session Store</div><div class="ops-value"><span class="chip {session_ok}">{html.escape(session_note)}</span></div></div>
+  <div class="ops-item"><div class="ops-label">Audit Mirror</div><div class="ops-value"><span class="chip {audit_ok}">{html.escape(audit_note)}</span></div></div>
 </section>
 <section class="panel">
   <form method="post" action="/settings/integrations/save">
@@ -4815,6 +4902,7 @@ class Handler(BaseHTTPRequestHandler):
       <thead><tr><th>Integration</th><th>Value</th></tr></thead>
       <tbody>
         <tr><td>Session store</td><td><div class="field"><select name="session_store"><option value="memory" {'selected' if settings.get('session_store') == 'memory' else ''}>memory</option><option value="file" {'selected' if settings.get('session_store') == 'file' else ''}>file</option><option value="postgres" {'selected' if settings.get('session_store') == 'postgres' else ''}>postgres</option></select></div></td></tr>
+        <tr><td>Audit mirror</td><td><div class="field"><select name="audit_mirror"><option value="local" {'selected' if settings.get('audit_mirror', 'local') != 'postgres' else ''}>local</option><option value="postgres" {'selected' if settings.get('audit_mirror') == 'postgres' else ''}>postgres</option></select></div></td></tr>
         <tr><td>Enable Postgres</td><td><div class="field"><select name="postgres_enabled"><option value="false" {'selected' if settings.get('postgres_enabled') != 'true' else ''}>false</option><option value="true" {'selected' if settings.get('postgres_enabled') == 'true' else ''}>true</option></select></div></td></tr>
         <tr><td>Postgres DSN</td><td><div class="field"><input name="postgres_dsn" value="{html.escape(postgres_dsn_value)}" placeholder="postgresql://zt_console@db/nkp_zerotouch"></div></td></tr>
         <tr><td>Enable OIDC</td><td><div class="field"><select name="oidc_enabled"><option value="false" {'selected' if settings.get('oidc_enabled') != 'true' else ''}>false</option><option value="true" {'selected' if settings.get('oidc_enabled') == 'true' else ''}>true</option></select></div></td></tr>
@@ -4954,7 +5042,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if parsed.path == "/settings/integrations/save":
-            data = {key: form_value(form, key) for key in ["session_store", "postgres_enabled", "postgres_dsn", "oidc_enabled", "oidc_issuer", "oidc_client_id", "oidc_redirect_uri", "vault_enabled", "vault_addr", "vault_mount", "vault_secret_path"]}
+            data = {key: form_value(form, key) for key in ["session_store", "audit_mirror", "postgres_enabled", "postgres_dsn", "oidc_enabled", "oidc_issuer", "oidc_client_id", "oidc_redirect_uri", "vault_enabled", "vault_addr", "vault_mount", "vault_secret_path"]}
             if postgres_dsn_contains_password(data.get("postgres_dsn", "")):
                 audit_event("integrations_saved", self.current_user(), "integrations", "denied", {"reason": "postgres_dsn_password"})
                 body = "<h2>Integration Settings Rejected</h2><div class='notice'>Postgres DSN must not include a password. Store database credentials in Vault or environment-scoped secrets and save only passwordless endpoint metadata here.</div><a class='back-link' href='/settings/integrations'>Back to integrations</a>"
