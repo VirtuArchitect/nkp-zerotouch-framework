@@ -46,7 +46,7 @@ This maps the public-readiness and real-deployment tasks to the repository featu
 | Lock cleanup | Implemented baseline | stale locks can be cleared while active locks remain protected |
 | Production readiness gate | Implemented baseline | console reports plan review, preflight evidence, backup, drift, channel, and structured verification evidence readiness |
 | Dashboard route tests | Implemented baseline | pytest route/API smoke coverage for dashboard pages and JSON endpoints |
-| OIDC login flow | Partial | readiness route validates discovery metadata, builds an authorization handoff with state/nonce, and the callback validates state before failing closed; full token exchange, signed JWT validation, nonce validation, and role mapping remain future work |
+| OIDC login flow | Partial | readiness route validates discovery metadata, builds an authorization handoff with signed state/nonce cookies, and the callback validates the signed handoff before failing closed; full token exchange, signed JWT validation, nonce validation, and role mapping remain future work |
 | Vault secret validation | Implemented baseline | runtime secret key presence checks and Vault health probe metadata |
 | Environment uniqueness checks | Implemented baseline | environment create/edit blocks duplicate names, cluster names, API VIPs, and registry namespaces |
 | CI environment identity checks | Implemented baseline | `tools/zt_config.py validate-all` validates committed environment files and blocks duplicate identity values |

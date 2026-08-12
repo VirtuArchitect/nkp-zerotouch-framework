@@ -78,11 +78,13 @@ def start_json_server(expected_path, payload):
     return server
 
 
-def request(opener, base_url, path, data=None, allow_error=False, timeout=30):
+def request(opener, base_url, path, data=None, allow_error=False, timeout=30, headers=None):
     encoded = None
     if data is not None:
         encoded = urllib.parse.urlencode(data).encode("utf-8")
-    req = urllib.request.Request(f"{base_url}{path}", data=encoded, headers={"Connection": "close"})
+    request_headers = {"Connection": "close"}
+    request_headers.update(headers or {})
+    req = urllib.request.Request(f"{base_url}{path}", data=encoded, headers=request_headers)
     try:
         with opener.open(req, timeout=timeout) as response:
             return response.status, response.headers.get("Content-Type", ""), response.read().decode("utf-8")
@@ -693,6 +695,30 @@ def test_oidc_readiness_warns_on_issuer_mismatch_and_missing_endpoints():
         server.server_close()
 
 
+def test_oidc_handoff_cookie_is_signed_and_tamper_checked():
+    old_secret = os.environ.get("ZT_OIDC_STATE_SECRET")
+    try:
+        os.environ["ZT_OIDC_STATE_SECRET"] = "test-oidc-state-secret"
+        header = app.oidc_cookie_header("state-value", "nonce-value")
+        cookie = header.split("zt_oidc=", 1)[1].split(";", 1)[0]
+
+        state, nonce, error = app.parse_oidc_handoff_cookie(cookie)
+        assert error == ""
+        assert state == "state-value"
+        assert nonce == "nonce-value"
+
+        tampered = cookie.rsplit(".", 1)[0] + ".bad-signature"
+        state, nonce, error = app.parse_oidc_handoff_cookie(tampered)
+        assert state == ""
+        assert nonce == ""
+        assert error == "handoff signature mismatch"
+    finally:
+        if old_secret is None:
+            os.environ.pop("ZT_OIDC_STATE_SECRET", None)
+        else:
+            os.environ["ZT_OIDC_STATE_SECRET"] = old_secret
+
+
 def test_oidc_login_page_shows_readiness_contract():
     rbac_path = app.SETTINGS / "rbac.json"
     integrations_path = app.SETTINGS / "integrations.json"
@@ -808,6 +834,21 @@ def test_oidc_callback_validates_state_and_fails_closed():
         assert status == 501
         assert "State validation passed" in body
         assert "signed JWT validation" in body
+
+        status, _, _ = request(opener, base_url, "/login/oidc")
+        assert status == 200
+        oidc_cookie = next(cookie for cookie in cookie_jar if cookie.name == "zt_oidc")
+        expected_state = oidc_cookie.value.split(".", 1)[0]
+        tampered_cookie = oidc_cookie.value.rsplit(".", 1)[0] + ".bad-signature"
+        status, _, body = request(
+            urllib.request.build_opener(),
+            base_url,
+            f"/login/oidc/callback?code=abc&state={urllib.parse.quote(expected_state)}",
+            allow_error=True,
+            headers={"Cookie": f"zt_oidc={tampered_cookie}"},
+        )
+        assert status == 403
+        assert "handoff cookie was invalid" in body
     finally:
         server.shutdown()
         server.server_close()
