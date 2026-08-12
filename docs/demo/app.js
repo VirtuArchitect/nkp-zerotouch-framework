@@ -207,6 +207,7 @@ const uatCases = [
 const genericSections = {
   setup: ["Setup Wizard", "Create a deployment profile from connected, proxied, or air-gapped templates.", [["Source template", "connected.example.yaml"], ["Identity checks", "duplicate names blocked"], ["Next step", "prepare workspace"]]],
   preflight: ["Preflight", "Readiness matrix across bundle, network, credentials, and provider checks.", [["Bundle", "NKP v2.17.1 discovered"], ["Prism Central", "placeholder endpoint warning"], ["Registry", "required for air-gapped"]]],
+  external: ["External Evidence", "Reviewed proof records for systems the static demo cannot validate.", [["Prism authorization", "required for production"], ["Deployment UAT", "required for production"], ["Evidence boundary", "references only; no secrets"]]],
   drift: ["Drift", "Generated plan and verification evidence signals.", [["lab-airgapped", "verification report missing"], ["lab-connected", "generate has not run"], ["lab-proxied", "plan review is not generated"]]],
   production: ["Production Gate", "Deployment gate checks before live apply is requested.", [["Placeholder endpoint block", "enabled"], ["Plan review", "required"], ["Backup evidence", "recommended"]]],
   health: ["Health", "Runner, tool, credential, and integration checks.", [["Runner", "Docker / Local Shell"], ["Credentials", "environment variables checked"], ["Optional tools", "podman warning"]]],

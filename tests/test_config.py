@@ -43,6 +43,31 @@ def test_connected_context():
     assert data["controlPlaneEndpointIp"] == "10.10.10.50"
 
 
+def test_context_includes_release_channel(tmp_path):
+    config = tmp_path / "release-channel.yaml"
+    config.write_text(
+        """
+environment:
+  name: release-channel
+  type: connected
+releaseChannel: production
+nkp:
+  version: v2.17.1
+nutanix:
+  prismCentralEndpoint: https://pc.example.com:9440
+  clusterName: pe-cluster
+cluster:
+  name: release-channel-cluster
+  kubernetesVersion: v1.32.3
+""",
+        encoding="utf-8",
+    )
+
+    data = json.loads(run_tool("context", "--config", str(config)))
+
+    assert data["releaseChannel"] == "production"
+
+
 def test_invalid_environment_type():
     data = json.loads(run_tool("validate", "--config", "tests/fixtures/invalid-env.yaml"))
     assert data["valid"] is False

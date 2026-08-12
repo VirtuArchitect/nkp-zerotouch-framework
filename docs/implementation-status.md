@@ -45,6 +45,7 @@ This maps the public-readiness and real-deployment tasks to the repository featu
 | Restore planning | Implemented baseline | console generates guarded restore plans and JSON metadata from backup manifests, including component inventory, lock warnings, change records, and approval-gated no-copy authorization jobs |
 | Lock cleanup | Implemented baseline | stale locks can be cleared while active locks remain protected |
 | Production readiness gate | Implemented baseline | console reports plan review, preflight evidence, backup, drift, channel, and structured verification evidence readiness |
+| External validation evidence | Implemented baseline | console records reviewed external proof metadata under `.zt/external-validations/` and requires Prism authorization plus deployment UAT evidence for production-channel readiness |
 | Dashboard route tests | Implemented baseline | pytest route/API smoke coverage for dashboard pages and JSON endpoints |
 | OIDC login flow | Implemented baseline | readiness route validates discovery metadata, builds an authorization handoff with signed state/nonce cookies, exchanges authorization codes, validates signed HS256 `id_token` claims, checks nonce/issuer/audience/expiry, and maps identities to active local RBAC accounts; RSA/JWKS provider support remains future work |
 | Vault secret backend | Implemented baseline | runtime secret key presence checks, Vault health probe metadata, and dashboard Vault KV key-presence resolution without displaying secret values |

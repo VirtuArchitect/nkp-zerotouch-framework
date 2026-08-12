@@ -215,6 +215,7 @@ def context(data, config_path):
         "environmentName": dotted_get(data, "environment.name"),
         "environmentType": dotted_get(data, "environment.type"),
         "environmentProvider": dotted_get(data, "environment.provider", "nutanix-ahv"),
+        "releaseChannel": dotted_get(data, "releaseChannel", dotted_get(data, "environment.channel")),
         "bundleType": dotted_get(data, "nkp.bundleType"),
         "bundlePath": dotted_get(data, "nkp.bundlePath"),
         "nkpVersion": dotted_get(data, "nkp.version"),
