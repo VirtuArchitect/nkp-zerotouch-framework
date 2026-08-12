@@ -39,6 +39,7 @@
           <button class="nav-item" type="button" data-view-link="health">Health</button>
           <div class="nav-label">Artifacts</div>
           <button class="nav-item" type="button" data-view-link="artifacts">Artifacts</button>
+          <button class="nav-item" type="button" data-view-link="evidence">Evidence Packs</button>
           <button class="nav-item" type="button" data-view-link="plan">Plan Review</button>
           <button class="nav-item" type="button" data-view-link="kubeconfig">Kubeconfig</button>
           <button class="nav-item" type="button" data-view-link="backups">Backups</button>
@@ -162,6 +163,17 @@
                 <tbody id="artifactRows"></tbody>
               </table>
             </section>
+          </section>
+
+          <section class="view" data-view="evidence">
+            <div class="section-head"><div><h2>Evidence Packs</h2><div class="section-copy">Reviewable evidence bundles created by the evidence phase under .zt/evidence.</div></div></div>
+            <section class="panel">
+              <table>
+                <thead><tr><th>Pack</th><th>Environment</th><th>Created</th><th>Files</th><th>Redaction</th><th>Open</th></tr></thead>
+                <tbody id="evidenceRows"></tbody>
+              </table>
+            </section>
+            <div class="notice">Evidence packs exclude raw kubeconfig and local secret values. Generated plans and logs can still contain topology, VIPs, endpoints, and environment names.</div>
           </section>
 
           <section class="view" data-view="generic">

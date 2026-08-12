@@ -125,6 +125,39 @@ const artifacts = [
   ["deploy.log", "log", "lab-connected", "pending"],
 ];
 
+const evidencePacks = [
+  {
+    name: "lab-connected-20260713-213714",
+    environment: "lab-connected",
+    cluster: "nkp-mgmt-connected",
+    created: "2026-07-13T19:37:14Z",
+    files: 18,
+    redaction: "redacted",
+    redactionClass: "ok",
+    archive: "lab-connected-20260713-213714.zip",
+  },
+  {
+    name: "lab-airgapped-20260713-193643",
+    environment: "lab-airgapped",
+    cluster: "nkp-mgmt-airgapped",
+    created: "2026-07-13T19:36:43Z",
+    files: 16,
+    redaction: "redacted",
+    redactionClass: "ok",
+    archive: "lab-airgapped-20260713-193643.tar.gz",
+  },
+  {
+    name: "lab-proxied-20260713-validate",
+    environment: "lab-proxied",
+    cluster: "nkp-mgmt-proxied",
+    created: "pending verify",
+    files: 7,
+    redaction: "review",
+    redactionClass: "warn",
+    archive: "not generated",
+  },
+];
+
 const genericSections = {
   setup: ["Setup Wizard", "Create a deployment profile from connected, proxied, or air-gapped templates.", [["Source template", "connected.example.yaml"], ["Identity checks", "duplicate names blocked"], ["Next step", "prepare workspace"]]],
   preflight: ["Preflight", "Readiness matrix across bundle, network, credentials, and provider checks.", [["Bundle", "NKP v2.17.1 discovered"], ["Prism Central", "placeholder endpoint warning"], ["Registry", "required for air-gapped"]]],
@@ -139,7 +172,7 @@ const genericSections = {
   inventory: ["Inventory", "AHV inventory and future bare-metal provider notes.", [["Provider", "nutanix-ahv"], ["Prism Element", "pe-cluster"], ["Image", "nkp-node-image"]]],
   network: ["Network", "Management, workload, API VIP, DNS, NTP, and proxy fields.", [["API VIP", "10.10.10.51 reserved for lab-new"], ["Pod CIDR", "192.168.0.0/16"], ["Service CIDR", "10.96.0.0/12"]]],
   locks: ["Locks", "Operational locks around apply-class jobs.", [["deploy", "approval lock pending"], ["destroy", "requires confirm flag"], ["registry", "air-gapped only"]]],
-  actions: ["Safe Actions", "Dashboard-safe operations that do not perform live apply.", [["validate", "safe"], ["prepare", "safe"], ["generate", "safe"], ["verify", "safe"]]],
+  actions: ["Safe Actions", "Dashboard-safe operations that do not perform live apply.", [["validate", "safe"], ["prepare", "safe"], ["generate", "safe"], ["verify", "safe"], ["evidence", "safe"]]],
   changes: ["Change Records", "Apply requests are captured as change records.", [["CHG-003", "deploy pending approval"], ["CHG-002", "registry pending approval"], ["CHG-001", "generate completed"]]],
   approval: ["Approval Policy", "Approval thresholds for apply-class workflows.", [["deploy", "2 approvals"], ["registry", "1 approval"], ["destroy", "2 approvals and confirm flag"]]],
   channels: ["Release Channels", "Environment channel metadata and readiness.", [["lab", "connected/proxied/air-gapped"], ["pilot", "extra approval"], ["production", "stricter gate"]]],
@@ -216,6 +249,19 @@ function renderArtifacts() {
   `).join("");
 }
 
+function renderEvidence() {
+  $("#evidenceRows").innerHTML = evidencePacks.map((pack) => `
+    <tr>
+      <td><div class="env-name">${pack.name}</div><div class="env-file">.zt/evidence/${pack.name}</div></td>
+      <td>${pack.environment}<div class="env-file">${pack.cluster}</div></td>
+      <td>${pack.created}</td>
+      <td>${pack.files}</td>
+      <td><span class="chip ${pack.redactionClass}">${pack.redaction}</span></td>
+      <td><button class="button-link" type="button" data-command="manifest">Manifest</button><div class="env-file">${pack.archive}</div></td>
+    </tr>
+  `).join("");
+}
+
 function renderGeneric(sectionKey) {
   const [title, copy, cards] = genericSections[sectionKey] || genericSections.settings;
   $("#genericTitle").textContent = title;
@@ -226,7 +272,7 @@ function renderGeneric(sectionKey) {
 }
 
 function setView(viewName) {
-  const dedicated = ["environments", "jobs", "runs", "pipeline", "cli", "artifacts"];
+  const dedicated = ["environments", "jobs", "runs", "pipeline", "cli", "artifacts", "evidence"];
   const targetView = dedicated.includes(viewName) ? viewName : "generic";
   $$(".view").forEach((view) => view.classList.toggle("active", view.dataset.view === targetView));
   $$("[data-view-link]").forEach((item) => item.classList.toggle("active", item.dataset.viewLink === viewName));
@@ -271,6 +317,7 @@ document.addEventListener("click", (event) => {
   if (command === "action") toast("Demo action selected; live apply remains CLI-gated");
   if (command === "open") toast("Environment detail preview");
   if (command === "edit") toast("Edit workflow preview");
+  if (command === "manifest") toast("Evidence manifest preview");
   if (command === "metric") toast("Metric drill-down preview");
 });
 
@@ -281,6 +328,7 @@ renderRuns();
 renderJobs();
 renderPipeline();
 renderArtifacts();
+renderEvidence();
 renderGeneric("settings");
 renderThemeLabel();
 
