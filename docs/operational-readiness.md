@@ -65,6 +65,8 @@ Before exposing this console beyond a trusted operator workstation:
 - Set `ZT_COOKIE_SECURE=true` whenever the dashboard is served through HTTPS or
   an HTTPS-terminating reverse proxy so browser cookies are marked `Secure`.
 - Move from memory sessions to file-backed local sessions for workstation restarts, or to Postgres-backed sessions for shared operator consoles when `psycopg` or `psycopg2` is installed in the dashboard runtime.
+- Enable `audit_mirror=postgres` for shared operator consoles that need central
+  audit search while retaining the local append-only `.zt` audit log.
 - Connect OIDC/SAML or enterprise SSO to a real identity provider.
 - For built-in OIDC login, configure `ZT_OIDC_CLIENT_SECRET`, map provider
   identities to active local RBAC accounts, and use HS256 `id_token` validation

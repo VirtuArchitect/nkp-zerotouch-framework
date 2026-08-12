@@ -21,7 +21,7 @@ This maps the public-readiness and real-deployment tasks to the repository featu
 | Live demo | Implemented | GitHub Pages prototype under `docs/demo/`, including console evidence-pack review and UAT readiness, published to `gh-pages` by `.github/workflows/pages.yml` |
 | CSRF protection | Implemented | authenticated POST forms receive and validate CSRF tokens |
 | Route-level RBAC | Implemented baseline | routes are mapped to permissions and enforced for local roles |
-| Audit events | Implemented baseline | append-only `.zt/audit/events.jsonl` for logins, settings, jobs, approvals, and environment changes |
+| Audit events | Implemented baseline | append-only `.zt/audit/events.jsonl` for logins, settings, jobs, approvals, and environment changes; optional `audit_mirror=postgres` mirrors audit metadata to Postgres |
 | Health checks | Implemented baseline | console health page for runner, tools, bundles, Prism, registry, credential variables, authenticated API probes, and enterprise integration probes |
 | Artifact viewer | Implemented | generated plans, reports, logs, and allowed config/docs files can be opened from the console |
 | Artifact diff/review | Implemented baseline | allowed artifacts can be compared from the console before operational use |
@@ -51,7 +51,7 @@ This maps the public-readiness and real-deployment tasks to the repository featu
 | Environment uniqueness checks | Implemented baseline | environment create/edit blocks duplicate names, cluster names, API VIPs, and registry namespaces |
 | CI environment identity checks | Implemented baseline | `tools/zt_config.py validate-all` validates committed environment files and blocks duplicate identity values |
 | Approval policy | Implemented baseline | per-action approval thresholds, self-approval prevention, production Admin option |
-| Enterprise integrations | Implemented baseline | Postgres TCP, Vault health, OIDC discovery, and session-store consistency checks under Settings > Integrations, Health, and Preflight; Postgres-backed sessions are available when an optional Python Postgres driver is installed |
+| Enterprise integrations | Implemented baseline | Postgres TCP, Vault health, OIDC discovery, and session-store consistency checks under Settings > Integrations, Health, and Preflight; Postgres-backed sessions and audit mirroring are available when an optional Python Postgres driver is installed |
 | Session stores | Implemented baseline | `session_store=file` persists console sessions under `.zt/settings/sessions.json`; `session_store=postgres` stores session records in Postgres through optional `psycopg` or `psycopg2`; memory remains the default local mode |
 | Kubeconfig capture | Implemented | `kubeconfig` phase |
 | Registry push enhancements | Implemented | CA, insecure, concurrency, existing-tag behavior |

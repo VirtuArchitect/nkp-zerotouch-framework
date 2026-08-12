@@ -51,6 +51,8 @@ Job and approval model:
   `ZT_COOKIE_SECURE=true` when serving the dashboard through HTTPS so session
   and OIDC handoff cookies are marked `Secure`.
 - Mutations are written to an append-only audit log under `.zt/audit/events.jsonl`.
+- When enabled under `Settings > Integrations`, audit event metadata is also
+  mirrored to Postgres while the local append-only audit log remains in place.
 
 Deployment readiness sections:
 
@@ -73,7 +75,7 @@ Settings sections:
 
 - `Providers`: default provider intent and runner type.
 - `Secrets`: metadata for local-file or external secret backends. Secret values are not stored by the dashboard. When `hashicorp-vault` is selected, the console reads Vault KV metadata with `VAULT_TOKEN` and shows only required key presence.
-- `Integrations`: Postgres, Vault, OIDC, and session-store integration metadata with endpoint/discovery health probes. File-backed sessions are active for local restarts; Postgres-backed sessions are available when `session_store=postgres`, Postgres is enabled, a password-free DSN is saved, and optional `psycopg` or `psycopg2` is installed in the dashboard runtime. Postgres DSNs must not include passwords; the console rejects password-bearing DSNs and redacts any previously saved value before rendering it. OIDC handoff now issues short-lived signed state/nonce cookies; the callback completes authorization-code exchange for HS256 `id_token` responses, validates nonce, issuer, audience, and expiry, and maps the identity to an active local RBAC account. RSA/JWKS providers still fail closed until a reviewed JWT crypto dependency is added.
+- `Integrations`: Postgres, Vault, OIDC, session-store, and audit-mirror integration metadata with endpoint/discovery health probes. File-backed sessions are active for local restarts; Postgres-backed sessions and audit mirroring are available when Postgres is enabled, a password-free DSN is saved, and optional `psycopg` or `psycopg2` is installed in the dashboard runtime. Postgres DSNs must not include passwords; the console rejects password-bearing DSNs and redacts any previously saved value before rendering it. OIDC handoff now issues short-lived signed state/nonce cookies; the callback completes authorization-code exchange for HS256 `id_token` responses, validates nonce, issuer, audience, and expiry, and maps the identity to an active local RBAC account. RSA/JWKS providers still fail closed until a reviewed JWT crypto dependency is added.
 
 Environment safeguards:
 

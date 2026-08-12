@@ -132,8 +132,11 @@ class FakePostgresCursor:
             token = params[0]
             self.row = self.conn.store.get(token)
         elif normalized.startswith("INSERT"):
-            token, session_json, expires_at = params
-            self.conn.store[token] = (session_json, expires_at)
+            if app.POSTGRES_AUDIT_TABLE.upper() in normalized:
+                self.conn.audit_events.append(params)
+            else:
+                token, session_json, expires_at = params
+                self.conn.store[token] = (session_json, expires_at)
         elif normalized.startswith("DELETE"):
             self.conn.store.pop(params[0], None)
 
@@ -145,9 +148,10 @@ class FakePostgresCursor:
 
 
 class FakePostgresConnection:
-    def __init__(self, store, statements):
+    def __init__(self, store, statements, audit_events):
         self.store = store
         self.statements = statements
+        self.audit_events = audit_events
         self.closed = False
         self.commits = 0
 
@@ -165,12 +169,13 @@ class FakePostgresDriver:
     def __init__(self):
         self.store = {}
         self.statements = []
+        self.audit_events = []
         self.connections = []
 
     def connect(self, dsn, **kwargs):
         self.last_dsn = dsn
         self.last_kwargs = kwargs
-        conn = FakePostgresConnection(self.store, self.statements)
+        conn = FakePostgresConnection(self.store, self.statements, self.audit_events)
         self.connections.append(conn)
         return conn
 
@@ -781,6 +786,86 @@ def test_postgres_session_store_uses_optional_driver():
             integrations_path.write_text(original_integrations, encoding="utf-8")
 
 
+def test_postgres_audit_mirror_status_and_write(tmp_path):
+    integrations_path = app.SETTINGS / "integrations.json"
+    original_integrations = integrations_path.read_text(encoding="utf-8") if integrations_path.exists() else None
+    original_driver = app.postgres_session_driver
+    original_audit = app.AUDIT
+    old_password = os.environ.get("ZT_POSTGRES_PASSWORD")
+    driver = FakePostgresDriver()
+    try:
+        app.AUDIT = tmp_path / "audit"
+        os.environ["ZT_POSTGRES_PASSWORD"] = "runtime-secret"
+        app.postgres_session_driver = lambda: (driver, "fake")
+
+        disabled_status, disabled_note = app.audit_mirror_status({
+            **app.default_integrations(),
+            "audit_mirror": "local",
+        })
+        assert disabled_status == "ok"
+        assert "local audit log" in disabled_note
+
+        app.save_setting("integrations", {
+            **app.default_integrations(),
+            "audit_mirror": "postgres",
+            "postgres_enabled": "true",
+            "postgres_dsn": "postgresql://zt_console@db/nkp_zerotouch",
+        })
+        status, note = app.audit_mirror_status(app.load_setting("integrations", app.default_integrations()))
+        assert status == "ok"
+        assert "postgres audit mirror" in note
+
+        app.audit_event(
+            "test_event",
+            {"username": "audit-user", "role": "Admin"},
+            "target-1",
+            "success",
+            {"result": "ok"},
+        )
+
+        local_events = app.recent_audit_events()
+        assert local_events[0]["event"] == "test_event"
+        assert len(driver.audit_events) == 1
+        event_time, event, status, username, role, target, detail_json = driver.audit_events[0]
+        assert event_time.endswith("Z")
+        assert event == "test_event"
+        assert status == "success"
+        assert username == "audit-user"
+        assert role == "Admin"
+        assert target == "target-1"
+        assert app.json.loads(detail_json) == {"result": "ok"}
+        assert any(app.POSTGRES_AUDIT_TABLE in sql for sql, _ in driver.statements)
+        assert driver.last_kwargs["password"] == "runtime-secret"
+    finally:
+        app.AUDIT = original_audit
+        app.postgres_session_driver = original_driver
+        if old_password is None:
+            os.environ.pop("ZT_POSTGRES_PASSWORD", None)
+        else:
+            os.environ["ZT_POSTGRES_PASSWORD"] = old_password
+        if original_integrations is None:
+            integrations_path.unlink(missing_ok=True)
+        else:
+            integrations_path.write_text(original_integrations, encoding="utf-8")
+
+
+def test_postgres_audit_mirror_warns_without_backend():
+    original_driver = app.postgres_session_driver
+    try:
+        app.postgres_session_driver = lambda: (None, "")
+        status, note = app.audit_mirror_status({
+            **app.default_integrations(),
+            "audit_mirror": "postgres",
+            "postgres_enabled": "true",
+            "postgres_dsn": "postgresql://zt_console@db/nkp_zerotouch",
+        })
+
+        assert status == "warn"
+        assert "optional psycopg" in note
+    finally:
+        app.postgres_session_driver = original_driver
+
+
 def test_postgres_session_store_rejects_missing_prerequisites():
     status, note = app.session_store_status({
         **app.default_integrations(),
@@ -919,6 +1004,7 @@ def test_integrations_page_redacts_and_rejects_postgres_dsn_password():
             {
                 "csrf_token": csrf,
                 "session_store": "memory",
+                "audit_mirror": "local",
                 "postgres_enabled": "true",
                 "postgres_dsn": "postgresql://zt_console:secret@db/nkp_zerotouch",
                 "oidc_enabled": "false",

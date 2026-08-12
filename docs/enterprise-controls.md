@@ -92,6 +92,11 @@ password-free DSN is saved, and optional `psycopg` or `psycopg2` is installed in
 the dashboard runtime. Store any required database password in
 `ZT_POSTGRES_PASSWORD`, not in the saved DSN.
 
+Postgres can also mirror audit event metadata when `audit_mirror=postgres`.
+The console still writes the local append-only `.zt/audit/events.jsonl` record
+first, then mirrors event, actor, role, target, status, timestamp, and JSON
+detail fields to `zt_console_audit_events`.
+
 HashiCorp Vault can be used as a dashboard secret-presence backend. Save only
 Vault URL, namespace, and path metadata under Settings > Secrets, provide
 `VAULT_TOKEN` in the runtime environment, and use the console to confirm
