@@ -385,6 +385,72 @@ def test_dashboard_file_session_store_persists_and_logs_out():
             sessions_path.write_text(original_sessions, encoding="utf-8")
 
 
+def test_postgres_session_store_is_contract_only():
+    status, note = app.session_store_status({
+        **app.default_integrations(),
+        "session_store": "postgres",
+        "postgres_enabled": "true",
+        "postgres_dsn": "postgresql://zt_console@db/nkp_zerotouch",
+    })
+
+    assert status == "warn"
+    assert "not implemented" in note
+
+
+def test_integrations_page_marks_postgres_session_store_contract_only():
+    rbac_path = app.SETTINGS / "rbac.json"
+    integrations_path = app.SETTINGS / "integrations.json"
+    original_rbac = rbac_path.read_text(encoding="utf-8") if rbac_path.exists() else None
+    original_integrations = integrations_path.read_text(encoding="utf-8") if integrations_path.exists() else None
+    rbac = app.default_rbac()
+    account = {
+        "username": "integrations-smoke",
+        "displayName": "Integrations Smoke",
+        "role": "Admin",
+        "status": "active",
+    }
+    account.update(app.password_record("IntegrationsSmoke-Local-123!"))
+    rbac["accounts"] = [account]
+    app.write_json(rbac_path, rbac)
+    app.save_setting("integrations", {
+        **app.default_integrations(),
+        "session_store": "postgres",
+        "postgres_enabled": "true",
+        "postgres_dsn": "postgresql://zt_console@db/nkp_zerotouch",
+    })
+    server = app.ThreadingHTTPServer(("127.0.0.1", 0), app.Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base_url = f"http://127.0.0.1:{server.server_address[1]}"
+    cookie_jar = http.cookiejar.CookieJar()
+    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookie_jar))
+    no_redirect_opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookie_jar), NoRedirect)
+    try:
+        status, _, _ = request(
+            no_redirect_opener,
+            base_url,
+            "/login",
+            {"username": "integrations-smoke", "password": "IntegrationsSmoke-Local-123!"},
+            allow_error=True,
+        )
+        assert status == 303
+        status, _, body = request(opener, base_url, "/settings/integrations")
+        assert status == 200
+        assert "postgres session backend not implemented" in body
+        assert "postgres contract only" in body
+    finally:
+        server.shutdown()
+        server.server_close()
+        if original_rbac is None:
+            rbac_path.unlink(missing_ok=True)
+        else:
+            rbac_path.write_text(original_rbac, encoding="utf-8")
+        if original_integrations is None:
+            integrations_path.unlink(missing_ok=True)
+        else:
+            integrations_path.write_text(original_integrations, encoding="utf-8")
+
+
 def test_authenticated_prism_probe_uses_credentials():
     old_user = os.environ.get("NUTANIX_PC_USERNAME")
     old_password = os.environ.get("NUTANIX_PC_PASSWORD")

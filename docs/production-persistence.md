@@ -4,6 +4,8 @@ The local console currently stores runtime state under `.zt`. That is suitable
 for an operator workstation, lab validation, and development. The
 `session_store=file` setting persists local console sessions under
 `.zt/settings/sessions.json` so restarts do not require memory-only sessions.
+The `session_store=postgres` setting is a contract marker only; runtime sessions
+continue to use memory until a reviewed Postgres session backend is implemented.
 Production multi-user use should move durable shared state into Postgres.
 
 Recommended Postgres-backed objects:
