@@ -51,8 +51,8 @@ This maps the public-readiness and real-deployment tasks to the repository featu
 | Environment uniqueness checks | Implemented baseline | environment create/edit blocks duplicate names, cluster names, API VIPs, and registry namespaces |
 | CI environment identity checks | Implemented baseline | `tools/zt_config.py validate-all` validates committed environment files and blocks duplicate identity values |
 | Approval policy | Implemented baseline | per-action approval thresholds, self-approval prevention, production Admin option |
-| Enterprise integrations | Probed baseline | Postgres TCP, Vault health, OIDC discovery, and session-store consistency checks under Settings > Integrations, Health, and Preflight; Postgres session storage is reported as contract-only until a backend exists |
-| File session store | Implemented baseline | `session_store=file` persists console sessions under `.zt/settings/sessions.json`; memory remains the default local mode and `session_store=postgres` is not active |
+| Enterprise integrations | Implemented baseline | Postgres TCP, Vault health, OIDC discovery, and session-store consistency checks under Settings > Integrations, Health, and Preflight; Postgres-backed sessions are available when an optional Python Postgres driver is installed |
+| Session stores | Implemented baseline | `session_store=file` persists console sessions under `.zt/settings/sessions.json`; `session_store=postgres` stores session records in Postgres through optional `psycopg` or `psycopg2`; memory remains the default local mode |
 | Kubeconfig capture | Implemented | `kubeconfig` phase |
 | Registry push enhancements | Implemented | CA, insecure, concurrency, existing-tag behavior |
 | Containerized runner | Implemented | `Dockerfile`, `Containerfile`, `docs/container-runner.md` |

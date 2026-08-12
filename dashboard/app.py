@@ -3,6 +3,7 @@ import difflib
 import hmac
 import html
 import hashlib
+import importlib
 import json
 import os
 import re
@@ -37,6 +38,7 @@ CHANGE_RECORDS = ZT / "change-records"
 ENV_DIR = ROOT / "configs" / "environments"
 SESSIONS = {}
 LOGIN_FAILURES = {}
+POSTGRES_SESSION_TABLE = "zt_console_sessions"
 try:
     SESSION_TTL_SECONDS = int(os.environ.get("ZT_SESSION_TTL_SECONDS", "43200"))
 except ValueError:
@@ -471,6 +473,8 @@ def save_setting(name, data):
 
 def session_store_mode():
     mode = load_setting("integrations", default_integrations()).get("session_store", "memory")
+    if mode == "postgres" and postgres_session_backend_available():
+        return "postgres"
     return mode if mode in {"memory", "file"} else "memory"
 
 
@@ -479,8 +483,131 @@ def session_store_status(settings):
     if requested == "file":
         return "ok", "file-backed local sessions"
     if requested == "postgres":
-        return "warn", "postgres session backend not implemented; runtime uses memory"
+        if settings.get("postgres_enabled") != "true":
+            return "warn", "enable Postgres before using postgres-backed sessions"
+        dsn = settings.get("postgres_dsn", "")
+        if not dsn:
+            return "warn", "postgres session backend requires a DSN"
+        if postgres_dsn_contains_password(dsn):
+            return "warn", "postgres session DSN must not include password"
+        driver, _ = postgres_session_driver()
+        if not driver:
+            return "warn", "postgres session backend requires optional psycopg or psycopg2"
+        return "ok", "postgres-backed sessions"
     return "ok", "memory"
+
+
+def postgres_session_driver():
+    for module_name in ("psycopg", "psycopg2"):
+        try:
+            return importlib.import_module(module_name), module_name
+        except ImportError:
+            continue
+    return None, ""
+
+
+def postgres_session_backend_available(settings=None):
+    settings = settings or load_setting("integrations", default_integrations())
+    status, _ = session_store_status(settings)
+    return status == "ok" and settings.get("session_store") == "postgres"
+
+
+def postgres_session_connect(settings=None):
+    settings = settings or load_setting("integrations", default_integrations())
+    if not postgres_session_backend_available(settings):
+        raise RuntimeError("Postgres session backend is not configured.")
+    dsn = settings.get("postgres_dsn", "")
+    driver, _ = postgres_session_driver()
+    kwargs = {"connect_timeout": 3}
+    password = os.environ.get("ZT_POSTGRES_PASSWORD", "").strip()
+    if password:
+        kwargs["password"] = password
+    return driver.connect(dsn, **kwargs)
+
+
+def close_cursor(cursor):
+    close = getattr(cursor, "close", None)
+    if close:
+        close()
+
+
+def postgres_execute(conn, sql, params=None, fetchone=False):
+    cursor = conn.cursor()
+    try:
+        cursor.execute(sql, params or ())
+        return cursor.fetchone() if fetchone else None
+    finally:
+        close_cursor(cursor)
+
+
+def ensure_postgres_session_table(conn):
+    postgres_execute(
+        conn,
+        f"""
+        CREATE TABLE IF NOT EXISTS {POSTGRES_SESSION_TABLE} (
+            token TEXT PRIMARY KEY,
+            session_json TEXT NOT NULL,
+            expires_at DOUBLE PRECISION NOT NULL,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+    )
+    conn.commit()
+
+
+def load_postgres_session(token):
+    conn = postgres_session_connect()
+    try:
+        ensure_postgres_session_table(conn)
+        row = postgres_execute(
+            conn,
+            f"SELECT session_json, expires_at FROM {POSTGRES_SESSION_TABLE} WHERE token = %s",
+            (token,),
+            fetchone=True,
+        )
+        if not row:
+            return None
+        session = json.loads(row[0])
+        if session_expired(session):
+            delete_postgres_session(token, conn=conn)
+            return None
+        return session
+    finally:
+        conn.close()
+
+
+def save_postgres_session(token, session):
+    conn = postgres_session_connect()
+    try:
+        ensure_postgres_session_table(conn)
+        postgres_execute(
+            conn,
+            f"""
+            INSERT INTO {POSTGRES_SESSION_TABLE} (token, session_json, expires_at, updated_at)
+            VALUES (%s, %s, %s, CURRENT_TIMESTAMP)
+            ON CONFLICT (token)
+            DO UPDATE SET
+                session_json = EXCLUDED.session_json,
+                expires_at = EXCLUDED.expires_at,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (token, json.dumps(session, separators=(",", ":")), float(session.get("expiresAt", 0) or 0)),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def delete_postgres_session(token, conn=None):
+    owned_conn = conn is None
+    conn = conn or postgres_session_connect()
+    try:
+        ensure_postgres_session_table(conn)
+        postgres_execute(conn, f"DELETE FROM {POSTGRES_SESSION_TABLE} WHERE token = %s", (token,))
+        conn.commit()
+    finally:
+        if owned_conn:
+            conn.close()
 
 
 def session_file():
@@ -509,7 +636,13 @@ def save_persisted_sessions(sessions):
 def get_session(token):
     if not token:
         return None
-    if session_store_mode() == "file":
+    mode = session_store_mode()
+    if mode == "postgres":
+        try:
+            return load_postgres_session(token)
+        except Exception:
+            return None
+    if mode == "file":
         return load_persisted_sessions().get(token)
     session = SESSIONS.get(token)
     if session and session_expired(session):
@@ -521,7 +654,11 @@ def get_session(token):
 def save_session(token, session):
     session.setdefault("createdAt", time.time())
     session["expiresAt"] = session.get("expiresAt") or (time.time() + SESSION_TTL_SECONDS)
-    if session_store_mode() == "file":
+    mode = session_store_mode()
+    if mode == "postgres":
+        save_postgres_session(token, session)
+        return
+    if mode == "file":
         sessions = load_persisted_sessions()
         sessions[token] = session
         save_persisted_sessions(sessions)
@@ -533,6 +670,11 @@ def delete_session(token):
     if not token:
         return
     SESSIONS.pop(token, None)
+    if session_store_mode() == "postgres":
+        try:
+            delete_postgres_session(token)
+        except Exception:
+            pass
     if session_file().exists():
         sessions = load_persisted_sessions()
         if token in sessions:
@@ -4425,7 +4567,7 @@ class Handler(BaseHTTPRequestHandler):
     <table>
       <thead><tr><th>Integration</th><th>Value</th></tr></thead>
       <tbody>
-        <tr><td>Session store</td><td><div class="field"><select name="session_store"><option value="memory" {'selected' if settings.get('session_store') == 'memory' else ''}>memory</option><option value="file" {'selected' if settings.get('session_store') == 'file' else ''}>file</option><option value="postgres" {'selected' if settings.get('session_store') == 'postgres' else ''}>postgres contract only</option></select></div></td></tr>
+        <tr><td>Session store</td><td><div class="field"><select name="session_store"><option value="memory" {'selected' if settings.get('session_store') == 'memory' else ''}>memory</option><option value="file" {'selected' if settings.get('session_store') == 'file' else ''}>file</option><option value="postgres" {'selected' if settings.get('session_store') == 'postgres' else ''}>postgres</option></select></div></td></tr>
         <tr><td>Enable Postgres</td><td><div class="field"><select name="postgres_enabled"><option value="false" {'selected' if settings.get('postgres_enabled') != 'true' else ''}>false</option><option value="true" {'selected' if settings.get('postgres_enabled') == 'true' else ''}>true</option></select></div></td></tr>
         <tr><td>Postgres DSN</td><td><div class="field"><input name="postgres_dsn" value="{html.escape(postgres_dsn_value)}" placeholder="postgresql://zt_console@db/nkp_zerotouch"></div></td></tr>
         <tr><td>Enable OIDC</td><td><div class="field"><select name="oidc_enabled"><option value="false" {'selected' if settings.get('oidc_enabled') != 'true' else ''}>false</option><option value="true" {'selected' if settings.get('oidc_enabled') == 'true' else ''}>true</option></select></div></td></tr>
@@ -4530,7 +4672,13 @@ class Handler(BaseHTTPRequestHandler):
                 "loginAt": time.time(),
                 "csrf": secrets.token_urlsafe(32),
             }
-            save_session(token, session)
+            try:
+                save_session(token, session)
+            except Exception as exc:
+                audit_event("login_session_failed", session, username, "error", {"error": str(exc)})
+                body = "<h2>Login unavailable</h2><div class='notice'>The configured session store could not save the login session. Check Settings > Integrations and the dashboard runtime logs.</div><a class='back-link' href='/login'>Back to login</a>"
+                self.send_html(page("Login Unavailable", body, "about"), status=503)
+                return
             audit_event("login", session, username, "success")
             self.send_redirect("/", {"Set-Cookie": session_cookie_header(token)})
             return

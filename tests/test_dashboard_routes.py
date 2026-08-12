@@ -52,6 +52,61 @@ class JsonHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
+class FakePostgresCursor:
+    def __init__(self, conn):
+        self.conn = conn
+        self.row = None
+
+    def execute(self, sql, params=()):
+        self.conn.statements.append((sql, params))
+        normalized = " ".join(sql.upper().split())
+        if normalized.startswith("SELECT"):
+            token = params[0]
+            self.row = self.conn.store.get(token)
+        elif normalized.startswith("INSERT"):
+            token, session_json, expires_at = params
+            self.conn.store[token] = (session_json, expires_at)
+        elif normalized.startswith("DELETE"):
+            self.conn.store.pop(params[0], None)
+
+    def fetchone(self):
+        return self.row
+
+    def close(self):
+        return None
+
+
+class FakePostgresConnection:
+    def __init__(self, store, statements):
+        self.store = store
+        self.statements = statements
+        self.closed = False
+        self.commits = 0
+
+    def cursor(self):
+        return FakePostgresCursor(self)
+
+    def commit(self):
+        self.commits += 1
+
+    def close(self):
+        self.closed = True
+
+
+class FakePostgresDriver:
+    def __init__(self):
+        self.store = {}
+        self.statements = []
+        self.connections = []
+
+    def connect(self, dsn, **kwargs):
+        self.last_dsn = dsn
+        self.last_kwargs = kwargs
+        conn = FakePostgresConnection(self.store, self.statements)
+        self.connections.append(conn)
+        return conn
+
+
 def start_probe_server(expected_path, expected_auth):
     class Handler(ProbeHandler):
         pass
@@ -532,16 +587,93 @@ def test_login_repeated_failures_are_rate_limited():
             rbac_path.write_text(original_rbac, encoding="utf-8")
 
 
-def test_postgres_session_store_is_contract_only():
+def test_postgres_session_store_reports_optional_backend_requirements():
+    original_driver = app.postgres_session_driver
+    try:
+        app.postgres_session_driver = lambda: (None, "")
+        status, note = app.session_store_status({
+            **app.default_integrations(),
+            "session_store": "postgres",
+            "postgres_enabled": "true",
+            "postgres_dsn": "postgresql://zt_console@db/nkp_zerotouch",
+        })
+        assert status == "warn"
+        assert "requires optional psycopg" in note
+
+        app.postgres_session_driver = lambda: (FakePostgresDriver(), "fake")
+        status, note = app.session_store_status({
+            **app.default_integrations(),
+            "session_store": "postgres",
+            "postgres_enabled": "true",
+            "postgres_dsn": "postgresql://zt_console@db/nkp_zerotouch",
+        })
+        assert status == "ok"
+        assert "postgres-backed sessions" in note
+    finally:
+        app.postgres_session_driver = original_driver
+
+
+def test_postgres_session_store_uses_optional_driver():
+    integrations_path = app.SETTINGS / "integrations.json"
+    original_integrations = integrations_path.read_text(encoding="utf-8") if integrations_path.exists() else None
+    original_driver = app.postgres_session_driver
+    original_memory_sessions = dict(app.SESSIONS)
+    old_password = os.environ.get("ZT_POSTGRES_PASSWORD")
+    driver = FakePostgresDriver()
+    try:
+        os.environ["ZT_POSTGRES_PASSWORD"] = "runtime-secret"
+        app.postgres_session_driver = lambda: (driver, "fake")
+        app.save_setting("integrations", {
+            **app.default_integrations(),
+            "session_store": "postgres",
+            "postgres_enabled": "true",
+            "postgres_dsn": "postgresql://zt_console@db/nkp_zerotouch",
+        })
+        app.SESSIONS.clear()
+
+        session = {
+            "username": "pg-session",
+            "role": "Admin",
+            "csrf": "csrf-token",
+            "expiresAt": app.time.time() + 60,
+        }
+        app.save_session("pg-token", session)
+
+        assert app.SESSIONS == {}
+        assert driver.last_dsn == "postgresql://zt_console@db/nkp_zerotouch"
+        assert driver.last_kwargs["password"] == "runtime-secret"
+        assert any("CREATE TABLE IF NOT EXISTS" in sql for sql, _ in driver.statements)
+
+        loaded = app.get_session("pg-token")
+        assert loaded["username"] == "pg-session"
+        assert loaded["role"] == "Admin"
+
+        app.delete_session("pg-token")
+        assert app.get_session("pg-token") is None
+    finally:
+        app.SESSIONS.clear()
+        app.SESSIONS.update(original_memory_sessions)
+        app.postgres_session_driver = original_driver
+        if old_password is None:
+            os.environ.pop("ZT_POSTGRES_PASSWORD", None)
+        else:
+            os.environ["ZT_POSTGRES_PASSWORD"] = old_password
+        if original_integrations is None:
+            integrations_path.unlink(missing_ok=True)
+        else:
+            integrations_path.write_text(original_integrations, encoding="utf-8")
+
+
+def test_postgres_session_store_rejects_missing_prerequisites():
     status, note = app.session_store_status({
         **app.default_integrations(),
         "session_store": "postgres",
-        "postgres_enabled": "true",
+        "postgres_enabled": "false",
         "postgres_dsn": "postgresql://zt_console@db/nkp_zerotouch",
     })
 
     assert status == "warn"
-    assert "not implemented" in note
+    assert "enable Postgres" in note
 
 
 def test_postgres_dsn_password_is_not_accepted():
@@ -558,11 +690,12 @@ def test_postgres_dsn_password_is_not_accepted():
     assert "must not include password" in note
 
 
-def test_integrations_page_marks_postgres_session_store_contract_only():
+def test_integrations_page_marks_postgres_session_store_available():
     rbac_path = app.SETTINGS / "rbac.json"
     integrations_path = app.SETTINGS / "integrations.json"
     original_rbac = rbac_path.read_text(encoding="utf-8") if rbac_path.exists() else None
     original_integrations = integrations_path.read_text(encoding="utf-8") if integrations_path.exists() else None
+    original_driver = app.postgres_session_driver
     rbac = app.default_rbac()
     account = {
         "username": "integrations-smoke",
@@ -573,6 +706,8 @@ def test_integrations_page_marks_postgres_session_store_contract_only():
     account.update(app.password_record("IntegrationsSmoke-Local-123!"))
     rbac["accounts"] = [account]
     app.write_json(rbac_path, rbac)
+    driver = FakePostgresDriver()
+    app.postgres_session_driver = lambda: (driver, "fake")
     app.save_setting("integrations", {
         **app.default_integrations(),
         "session_store": "postgres",
@@ -597,11 +732,12 @@ def test_integrations_page_marks_postgres_session_store_contract_only():
         assert status == 303
         status, _, body = request(opener, base_url, "/settings/integrations")
         assert status == 200
-        assert "postgres session backend not implemented" in body
-        assert "postgres contract only" in body
+        assert "postgres-backed sessions" in body
+        assert "postgres contract only" not in body
     finally:
         server.shutdown()
         server.server_close()
+        app.postgres_session_driver = original_driver
         if original_rbac is None:
             rbac_path.unlink(missing_ok=True)
         else:
