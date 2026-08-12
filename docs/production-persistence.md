@@ -18,8 +18,11 @@ Recommended Postgres-backed objects:
 - Environment metadata indexes.
 - Health snapshots and integration probe results.
 
-Secrets should not be stored in Postgres. Store only references to Vault or an
-equivalent external secret backend.
+Secrets should not be stored in Postgres or embedded in dashboard integration
+settings. Store only references to Vault or an equivalent external secret
+backend. The dashboard rejects Postgres DSNs that include a password and redacts
+any previously saved password-bearing DSN before rendering the integrations
+page.
 
 Migration approach:
 
