@@ -1,0 +1,434 @@
+const metrics = [
+  ["Ready to Deploy", "3", "environments clear deploy gate"],
+  ["Blocked", "1", "environments need operator action"],
+  ["Pending Approval", "4", "apply and restore jobs awaiting review"],
+  ["Drift Detected", "4", "environments with drift signals"],
+];
+
+const environments = [
+  {
+    name: "lab-airgapped",
+    file: "air-gapped.example.yaml",
+    type: "air-gapped",
+    lifecycle: "Generated",
+    lifecycleClass: "ok",
+    readiness: "7/10",
+    readinessPct: 70,
+    gate: "ready",
+    gateClass: "ok",
+    gateDetail: "deploy gate clear",
+    drift: "attention",
+    driftClass: "warn",
+    driftDetail: "verification report missing",
+    evidence: "approved",
+    evidenceClass: "ok",
+    evidenceDetail: "report missing",
+    action: "Resolve drift",
+    detail: "verification report missing",
+  },
+  {
+    name: "lab-connected",
+    file: "connected.example.yaml",
+    type: "connected",
+    lifecycle: "Verified",
+    lifecycleClass: "ok",
+    readiness: "6/10",
+    readinessPct: 60,
+    gate: "ready",
+    gateClass: "ok",
+    gateDetail: "deploy gate clear",
+    drift: "attention",
+    driftClass: "warn",
+    driftDetail: "generate has not run",
+    evidence: "approved",
+    evidenceClass: "ok",
+    evidenceDetail: "report available",
+    action: "Prepare workspace",
+    detail: "Stage NKP inputs and create local state.",
+  },
+  {
+    name: "lab-new",
+    file: "lab-new.yaml",
+    type: "connected",
+    lifecycle: "Verified",
+    lifecycleClass: "ok",
+    readiness: "6/10",
+    readinessPct: 60,
+    gate: "ready",
+    gateClass: "ok",
+    gateDetail: "deploy gate clear",
+    drift: "attention",
+    driftClass: "warn",
+    driftDetail: "generate has not run",
+    evidence: "approved",
+    evidenceClass: "ok",
+    evidenceDetail: "report available",
+    action: "Prepare workspace",
+    detail: "Stage NKP inputs and create local state.",
+  },
+  {
+    name: "lab-proxied",
+    file: "proxied.example.yaml",
+    type: "proxied",
+    lifecycle: "Draft",
+    lifecycleClass: "warn",
+    readiness: "5/10",
+    readinessPct: 50,
+    gate: "blocked",
+    gateClass: "warn",
+    gateDetail: "plan review is not generated",
+    drift: "attention",
+    driftClass: "warn",
+    driftDetail: "generate has not run; verification report missing",
+    evidence: "not generated",
+    evidenceClass: "warn",
+    evidenceDetail: "report missing",
+    action: "Prepare workspace",
+    detail: "Stage NKP inputs and create local state.",
+  },
+];
+
+const nextActions = [
+  environments[0],
+  environments[1],
+  environments[2],
+  environments[3],
+];
+
+const jobs = [
+  ["job-20260629-apply-003", "deploy", "pending_approval", "jgoulden", "1 of 2"],
+  ["job-20260629-registry-002", "registry", "pending_approval", "operator", "0 of 1"],
+  ["job-20260713-restore-004", "restore", "pending_approval", "jgoulden", "0 of 2"],
+  ["job-20260629-generate-001", "generate", "completed", "jgoulden", "not required"],
+];
+
+const runs = [
+  ["20260629-102047", "summary.md"],
+  ["20260629-082052", "summary.md"],
+  ["20260629-081805", "summary.md"],
+];
+
+const pipeline = [
+  ["validate", "Schema and bundle checks", "ok", 100],
+  ["prepare", "Local state and staged tools", "ok", 100],
+  ["generate", "Plans, scripts, and dry-run", "warn", 65],
+  ["registry", "Air-gapped bundle plan", "warn", 45],
+  ["deploy", "Approval-gated NKP create", "warn", 20],
+  ["verify", "Kubeconfig and reports", "warn", 10],
+];
+
+const artifacts = [
+  ["cluster-values.yaml", "config", "lab-connected", "generated"],
+  ["deploy-plan.md", "plan", "lab-connected", "review"],
+  ["registry-plan.md", "plan", "lab-airgapped", "generated"],
+  ["verification-summary.md", "report", "lab-airgapped", "missing"],
+  ["environment.json", "state", "lab-connected", "ready"],
+  ["deploy.log", "log", "lab-connected", "pending"],
+];
+
+const evidencePacks = [
+  {
+    name: "lab-connected-20260713-213714",
+    environment: "lab-connected",
+    cluster: "nkp-mgmt-connected",
+    created: "2026-07-13T19:37:14Z",
+    files: 18,
+    redaction: "redacted",
+    redactionClass: "ok",
+    archive: "lab-connected-20260713-213714.zip",
+  },
+  {
+    name: "lab-airgapped-20260713-193643",
+    environment: "lab-airgapped",
+    cluster: "nkp-mgmt-airgapped",
+    created: "2026-07-13T19:36:43Z",
+    files: 16,
+    redaction: "redacted",
+    redactionClass: "ok",
+    archive: "lab-airgapped-20260713-193643.tar.gz",
+  },
+  {
+    name: "lab-proxied-20260713-validate",
+    environment: "lab-proxied",
+    cluster: "nkp-mgmt-proxied",
+    created: "pending verify",
+    files: 7,
+    redaction: "review",
+    redactionClass: "warn",
+    archive: "not generated",
+  },
+];
+
+const restorePlans = [
+  {
+    environment: "lab-connected",
+    manifest: "backup-manifest.json",
+    plan: "restore-20260713-214000.md",
+    status: "ready",
+    statusClass: "ok",
+    signal: "metadata clean",
+    action: "Request approval",
+  },
+  {
+    environment: "lab-airgapped",
+    manifest: "backup-manifest.json",
+    plan: "restore-20260713-193643.md",
+    status: "blocked",
+    statusClass: "warn",
+    signal: "verification report missing",
+    action: "Resolve blockers",
+  },
+  {
+    environment: "lab-proxied",
+    manifest: "backup-manifest.json",
+    plan: "not generated",
+    status: "blocked",
+    statusClass: "warn",
+    signal: "backup components missing",
+    action: "Generate plan",
+  },
+];
+
+const uatCases = [
+  ["UAT-001", "Connected config validation", "partial", "2 validation evidence records", "Validation pass or accepted warnings", "Config hash and validation output"],
+  ["UAT-002", "Proxied config validation", "partial", "proxy/no-proxy checks captured", "Proxy/no-proxy checks reviewed", "Config hash, proxy review, validation output"],
+  ["UAT-003", "Air-gapped config validation", "partial", "bundle and registry warnings captured", "Bundle and registry requirements verified", "Config hash, bundle checksum, validation output"],
+  ["UAT-004", "Prepare workspace", "partial", "3 configured environments", ".zt workspace created for approved config", "Prepare output and workspace path"],
+  ["UAT-005", "Generate artifacts", "partial", "1 environment with generated artifacts", "Reviewable artifacts created", "Generated files and config hash"],
+  ["UAT-006", "Point-of-no-return review", "missing", "approval record required", "Operator identifies apply boundary", "Approval or tabletop record"],
+  ["UAT-007", "Registry planning/execution", "missing", "registry evidence required", "Registry action is approved or simulated", "Registry output or simulation marker"],
+  ["UAT-008", "Deployment execution", "missing", "deployment evidence required", "Deploy action is approved or simulated", "Command output and target/simulation evidence"],
+  ["UAT-009", "Post-deployment validation", "partial", "verification evidence found", "Verify output captured", "Verify output and acceptance result"],
+  ["UAT-010", "Failed deployment recovery", "partial", "2 evidence packs available", "Failure is classified before rerun", "Failure transcript and recovery decision"],
+  ["UAT-011", "Rollback/abort", "missing", "decision record required", "Abort or rollback path is documented", "Decision record and final state"],
+  ["UAT-012", "Dashboard governance", "partial", "3 run records, 3 job records", "Approval/audit/run records are visible", "Dashboard record or screenshot"],
+];
+
+const genericSections = {
+  setup: ["Setup Wizard", "Create a deployment profile from connected, proxied, or air-gapped templates.", [["Source template", "connected.example.yaml"], ["Identity checks", "duplicate names blocked"], ["Next step", "prepare workspace"]]],
+  preflight: ["Preflight", "Readiness matrix across bundle, network, credentials, and provider checks.", [["Bundle", "NKP v2.17.1 discovered"], ["Prism Central", "placeholder endpoint warning"], ["Registry", "required for air-gapped"]]],
+  external: ["External Evidence", "Reviewed proof records for systems the static demo cannot validate.", [["Prism authorization", "required for production"], ["Deployment UAT", "required for production"], ["Evidence boundary", "references only; no secrets"]]],
+  drift: ["Drift", "Generated plan and verification evidence signals.", [["lab-airgapped", "verification report missing"], ["lab-connected", "generate has not run"], ["lab-proxied", "plan review is not generated"]]],
+  production: ["Production Gate", "Deployment gate checks before live apply is requested.", [["Placeholder endpoint block", "enabled"], ["Plan review", "required"], ["Backup evidence", "recommended"]]],
+  health: ["Health", "Runner, tool, credential, and integration checks.", [["Runner", "Docker / Local Shell"], ["Credentials", "environment variables checked"], ["Optional tools", "podman warning"]]],
+  plan: ["Plan Review", "Artifact review with hash evidence before apply approval.", [["deploy-plan.md", "awaiting approval"], ["registry-plan.md", "generated"], ["Change record", "linked to pending job"]]],
+  kubeconfig: ["Kubeconfig", "Kubeconfig presence and verification output.", [["lab-connected", "not yet captured"], ["lab-airgapped", "report missing"], ["Access", "local artifact only"]]],
+  backups: ["Backups", "Local backup snapshots before destructive workflows.", [["Latest backup", "not captured in demo"], ["Scope", "state, generated, reports"], ["Restore path", ".zt/environments/<name>/backup"]]],
+  sources: ["Sources", "NKP bundle paths, source metadata, and checksums.", [["Standard bundle", "/mnt/c/Share/nkp-bundle_v2.17.1"], ["Air-gapped bundle", "/mnt/c/Share/nkp-air-gapped-bundle_v2.17.1"], ["Git source", "VirtuArchitect/nkp-zerotouch-framework"]]],
+  inventory: ["Inventory", "AHV inventory and future bare-metal provider notes.", [["Provider", "nutanix-ahv"], ["Prism Element", "pe-cluster"], ["Image", "nkp-node-image"]]],
+  network: ["Network", "Management, workload, API VIP, DNS, NTP, and proxy fields.", [["API VIP", "10.10.10.51 reserved for lab-new"], ["Pod CIDR", "192.168.0.0/16"], ["Service CIDR", "10.96.0.0/12"]]],
+  locks: ["Locks", "Operational locks around apply-class jobs.", [["deploy", "approval lock pending"], ["destroy", "requires confirm flag"], ["registry", "air-gapped only"]]],
+  actions: ["Safe Actions", "Dashboard-safe operations that do not perform live apply.", [["validate", "safe"], ["prepare", "safe"], ["generate", "safe"], ["verify", "safe"], ["evidence", "safe"]]],
+  changes: ["Change Records", "Apply requests are captured as change records.", [["CHG-003", "deploy pending approval"], ["CHG-002", "registry pending approval"], ["CHG-001", "generate completed"]]],
+  approval: ["Approval Policy", "Approval thresholds for apply-class workflows.", [["deploy", "2 approvals"], ["registry", "1 approval"], ["destroy", "2 approvals and confirm flag"]]],
+  channels: ["Release Channels", "Environment channel metadata and readiness.", [["lab", "connected/proxied/air-gapped"], ["pilot", "extra approval"], ["production", "stricter gate"]]],
+  audit: ["Audit Trail", "Append-only local event stream.", [["08:35", "admin login accepted"], ["08:20", "PowerShell smoke completed"], ["08:18", "Bash smoke completed"]]],
+  settings: ["Providers", "Default provider intent and local settings.", [["Provider", "nutanix-ahv"], ["Auth", "Local RBAC"], ["Persistence", "local .zt state"]]],
+};
+
+const $ = (selector) => document.querySelector(selector);
+const $$ = (selector) => [...document.querySelectorAll(selector)];
+
+function renderMetrics() {
+  $("#summaryGrid").innerHTML = metrics.map(([label, value, foot]) => `
+    <a class="metric" href="#${label.toLowerCase().replaceAll(" ", "-")}" data-command="metric">
+      <div class="metric-label">${label}</div>
+      <div class="metric-value">${value}</div>
+      <div class="metric-foot">${foot}</div>
+    </a>
+  `).join("");
+}
+
+function renderNextActions() {
+  $("#nextActions").innerHTML = nextActions.map((env) => `
+    <div class="next-action">
+      <div>
+        <strong>${env.name}</strong>
+        <div class="env-file">${env.file} - ${env.detail}</div>
+      </div>
+      <button class="button-link" type="button" data-command="action">${env.action}</button>
+    </div>
+  `).join("");
+}
+
+function renderEnvironments() {
+  $("#environmentRows").innerHTML = environments.map((env) => `
+    <tr>
+      <td><div class="env-name">${env.name}</div><div class="env-file">${env.file}</div></td>
+      <td><span class="badge ${env.type}">${env.type}</span><div class="env-file">channel lab</div></td>
+      <td><span class="chip ${env.lifecycleClass}">${env.lifecycle}</span><div class="env-file">readiness ${env.readiness}</div><div class="progress-track"><div class="progress-bar" style="width:${env.readinessPct}%"></div></div></td>
+      <td><span class="chip ${env.gateClass}">${env.gate}</span><div class="env-file">${env.gateDetail}</div></td>
+      <td><span class="chip ${env.driftClass}">${env.drift}</span><div class="env-file">${env.driftDetail}</div></td>
+      <td><span class="chip ${env.evidenceClass}">${env.evidence}</span><div class="env-file">${env.evidenceDetail}</div></td>
+      <td><button class="button-link" type="button" data-command="action">${env.action}</button><div class="env-file">${env.detail}</div></td>
+      <td><div class="manage-actions"><button class="button-link" type="button" data-command="open">Open</button><button class="button-link" type="button" data-command="edit">Edit</button></div></td>
+    </tr>
+  `).join("");
+}
+
+function renderRuns() {
+  const rows = runs.map(([name, file]) => `<li><code>${name}</code><span class="muted">${file}</span></li>`).join("");
+  $("#recentRuns").innerHTML = rows;
+  $("#runsList").innerHTML = rows;
+}
+
+function renderJobs() {
+  $("#jobRows").innerHTML = jobs.map(([id, action, status, requester, approval]) => `
+    <tr><td><code>${id}</code></td><td>${action}</td><td><span class="chip ${status === "completed" ? "ok" : "warn"}">${status}</span></td><td>${requester}</td><td>${approval}</td></tr>
+  `).join("");
+}
+
+function renderPipeline() {
+  $("#pipelineSteps").innerHTML = pipeline.map(([name, detail, state, pct]) => `
+    <div class="pipeline-step">
+      <strong>${name}</strong>
+      <span class="chip ${state}">${state === "ok" ? "pass" : "attention"}</span>
+      <div class="env-file">${detail}</div>
+      <div class="progress-track"><div class="progress-bar" style="width:${pct}%"></div></div>
+    </div>
+  `).join("");
+}
+
+function renderArtifacts() {
+  $("#artifactRows").innerHTML = artifacts.map(([name, type, env, status]) => `
+    <tr><td><code>${name}</code></td><td>${type}</td><td>${env}</td><td><span class="chip ${status === "missing" ? "warn" : "ok"}">${status}</span></td></tr>
+  `).join("");
+}
+
+function renderEvidence() {
+  $("#evidenceRows").innerHTML = evidencePacks.map((pack) => `
+    <tr>
+      <td><div class="env-name">${pack.name}</div><div class="env-file">.zt/evidence/${pack.name}</div></td>
+      <td>${pack.environment}<div class="env-file">${pack.cluster}</div></td>
+      <td>${pack.created}</td>
+      <td>${pack.files}</td>
+      <td><span class="chip ${pack.redactionClass}">${pack.redaction}</span></td>
+      <td><button class="button-link" type="button" data-command="manifest">Manifest</button><div class="env-file">${pack.archive}</div></td>
+    </tr>
+  `).join("");
+}
+
+function renderUat() {
+  const partial = uatCases.filter(([, , status]) => status === "partial").length;
+  const missing = uatCases.filter(([, , status]) => status === "missing").length;
+  const coverage = uatCases.length - missing;
+  $("#uatMetrics").innerHTML = [
+    ["UAT Cases", uatCases.length, "documented acceptance checks"],
+    ["Partial Evidence", partial, "cases with local signals"],
+    ["Missing Evidence", missing, "cases needing proof"],
+    ["Evidence Coverage", coverage, "case(s) with signals"],
+  ].map(([label, value, foot]) => `
+    <a class="metric" href="#uat" data-command="metric">
+      <div class="metric-label">${label}</div>
+      <div class="metric-value">${value}</div>
+      <div class="metric-foot">${foot}</div>
+    </a>
+  `).join("");
+
+  $("#uatRows").innerHTML = uatCases.map(([id, title, status, detail, required, evidence]) => {
+    const chipClass = status === "pass" ? "ok" : status === "partial" ? "warn" : "fail";
+    return `
+      <tr>
+        <td><div class="env-name">${id}</div><div class="env-file">${title}</div></td>
+        <td><span class="chip ${chipClass}">${status}</span><div class="env-file">${detail}</div></td>
+        <td>${required}</td>
+        <td>${evidence}</td>
+      </tr>
+    `;
+  }).join("");
+}
+
+function renderRestore() {
+  $("#restoreRows").innerHTML = restorePlans.map((item) => `
+    <tr>
+      <td><div class="env-name">${item.environment}</div><div class="env-file">${item.manifest}</div></td>
+      <td><code>${item.plan}</code></td>
+      <td><span class="chip ${item.statusClass}">${item.status}</span><div class="env-file">${item.signal}</div></td>
+      <td><button class="button-link" type="button" data-command="restore">${item.action}</button></td>
+    </tr>
+  `).join("");
+
+  $("#restoreActions").innerHTML = [
+    ["Plan-first", "Restore plans are generated under .zt/restore-plans before any operator action."],
+    ["Approval-gated", "Clean restore metadata can create a pending approval job for manual authorization."],
+    ["No-copy boundary", "The approved authorization job records evidence only; actual file copy remains manual."],
+  ].map(([heading, body]) => `
+    <article class="settings-card"><h3>${heading}</h3><p>${body}</p></article>
+  `).join("");
+}
+
+function renderGeneric(sectionKey) {
+  const [title, copy, cards] = genericSections[sectionKey] || genericSections.settings;
+  $("#genericTitle").textContent = title;
+  $("#genericCopy").textContent = copy;
+  $("#genericCards").innerHTML = cards.map(([heading, body]) => `
+    <article class="settings-card"><h3>${heading}</h3><p>${body}</p></article>
+  `).join("");
+}
+
+function setView(viewName) {
+  const dedicated = ["environments", "jobs", "runs", "pipeline", "cli", "artifacts", "evidence", "uat", "restore"];
+  const targetView = dedicated.includes(viewName) ? viewName : "generic";
+  $$(".view").forEach((view) => view.classList.toggle("active", view.dataset.view === targetView));
+  $$("[data-view-link]").forEach((item) => item.classList.toggle("active", item.dataset.viewLink === viewName));
+  if (targetView === "generic") renderGeneric(viewName);
+  window.location.hash = viewName;
+}
+
+function toast(message) {
+  const el = document.createElement("div");
+  el.className = "copy-toast";
+  el.textContent = message;
+  document.body.append(el);
+  setTimeout(() => el.remove(), 1600);
+}
+
+function currentTheme() {
+  return document.documentElement.dataset.theme === "light" ? "light" : "dark";
+}
+
+function renderThemeLabel() {
+  const label = document.querySelector("[data-theme-label]");
+  if (label) label.textContent = currentTheme() === "light" ? "Dark" : "Light";
+}
+
+function toggleTheme() {
+  const next = currentTheme() === "light" ? "dark" : "light";
+  if (next === "light") document.documentElement.dataset.theme = "light";
+  else document.documentElement.removeAttribute("data-theme");
+  try {
+    localStorage.setItem("zt-theme", next);
+  } catch (error) {}
+  renderThemeLabel();
+}
+
+document.addEventListener("click", (event) => {
+  const viewLink = event.target.closest("[data-view-link]");
+  if (viewLink) setView(viewLink.dataset.viewLink);
+
+  const command = event.target.closest("[data-command]")?.dataset.command;
+  if (event.target.closest("[data-theme-toggle]")) toggleTheme();
+  if (command === "demo-login") toast("Static demo session stays signed in");
+  if (command === "action") toast("Demo action selected; live apply remains CLI-gated");
+  if (command === "open") toast("Environment detail preview");
+  if (command === "edit") toast("Edit workflow preview");
+  if (command === "manifest") toast("Evidence manifest preview");
+  if (command === "metric") toast("Metric drill-down preview");
+  if (command === "restore") toast("Restore approval workflow preview; file copy remains manual");
+});
+
+renderMetrics();
+renderNextActions();
+renderEnvironments();
+renderRuns();
+renderJobs();
+renderPipeline();
+renderArtifacts();
+renderEvidence();
+renderUat();
+renderRestore();
+renderGeneric("settings");
+renderThemeLabel();
+
+const initial = window.location.hash.replace("#", "");
+if (initial) setView(initial);
