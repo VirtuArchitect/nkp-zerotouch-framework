@@ -72,7 +72,7 @@ Deployment readiness sections:
 Settings sections:
 
 - `Providers`: default provider intent and runner type.
-- `Secrets`: metadata for local-file or external secret backends. Secret values are not stored by the dashboard.
+- `Secrets`: metadata for local-file or external secret backends. Secret values are not stored by the dashboard. When `hashicorp-vault` is selected, the console reads Vault KV metadata with `VAULT_TOKEN` and shows only required key presence.
 - `Integrations`: Postgres, Vault, OIDC, and session-store integration metadata with endpoint/discovery health probes. File-backed sessions are active for local restarts; Postgres-backed sessions are available when `session_store=postgres`, Postgres is enabled, a password-free DSN is saved, and optional `psycopg` or `psycopg2` is installed in the dashboard runtime. Postgres DSNs must not include passwords; the console rejects password-bearing DSNs and redacts any previously saved value before rendering it. OIDC handoff now issues short-lived signed state/nonce cookies; the callback completes authorization-code exchange for HS256 `id_token` responses, validates nonce, issuer, audience, and expiry, and maps the identity to an active local RBAC account. RSA/JWKS providers still fail closed until a reviewed JWT crypto dependency is added.
 
 Environment safeguards:

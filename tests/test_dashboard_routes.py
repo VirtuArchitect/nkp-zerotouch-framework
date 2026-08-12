@@ -88,6 +88,38 @@ class OidcProviderHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
+class VaultSecretHandler(BaseHTTPRequestHandler):
+    expected_path = "/v1/kv/data/nkp/zerotouch"
+    expected_token = "vault-token"
+    expected_namespace = ""
+    payload = {"data": {"data": {}}}
+    seen_paths = []
+    seen_tokens = []
+    seen_namespaces = []
+
+    def log_message(self, format, *args):
+        return
+
+    def do_GET(self):
+        type(self).seen_paths.append(self.path)
+        type(self).seen_tokens.append(self.headers.get("X-Vault-Token", ""))
+        type(self).seen_namespaces.append(self.headers.get("X-Vault-Namespace", ""))
+        if self.path != type(self).expected_path or self.headers.get("X-Vault-Token", "") != type(self).expected_token:
+            self.send_response(403)
+            self.end_headers()
+            return
+        if type(self).expected_namespace and self.headers.get("X-Vault-Namespace", "") != type(self).expected_namespace:
+            self.send_response(403)
+            self.end_headers()
+            return
+        body = app.json.dumps(type(self).payload).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
 class FakePostgresCursor:
     def __init__(self, conn):
         self.conn = conn
@@ -187,6 +219,21 @@ def start_oidc_provider():
         "jwks_uri": f"{issuer}/jwks.json",
     }
     return server, Handler, issuer
+
+
+def start_vault_secret_server(payload, expected_namespace=""):
+    class Handler(VaultSecretHandler):
+        pass
+
+    Handler.payload = payload
+    Handler.expected_namespace = expected_namespace
+    Handler.seen_paths = []
+    Handler.seen_tokens = []
+    Handler.seen_namespaces = []
+    server = app.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server, Handler
 
 
 def base64url_json(data):
@@ -900,6 +947,147 @@ def test_integrations_page_redacts_and_rejects_postgres_dsn_password():
             integrations_path.unlink(missing_ok=True)
         else:
             integrations_path.write_text(original_integrations, encoding="utf-8")
+
+
+def test_vault_secret_metadata_reads_kv_v2_without_exposing_values():
+    old_token = os.environ.get("VAULT_TOKEN")
+    server, handler = start_vault_secret_server(
+        {
+            "data": {
+                "data": {
+                    "NUTANIX_PC_USERNAME": "pc-user",
+                    "NUTANIX_PC_PASSWORD": "pc-secret",
+                    "ZT_REGISTRY_USERNAME": "reg-user",
+                },
+                "metadata": {"version": 1},
+            }
+        },
+        expected_namespace="platform",
+    )
+    try:
+        os.environ["VAULT_TOKEN"] = "vault-token"
+        settings = {
+            **app.default_secrets(),
+            "backend": "hashicorp-vault",
+            "vault_url": f"http://127.0.0.1:{server.server_address[1]}",
+            "namespace": "platform",
+            "secret_path": "kv/nkp/zerotouch",
+        }
+
+        metadata = app.vault_secret_metadata(settings)
+        rows, _ = app.runtime_secret_rows(settings)
+
+        assert metadata["status"] == "ok"
+        assert "NUTANIX_PC_USERNAME" in metadata["keys"]
+        assert "pc-secret" not in app.json.dumps(metadata)
+        assert handler.seen_paths == ["/v1/kv/data/nkp/zerotouch", "/v1/kv/data/nkp/zerotouch"]
+        assert handler.seen_tokens == ["vault-token", "vault-token"]
+        assert handler.seen_namespaces == ["platform", "platform"]
+        assert ("NUTANIX_PC_USERNAME", "ok", "vault") in rows
+        assert ("ZT_REGISTRY_PASSWORD", "warn", "missing") in rows
+    finally:
+        server.shutdown()
+        server.server_close()
+        if old_token is None:
+            os.environ.pop("VAULT_TOKEN", None)
+        else:
+            os.environ["VAULT_TOKEN"] = old_token
+
+
+def test_vault_secret_metadata_warns_without_token():
+    old_token = os.environ.pop("VAULT_TOKEN", None)
+    try:
+        metadata = app.vault_secret_metadata({
+            **app.default_secrets(),
+            "backend": "hashicorp-vault",
+            "vault_url": "https://vault.example.test",
+            "secret_path": "kv/nkp/zerotouch",
+        })
+
+        assert metadata["status"] == "warn"
+        assert "VAULT_TOKEN" in metadata["note"]
+        assert metadata["keys"] == []
+    finally:
+        if old_token is not None:
+            os.environ["VAULT_TOKEN"] = old_token
+
+
+def test_secrets_page_shows_vault_presence_without_values():
+    rbac_path = app.SETTINGS / "rbac.json"
+    secrets_path = app.SETTINGS / "secrets.json"
+    original_rbac = rbac_path.read_text(encoding="utf-8") if rbac_path.exists() else None
+    original_secrets = secrets_path.read_text(encoding="utf-8") if secrets_path.exists() else None
+    old_token = os.environ.get("VAULT_TOKEN")
+    server, _ = start_vault_secret_server({
+        "data": {
+            "data": {
+                "NUTANIX_PC_USERNAME": "pc-user",
+                "NUTANIX_PC_PASSWORD": "pc-secret",
+            }
+        }
+    })
+    try:
+        os.environ["VAULT_TOKEN"] = "vault-token"
+        rbac = app.default_rbac()
+        account = {
+            "username": "secrets-smoke",
+            "displayName": "Secrets Smoke",
+            "role": "Admin",
+            "status": "active",
+        }
+        account.update(app.password_record("SecretsSmoke-Local-123!"))
+        rbac["accounts"] = [account]
+        app.write_json(rbac_path, rbac)
+        app.save_setting("secrets", {
+            **app.default_secrets(),
+            "backend": "hashicorp-vault",
+            "vault_url": f"http://127.0.0.1:{server.server_address[1]}",
+            "secret_path": "kv/nkp/zerotouch",
+        })
+
+        dashboard_server = app.ThreadingHTTPServer(("127.0.0.1", 0), app.Handler)
+        thread = threading.Thread(target=dashboard_server.serve_forever, daemon=True)
+        thread.start()
+        base_url = f"http://127.0.0.1:{dashboard_server.server_address[1]}"
+        cookie_jar = http.cookiejar.CookieJar()
+        opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookie_jar))
+        no_redirect_opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookie_jar), NoRedirect)
+
+        status, _, _ = request(
+            no_redirect_opener,
+            base_url,
+            "/login",
+            {"username": "secrets-smoke", "password": "SecretsSmoke-Local-123!"},
+            allow_error=True,
+        )
+        assert status == 303
+        status, _, body = request(opener, base_url, "/settings/secrets")
+        assert status == 200
+        assert "2 key(s) available" in body
+        assert "NUTANIX_PC_USERNAME" in body
+        assert ">vault<" in body
+        assert "pc-user" not in body
+        assert "pc-secret" not in body
+    finally:
+        server.shutdown()
+        server.server_close()
+        try:
+            dashboard_server.shutdown()
+            dashboard_server.server_close()
+        except UnboundLocalError:
+            pass
+        if old_token is None:
+            os.environ.pop("VAULT_TOKEN", None)
+        else:
+            os.environ["VAULT_TOKEN"] = old_token
+        if original_rbac is None:
+            rbac_path.unlink(missing_ok=True)
+        else:
+            rbac_path.write_text(original_rbac, encoding="utf-8")
+        if original_secrets is None:
+            secrets_path.unlink(missing_ok=True)
+        else:
+            secrets_path.write_text(original_secrets, encoding="utf-8")
 
 
 def test_rbac_account_create_rejects_short_password():

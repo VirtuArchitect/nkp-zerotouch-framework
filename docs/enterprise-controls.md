@@ -91,3 +91,8 @@ Postgres can be used for dashboard sessions when `session_store=postgres`, a
 password-free DSN is saved, and optional `psycopg` or `psycopg2` is installed in
 the dashboard runtime. Store any required database password in
 `ZT_POSTGRES_PASSWORD`, not in the saved DSN.
+
+HashiCorp Vault can be used as a dashboard secret-presence backend. Save only
+Vault URL, namespace, and path metadata under Settings > Secrets, provide
+`VAULT_TOKEN` in the runtime environment, and use the console to confirm
+required keys exist without rendering secret values.

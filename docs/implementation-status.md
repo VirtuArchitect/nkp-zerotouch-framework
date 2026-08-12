@@ -47,7 +47,7 @@ This maps the public-readiness and real-deployment tasks to the repository featu
 | Production readiness gate | Implemented baseline | console reports plan review, preflight evidence, backup, drift, channel, and structured verification evidence readiness |
 | Dashboard route tests | Implemented baseline | pytest route/API smoke coverage for dashboard pages and JSON endpoints |
 | OIDC login flow | Implemented baseline | readiness route validates discovery metadata, builds an authorization handoff with signed state/nonce cookies, exchanges authorization codes, validates signed HS256 `id_token` claims, checks nonce/issuer/audience/expiry, and maps identities to active local RBAC accounts; RSA/JWKS provider support remains future work |
-| Vault secret validation | Implemented baseline | runtime secret key presence checks and Vault health probe metadata |
+| Vault secret backend | Implemented baseline | runtime secret key presence checks, Vault health probe metadata, and dashboard Vault KV key-presence resolution without displaying secret values |
 | Environment uniqueness checks | Implemented baseline | environment create/edit blocks duplicate names, cluster names, API VIPs, and registry namespaces |
 | CI environment identity checks | Implemented baseline | `tools/zt_config.py validate-all` validates committed environment files and blocks duplicate identity values |
 | Approval policy | Implemented baseline | per-action approval thresholds, self-approval prevention, production Admin option |
