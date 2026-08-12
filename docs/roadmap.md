@@ -59,14 +59,19 @@ Acceptance criteria:
 
 ### Strengthen restore execution controls
 
-Status: documented baseline in `docs/restore-controls.md`.
+Status: implemented baseline in `dashboard/app.py` and documented in
+`docs/restore-controls.md`.
 
-Restore planning exists, but restore execution remains intentionally manual. Define the next control layer before adding any automated restore apply behavior.
+Restore planning and approval-gated manual authorization exist. Restore file
+copy execution remains intentionally manual; define copy semantics, conflict
+handling, and post-restore verification before adding automated restore apply
+behavior.
 
 Acceptance criteria:
 
 - Restore execution requirements are documented.
 - Approval, evidence, rollback, and dry-run behavior are specified.
+- Clean restore metadata can create an approval-gated no-copy authorization job.
 - No restore apply automation is added without tests and security review.
 
 ### Publish an architecture review checklist
