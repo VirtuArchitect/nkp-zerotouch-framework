@@ -66,7 +66,9 @@ Before exposing this console beyond a trusted operator workstation:
   an HTTPS-terminating reverse proxy so browser cookies are marked `Secure`.
 - Move from memory sessions to file-backed local sessions for workstation restarts, or to Postgres-backed sessions for shared operator consoles when `psycopg` or `psycopg2` is installed in the dashboard runtime.
 - Connect OIDC/SAML or enterprise SSO to a real identity provider.
-- Complete OIDC authorization-code token exchange for production login.
+- For built-in OIDC login, configure `ZT_OIDC_CLIENT_SECRET`, map provider
+  identities to active local RBAC accounts, and use HS256 `id_token` validation
+  unless a reviewed JWT crypto dependency is added for RSA/JWKS providers.
 - Connect console state to Postgres if multi-user operation is required.
 - Encrypt or externalize all secrets; do not store raw credentials in the repo or database.
 - Connect Vault or an equivalent external secret backend.
@@ -99,6 +101,8 @@ Keep live apply operations deliberate and controlled:
 ## Current Gaps
 
 - No production SSO provider connected yet.
+- OIDC RSA/JWKS validation requires a reviewed JWT crypto dependency before
+  providers that sign with RSA can replace local login.
 - No external Postgres service is connected in this repository; Postgres-backed dashboard sessions require deployment-specific database provisioning and runtime driver installation.
 - No external Vault service connected yet.
 - No live Prism Central authorization validation against a real NKP lab yet.

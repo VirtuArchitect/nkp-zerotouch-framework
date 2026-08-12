@@ -23,10 +23,8 @@ Acceptance criteria:
 
 ### Complete OIDC authorization-code login flow
 
-The implementation status currently marks OIDC login as partial. Discovery
-metadata readiness is validated in the console; complete the full
-authorization-code token exchange and session mapping flow after approving a
-JWT/JWKS-capable runtime dependency.
+Status: implemented baseline for HS256 `id_token` providers; RSA/JWKS support
+still requires a reviewed JWT crypto dependency.
 
 Acceptance criteria:
 
