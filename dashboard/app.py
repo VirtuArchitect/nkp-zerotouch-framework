@@ -40,6 +40,10 @@ try:
     SESSION_TTL_SECONDS = int(os.environ.get("ZT_SESSION_TTL_SECONDS", "43200"))
 except ValueError:
     SESSION_TTL_SECONDS = 43200
+try:
+    MIN_PASSWORD_LENGTH = int(os.environ.get("ZT_MIN_PASSWORD_LENGTH", "12"))
+except ValueError:
+    MIN_PASSWORD_LENGTH = 12
 SAFE_ACTIONS = {"validate", "prepare", "generate", "verify", "backup", "runs", "evidence"}
 ACTION_ORDER = ["validate", "prepare", "generate", "verify", "backup", "runs", "evidence"]
 CLI_APPLY_ACTIONS = {"registry", "deploy", "upgrade", "destroy"}
@@ -253,6 +257,12 @@ def password_record(password):
     salt = secrets.token_hex(16)
     digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), 120000).hex()
     return {"salt": salt, "passwordHash": digest, "algorithm": "pbkdf2_sha256", "iterations": 120000}
+
+
+def password_policy_error(password):
+    if len(password or "") < MIN_PASSWORD_LENGTH:
+        return f"Password must be at least {MIN_PASSWORD_LENGTH} characters."
+    return ""
 
 
 def verify_password(password, account):
@@ -4432,6 +4442,10 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_html(page("Login Failed", "<h2>Login failed</h2><div class='notice'>Username and password are required.</div><a class='back-link' href='/login'>Back to login</a>", "about"), status=400)
                 return
             if not login_accounts:
+                password_error = password_policy_error(password)
+                if password_error:
+                    self.send_html(page("Login Failed", f"<h2>Login failed</h2><div class='notice'>{html.escape(password_error)}</div><a class='back-link' href='/login'>Back to login</a>", "about"), status=400)
+                    return
                 expected_bootstrap_token = os.environ.get("ZT_BOOTSTRAP_TOKEN", "")
                 if bootstrap_token_required() and (not expected_bootstrap_token or not secrets.compare_digest(form_value(form, "bootstrap_token"), expected_bootstrap_token)):
                     self.send_html(page("Bootstrap Blocked", "<h2>Bootstrap blocked</h2><div class='notice'>A valid bootstrap token is required before creating the first administrator account.</div><a class='back-link' href='/login'>Back to login</a>", "about"), status=403)
@@ -4652,6 +4666,11 @@ class Handler(BaseHTTPRequestHandler):
             if not password and not existing_account:
                 self.send_html(page("Account Error", "<h2>Password is required for new accounts.</h2><a class='back-link' href='/settings/rbac'>Back to RBAC</a>", "rbac"), status=400)
                 return
+            if password:
+                password_error = password_policy_error(password)
+                if password_error:
+                    self.send_html(page("Account Error", f"<h2>Account error</h2><div class='notice'>{html.escape(password_error)}</div><a class='back-link' href='/settings/rbac'>Back to RBAC</a>", "rbac"), status=400)
+                    return
             accounts = [account for account in rbac["accounts"] if safe_key(account.get("username", "")) != username]
             account_record = {
                 "username": username,

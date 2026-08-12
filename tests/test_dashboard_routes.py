@@ -317,6 +317,39 @@ def test_dashboard_exposed_bootstrap_requires_token():
             rbac_path.write_text(original, encoding="utf-8")
 
 
+def test_dashboard_bootstrap_rejects_short_password():
+    rbac_path = app.SETTINGS / "rbac.json"
+    original = rbac_path.read_text(encoding="utf-8") if rbac_path.exists() else None
+    try:
+        app.write_json(rbac_path, app.default_rbac())
+        server = app.ThreadingHTTPServer(("127.0.0.1", 0), app.Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        base_url = f"http://127.0.0.1:{server.server_address[1]}"
+        opener = urllib.request.build_opener()
+
+        status, _, body = request(
+            opener,
+            base_url,
+            "/login",
+            {"username": "admin", "password": "short"},
+            allow_error=True,
+        )
+        assert status == 400
+        assert f"at least {app.MIN_PASSWORD_LENGTH} characters" in body
+        assert not app.has_password_accounts()
+    finally:
+        try:
+            server.shutdown()
+            server.server_close()
+        except UnboundLocalError:
+            pass
+        if original is None:
+            rbac_path.unlink(missing_ok=True)
+        else:
+            rbac_path.write_text(original, encoding="utf-8")
+
+
 def test_dashboard_file_session_store_persists_and_logs_out():
     rbac_path = app.SETTINGS / "rbac.json"
     integrations_path = app.SETTINGS / "integrations.json"
@@ -570,6 +603,66 @@ def test_integrations_page_redacts_and_rejects_postgres_dsn_password():
             integrations_path.unlink(missing_ok=True)
         else:
             integrations_path.write_text(original_integrations, encoding="utf-8")
+
+
+def test_rbac_account_create_rejects_short_password():
+    rbac_path = app.SETTINGS / "rbac.json"
+    original_rbac = rbac_path.read_text(encoding="utf-8") if rbac_path.exists() else None
+    rbac = app.default_rbac()
+    account = {
+        "username": "rbac-admin",
+        "displayName": "RBAC Admin",
+        "role": "Admin",
+        "status": "active",
+    }
+    account.update(app.password_record("RbacAdmin-Local-123!"))
+    rbac["accounts"] = [account]
+    app.write_json(rbac_path, rbac)
+    server = app.ThreadingHTTPServer(("127.0.0.1", 0), app.Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base_url = f"http://127.0.0.1:{server.server_address[1]}"
+    cookie_jar = http.cookiejar.CookieJar()
+    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookie_jar))
+    no_redirect_opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookie_jar), NoRedirect)
+    try:
+        status, _, _ = request(
+            no_redirect_opener,
+            base_url,
+            "/login",
+            {"username": "rbac-admin", "password": "RbacAdmin-Local-123!"},
+            allow_error=True,
+        )
+        assert status == 303
+        status, _, body = request(opener, base_url, "/settings/rbac")
+        assert status == 200
+        csrf = body.split('name="csrf_token" value="', 1)[1].split('"', 1)[0]
+
+        status, _, body = request(
+            opener,
+            base_url,
+            "/settings/rbac/account/create",
+            {
+                "csrf_token": csrf,
+                "username": "weak-user",
+                "displayName": "Weak User",
+                "role": "Operator",
+                "status": "active",
+                "password": "short",
+            },
+            allow_error=True,
+        )
+        assert status == 400
+        assert f"at least {app.MIN_PASSWORD_LENGTH} characters" in body
+        saved = app.read_json(rbac_path)
+        assert all(account.get("username") != "weak-user" for account in saved["accounts"])
+    finally:
+        server.shutdown()
+        server.server_close()
+        if original_rbac is None:
+            rbac_path.unlink(missing_ok=True)
+        else:
+            rbac_path.write_text(original_rbac, encoding="utf-8")
 
 
 def test_authenticated_prism_probe_uses_credentials():

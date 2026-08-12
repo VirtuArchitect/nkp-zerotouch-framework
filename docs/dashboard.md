@@ -42,6 +42,8 @@ Job and approval model:
 - Approval thresholds are configured under `Approval Policy`.
 - Authenticated POST forms include CSRF protection.
 - Route access is RBAC-gated by role permissions.
+- Bootstrap and RBAC-created local account passwords must be at least 12
+  characters by default. Set `ZT_MIN_PASSWORD_LENGTH` to tune this local policy.
 - Login cookies include a `Max-Age` matching the server-side session TTL. Set
   `ZT_COOKIE_SECURE=true` when serving the dashboard through HTTPS so session
   and OIDC handoff cookies are marked `Secure`.
