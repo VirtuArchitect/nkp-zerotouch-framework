@@ -57,7 +57,7 @@ Before exposing this console beyond a trusted operator workstation:
   command lines with unquoted environment values.
 - Set `ZT_BOOTSTRAP_TOKEN` whenever the dashboard is bound outside localhost
   before the first admin account exists.
-- Move from memory sessions to file-backed local sessions or Postgres-backed shared session storage.
+- Move from memory sessions to file-backed local sessions. Treat Postgres-backed shared session storage as future work until a reviewed storage backend is implemented.
 - Connect OIDC/SAML or enterprise SSO to a real identity provider.
 - Complete OIDC authorization-code token exchange for production login.
 - Connect console state to Postgres if multi-user operation is required.
@@ -92,7 +92,7 @@ Keep live apply operations deliberate and controlled:
 ## Current Gaps
 
 - No production SSO provider connected yet.
-- No external Postgres service connected yet.
+- No external Postgres service or Postgres-backed dashboard session backend connected yet.
 - No external Vault service connected yet.
 - No live Prism Central authorization validation against a real NKP lab yet.
 - No end-to-end deployment proof against a real NKP lab yet.

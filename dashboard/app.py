@@ -325,6 +325,15 @@ def session_store_mode():
     return mode if mode in {"memory", "file"} else "memory"
 
 
+def session_store_status(settings):
+    requested = settings.get("session_store", "memory")
+    if requested == "file":
+        return "ok", "file-backed local sessions"
+    if requested == "postgres":
+        return "warn", "postgres session backend not implemented; runtime uses memory"
+    return "ok", "memory"
+
+
 def session_file():
     return SETTINGS / "sessions.json"
 
@@ -854,9 +863,7 @@ def integration_checks():
     postgres = postgres_status(settings)
     oidc = oidc_status(settings)
     vault = vault_status(settings)
-    session_store = settings.get("session_store", "memory")
-    session_status = "ok" if session_store != "postgres" or settings.get("postgres_enabled") == "true" else "warn"
-    session_note = f"{session_store}" if session_status == "ok" else "postgres session store requires Postgres"
+    session_status, session_note = session_store_status(settings)
     return [
         ("Postgres", postgres[0], postgres[1]),
         ("OIDC", oidc[0], oidc[1]),
@@ -4256,7 +4263,7 @@ class Handler(BaseHTTPRequestHandler):
     <table>
       <thead><tr><th>Integration</th><th>Value</th></tr></thead>
       <tbody>
-        <tr><td>Session store</td><td><div class="field"><select name="session_store"><option value="memory" {'selected' if settings.get('session_store') == 'memory' else ''}>memory</option><option value="file" {'selected' if settings.get('session_store') == 'file' else ''}>file</option><option value="postgres" {'selected' if settings.get('session_store') == 'postgres' else ''}>postgres</option></select></div></td></tr>
+        <tr><td>Session store</td><td><div class="field"><select name="session_store"><option value="memory" {'selected' if settings.get('session_store') == 'memory' else ''}>memory</option><option value="file" {'selected' if settings.get('session_store') == 'file' else ''}>file</option><option value="postgres" {'selected' if settings.get('session_store') == 'postgres' else ''}>postgres contract only</option></select></div></td></tr>
         <tr><td>Enable Postgres</td><td><div class="field"><select name="postgres_enabled"><option value="false" {'selected' if settings.get('postgres_enabled') != 'true' else ''}>false</option><option value="true" {'selected' if settings.get('postgres_enabled') == 'true' else ''}>true</option></select></div></td></tr>
         <tr><td>Postgres DSN</td><td><div class="field"><input name="postgres_dsn" value="{html.escape(settings.get('postgres_dsn', ''))}" placeholder="postgresql://zt_console@db/nkp_zerotouch"></div></td></tr>
         <tr><td>Enable OIDC</td><td><div class="field"><select name="oidc_enabled"><option value="false" {'selected' if settings.get('oidc_enabled') != 'true' else ''}>false</option><option value="true" {'selected' if settings.get('oidc_enabled') == 'true' else ''}>true</option></select></div></td></tr>
@@ -4272,7 +4279,7 @@ class Handler(BaseHTTPRequestHandler):
     </table>
   </form>
 </section>
-<div class="notice">These settings provide concrete integration contracts. External Postgres, Vault, and OIDC services must still be deployed and connected in the target environment.</div>
+<div class="notice">These settings provide concrete integration contracts. External Postgres, Vault, and OIDC services must still be deployed and connected in the target environment. Postgres session storage is not active yet; selecting it records intent while runtime sessions continue to use memory.</div>
 """
             self.send_html(page("Integrations - NKP ZeroTouch Framework", body, "integrations"))
             return
