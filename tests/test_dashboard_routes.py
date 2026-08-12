@@ -562,15 +562,19 @@ def test_oidc_login_page_shows_readiness_contract():
         thread = threading.Thread(target=dashboard_server.serve_forever, daemon=True)
         thread.start()
         base_url = f"http://127.0.0.1:{dashboard_server.server_address[1]}"
-        opener = urllib.request.build_opener()
+        cookie_jar = http.cookiejar.CookieJar()
+        opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookie_jar))
 
         status, content_type, body = request(opener, base_url, "/login/oidc")
 
         assert status == 200
         assert "text/html" in content_type
         assert "Readiness Contract" in body
+        assert "Continue to identity provider" in body
+        assert "response_type=code" in body
         assert "authorization_endpoint" in body
         assert "token validation" in body
+        assert any(cookie.name == "zt_oidc" for cookie in cookie_jar)
     finally:
         server.shutdown()
         server.server_close()
@@ -587,6 +591,90 @@ def test_oidc_login_page_shows_readiness_contract():
             integrations_path.unlink(missing_ok=True)
         else:
             integrations_path.write_text(original_integrations, encoding="utf-8")
+
+
+def test_oidc_callback_validates_state_and_fails_closed():
+    integrations_path = app.SETTINGS / "integrations.json"
+    original_integrations = integrations_path.read_text(encoding="utf-8") if integrations_path.exists() else None
+    server = start_json_server(
+        "/.well-known/openid-configuration",
+        {
+            "issuer": "",
+            "authorization_endpoint": "",
+            "token_endpoint": "",
+            "jwks_uri": "",
+        },
+    )
+    try:
+        issuer = f"http://127.0.0.1:{server.server_address[1]}"
+        server.RequestHandlerClass.payload = {
+            "issuer": issuer,
+            "authorization_endpoint": f"{issuer}/authorize",
+            "token_endpoint": f"{issuer}/token",
+            "jwks_uri": f"{issuer}/jwks.json",
+        }
+        app.save_setting("integrations", {
+            **app.default_integrations(),
+            "oidc_enabled": "true",
+            "oidc_issuer": issuer,
+            "oidc_client_id": "zt-console",
+            "oidc_redirect_uri": "http://localhost:18080/login/oidc/callback",
+        })
+        dashboard_server = app.ThreadingHTTPServer(("127.0.0.1", 0), app.Handler)
+        thread = threading.Thread(target=dashboard_server.serve_forever, daemon=True)
+        thread.start()
+        base_url = f"http://127.0.0.1:{dashboard_server.server_address[1]}"
+        cookie_jar = http.cookiejar.CookieJar()
+        opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookie_jar))
+
+        status, _, _ = request(opener, base_url, "/login/oidc")
+        assert status == 200
+        oidc_cookie = next(cookie for cookie in cookie_jar if cookie.name == "zt_oidc")
+        expected_state = oidc_cookie.value.split(".", 1)[0]
+
+        status, _, body = request(opener, base_url, "/login/oidc/callback?code=abc&state=wrong", allow_error=True)
+        assert status == 403
+        assert "callback state did not match" in body
+
+        status, _, _ = request(opener, base_url, "/login/oidc")
+        assert status == 200
+        oidc_cookie = next(cookie for cookie in cookie_jar if cookie.name == "zt_oidc")
+        expected_state = oidc_cookie.value.split(".", 1)[0]
+        status, _, body = request(opener, base_url, f"/login/oidc/callback?code=abc&state={urllib.parse.quote(expected_state)}", allow_error=True)
+        assert status == 501
+        assert "State validation passed" in body
+        assert "signed JWT validation" in body
+    finally:
+        server.shutdown()
+        server.server_close()
+        try:
+            dashboard_server.shutdown()
+            dashboard_server.server_close()
+        except UnboundLocalError:
+            pass
+        if original_integrations is None:
+            integrations_path.unlink(missing_ok=True)
+        else:
+            integrations_path.write_text(original_integrations, encoding="utf-8")
+
+
+def test_oidc_callback_rejects_missing_state_or_provider_error():
+    dashboard_server = app.ThreadingHTTPServer(("127.0.0.1", 0), app.Handler)
+    thread = threading.Thread(target=dashboard_server.serve_forever, daemon=True)
+    thread.start()
+    base_url = f"http://127.0.0.1:{dashboard_server.server_address[1]}"
+    opener = urllib.request.build_opener()
+    try:
+        status, _, body = request(opener, base_url, "/login/oidc/callback?code=abc", allow_error=True)
+        assert status == 400
+        assert "missing the expected state or code" in body
+
+        status, _, body = request(opener, base_url, "/login/oidc/callback?error=access_denied", allow_error=True)
+        assert status == 400
+        assert "access_denied" in body
+    finally:
+        dashboard_server.shutdown()
+        dashboard_server.server_close()
 
 
 def test_dashboard_cli_apply_actions_require_apply_flag():

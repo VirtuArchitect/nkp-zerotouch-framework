@@ -17,7 +17,7 @@ from base64 import b64encode
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.error import HTTPError
-from urllib.parse import parse_qs, quote, urlparse
+from urllib.parse import parse_qs, quote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 try:
@@ -237,6 +237,30 @@ def cookie_value(headers, name):
         if key == name:
             return value
     return ""
+
+
+def oidc_cookie_header(state, nonce):
+    return f"zt_oidc={state}.{nonce}; Path=/login/oidc; Max-Age=300; HttpOnly; SameSite=Lax"
+
+
+def clear_oidc_cookie_header():
+    return "zt_oidc=; Path=/login/oidc; Max-Age=0; HttpOnly; SameSite=Lax"
+
+
+def oidc_authorization_url(settings, metadata, state, nonce):
+    authorization_endpoint = metadata.get("authorization_endpoint", "") if isinstance(metadata, dict) else ""
+    redirect_uri = settings.get("oidc_redirect_uri", "")
+    if not authorization_endpoint or not redirect_uri:
+        return ""
+    params = {
+        "response_type": "code",
+        "client_id": settings.get("oidc_client_id", ""),
+        "redirect_uri": redirect_uri,
+        "scope": "openid profile email",
+        "state": state,
+        "nonce": nonce,
+    }
+    return f"{authorization_endpoint}?{urlencode(params)}"
 
 
 def default_rbac():
@@ -2559,6 +2583,14 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/login/oidc":
             settings = load_setting("integrations", default_integrations())
             status, note, metadata, checks = oidc_readiness(settings)
+            oidc_state = secrets.token_urlsafe(32)
+            oidc_nonce = secrets.token_urlsafe(32)
+            authorization_url = oidc_authorization_url(settings, metadata, oidc_state, oidc_nonce) if status == "ok" else ""
+            handoff_row = (
+                f'<tr><td>Authorization handoff</td><td><a href="{html.escape(authorization_url)}">Continue to identity provider</a></td></tr>'
+                if authorization_url else
+                '<tr><td>Authorization handoff</td><td>not ready</td></tr>'
+            )
             check_rows = "".join(
                 f"<tr><td>{html.escape(name)}</td><td><span class='chip {'ok' if passed else 'warn'}'>{html.escape(detail)}</span></td></tr>"
                 for name, passed, detail in checks
@@ -2581,6 +2613,7 @@ class Handler(BaseHTTPRequestHandler):
       <tr><td>Authorization endpoint</td><td>{html.escape(metadata.get('authorization_endpoint', 'not discovered') if isinstance(metadata, dict) else 'not discovered')}</td></tr>
       <tr><td>Token endpoint</td><td>{html.escape(metadata.get('token_endpoint', 'not discovered') if isinstance(metadata, dict) else 'not discovered')}</td></tr>
       <tr><td>JWKS URI</td><td>{html.escape(metadata.get('jwks_uri', 'not discovered') if isinstance(metadata, dict) else 'not discovered')}</td></tr>
+      {handoff_row}
     </tbody>
   </table>
 </section>
@@ -2595,7 +2628,35 @@ class Handler(BaseHTTPRequestHandler):
 <a class="back-link" href="/login">Back to local login</a>
 </div>
 """
-            self.send_html(page("OIDC Login - NKP ZeroTouch Framework", body, "about"))
+            headers = {"Set-Cookie": oidc_cookie_header(oidc_state, oidc_nonce)} if authorization_url else None
+            self.send_html(page("OIDC Login - NKP ZeroTouch Framework", body, "about"), headers=headers)
+            return
+        if parsed.path == "/login/oidc/callback":
+            query = parse_qs(parsed.query)
+            cookie = cookie_value(self.headers, "zt_oidc")
+            expected_state, _, expected_nonce = cookie.partition(".")
+            provided_state = query.get("state", [""])[0]
+            code = query.get("code", [""])[0]
+            provider_error = query.get("error", [""])[0]
+            headers = {"Set-Cookie": clear_oidc_cookie_header()}
+            if provider_error:
+                audit_event("oidc_callback_rejected", None, "provider", "denied", {"error": provider_error})
+                body = f"<h2>OIDC sign-in rejected</h2><div class='notice'>Identity provider returned <code>{html.escape(provider_error)}</code>.</div><a class='back-link' href='/login/oidc'>Back to OIDC readiness</a>"
+                self.send_html(page("OIDC Rejected - NKP ZeroTouch Framework", body, "about"), status=400, headers=headers)
+                return
+            if not expected_state or not expected_nonce or not provided_state or not code:
+                audit_event("oidc_callback_rejected", None, "callback", "denied", {"reason": "missing state or code"})
+                body = "<h2>OIDC callback rejected</h2><div class='notice'>The authorization callback was missing the expected state or code. Start a fresh OIDC handoff.</div><a class='back-link' href='/login/oidc'>Back to OIDC readiness</a>"
+                self.send_html(page("OIDC Callback Rejected - NKP ZeroTouch Framework", body, "about"), status=400, headers=headers)
+                return
+            if not secrets.compare_digest(expected_state, provided_state):
+                audit_event("oidc_callback_rejected", None, "callback", "denied", {"reason": "state mismatch"})
+                body = "<h2>OIDC callback rejected</h2><div class='notice'>The callback state did not match the local handoff state. Start a fresh OIDC handoff.</div><a class='back-link' href='/login/oidc'>Back to OIDC readiness</a>"
+                self.send_html(page("OIDC Callback Rejected - NKP ZeroTouch Framework", body, "about"), status=403, headers=headers)
+                return
+            audit_event("oidc_callback_validated", None, "callback", "blocked", {"reason": "token exchange not implemented"})
+            body = "<h2>OIDC callback validated</h2><div class='notice'>State validation passed, but login is not completed because token exchange, signed JWT validation, nonce validation, and role mapping require a reviewed OIDC/JWKS runtime dependency.</div><a class='back-link' href='/login'>Back to local login</a>"
+            self.send_html(page("OIDC Callback Guard - NKP ZeroTouch Framework", body, "about"), status=501, headers=headers)
             return
         if parsed.path == "/logout":
             token = cookie_value(self.headers, "zt_session")
