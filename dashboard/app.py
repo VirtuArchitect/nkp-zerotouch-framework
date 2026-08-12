@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import base64
 import difflib
 import hmac
 import html
@@ -412,6 +413,139 @@ def oidc_authorization_url(settings, metadata, state, nonce):
         "nonce": nonce,
     }
     return f"{authorization_endpoint}?{urlencode(params)}"
+
+
+def oidc_client_secret():
+    return os.environ.get("ZT_OIDC_CLIENT_SECRET", "").strip()
+
+
+def base64url_decode(value):
+    padding = "=" * (-len(value) % 4)
+    return base64.urlsafe_b64decode((value + padding).encode("ascii"))
+
+
+def jwt_json_part(token, index):
+    parts = token.split(".")
+    if len(parts) != 3:
+        raise ValueError("JWT must contain header, payload, and signature")
+    return json.loads(base64url_decode(parts[index]).decode("utf-8"))
+
+
+def verify_hs256_jwt(token, secret):
+    if not secret:
+        raise ValueError("ZT_OIDC_CLIENT_SECRET is required for HS256 token validation")
+    parts = token.split(".")
+    if len(parts) != 3:
+        raise ValueError("JWT must contain header, payload, and signature")
+    signing_input = ".".join(parts[:2]).encode("ascii")
+    expected = hmac.new(secret.encode("utf-8"), signing_input, hashlib.sha256).digest()
+    actual = base64url_decode(parts[2])
+    if not hmac.compare_digest(expected, actual):
+        raise ValueError("id_token signature validation failed")
+
+
+def oidc_validate_id_token(id_token, settings, metadata, expected_nonce, now=None):
+    if not id_token:
+        raise ValueError("token response did not include id_token")
+    header = jwt_json_part(id_token, 0)
+    claims = jwt_json_part(id_token, 1)
+    alg = header.get("alg", "")
+    if alg != "HS256":
+        raise ValueError("id_token alg must be HS256 for the built-in validator")
+    verify_hs256_jwt(id_token, oidc_client_secret())
+
+    current = int(now or time.time())
+    issuer = str(settings.get("oidc_issuer", "")).rstrip("/")
+    metadata_issuer = str(metadata.get("issuer", "")).rstrip("/")
+    expected_issuer = metadata_issuer or issuer
+    if str(claims.get("iss", "")).rstrip("/") != expected_issuer:
+        raise ValueError("id_token issuer mismatch")
+    audience = claims.get("aud")
+    client_id = settings.get("oidc_client_id", "")
+    if isinstance(audience, list):
+        audience_ok = client_id in audience
+    else:
+        audience_ok = audience == client_id
+    if not audience_ok:
+        raise ValueError("id_token audience mismatch")
+    if claims.get("nonce") != expected_nonce:
+        raise ValueError("id_token nonce mismatch")
+    try:
+        expires_at = int(claims.get("exp", 0))
+    except (TypeError, ValueError):
+        raise ValueError("id_token expiry missing or invalid")
+    if expires_at <= current:
+        raise ValueError("id_token expired")
+    if "nbf" in claims:
+        try:
+            not_before = int(claims.get("nbf", 0))
+        except (TypeError, ValueError):
+            raise ValueError("id_token not-before invalid")
+        if not_before > current:
+            raise ValueError("id_token not yet valid")
+    if "iat" in claims:
+        try:
+            issued_at = int(claims.get("iat", 0))
+        except (TypeError, ValueError):
+            raise ValueError("id_token issued-at invalid")
+        if issued_at > current + 60:
+            raise ValueError("id_token issued in the future")
+    return claims
+
+
+def oidc_exchange_code(settings, metadata, code):
+    token_endpoint = metadata.get("token_endpoint", "") if isinstance(metadata, dict) else ""
+    if not token_endpoint:
+        raise ValueError("OIDC token endpoint missing")
+    data = {
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": settings.get("oidc_redirect_uri", ""),
+        "client_id": settings.get("oidc_client_id", ""),
+    }
+    secret = oidc_client_secret()
+    if secret:
+        data["client_secret"] = secret
+    encoded = urlencode(data).encode("utf-8")
+    request = Request(
+        token_endpoint,
+        data=encoded,
+        headers={"Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+    with urlopen(request, timeout=5) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("OIDC token response was not an object")
+    return payload
+
+
+def oidc_identity_candidates(claims):
+    candidates = []
+    for key in ("preferred_username", "email", "sub"):
+        value = str(claims.get(key, "")).strip()
+        if value:
+            candidates.append(value)
+    return candidates
+
+
+def oidc_session_from_claims(claims):
+    rbac = load_rbac()
+    accounts = [account for account in rbac.get("accounts", []) if account.get("status") == "active"]
+    lookup = {safe_key(account.get("username", "")): account for account in accounts}
+    for candidate in oidc_identity_candidates(claims):
+        account = lookup.get(safe_key(candidate))
+        if account:
+            username = safe_key(account.get("username", candidate))
+            return {
+                "username": username,
+                "role": account.get("role", "Operator"),
+                "loginAt": time.time(),
+                "csrf": secrets.token_urlsafe(32),
+                "authProvider": "oidc",
+                "oidcSubject": str(claims.get("sub", "")),
+            }
+    raise ValueError("OIDC identity does not map to an active local RBAC account")
 
 
 def default_rbac():
@@ -1133,7 +1267,7 @@ def oidc_readiness(settings):
         checks.append((key, value_parsed.scheme in {"http", "https"} and bool(value_parsed.netloc), value or "missing"))
 
     ready = all(passed for _, passed, _ in checks)
-    note = "discovery ready; token validation not implemented" if ready else "discovery metadata incomplete"
+    note = "discovery ready; callback validates HS256 id_tokens and local RBAC mapping" if ready else "discovery metadata incomplete"
     return ("ok" if ready else "warn"), note, metadata, checks
 
 
@@ -2777,7 +2911,9 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(encoded)))
         for key, value in (headers or {}).items():
-            self.send_header(key, value)
+            values = value if isinstance(value, (list, tuple)) else [value]
+            for item in values:
+                self.send_header(key, item)
         self.end_headers()
         self.wfile.write(encoded)
 
@@ -2793,7 +2929,9 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(303)
         self.send_header("Location", location)
         for key, value in (headers or {}).items():
-            self.send_header(key, value)
+            values = value if isinstance(value, (list, tuple)) else [value]
+            for item in values:
+                self.send_header(key, item)
         self.end_headers()
 
     def current_user(self):
@@ -2924,7 +3062,7 @@ class Handler(BaseHTTPRequestHandler):
     <tbody>{check_rows}</tbody>
   </table>
 </section>
-<div class="notice">OIDC metadata is configured and validated here. Full authorization-code token exchange, signed token validation, and role mapping require a reviewed JWT/OIDC runtime dependency before production SSO can replace local login.</div>
+<div class="notice">OIDC metadata is configured and validated here. The built-in callback completes authorization-code exchange for signed HS256 <code>id_token</code> responses, validates nonce, issuer, audience, and expiry, then maps the identity to an active local RBAC account. RSA/JWKS providers fail closed until a reviewed JWT crypto dependency is added.</div>
 <a class="back-link" href="/login">Back to local login</a>
 </div>
 """
@@ -2964,9 +3102,27 @@ class Handler(BaseHTTPRequestHandler):
                 body = "<h2>OIDC callback rejected</h2><div class='notice'>The callback state did not match the local handoff state. Start a fresh OIDC handoff.</div><a class='back-link' href='/login/oidc'>Back to OIDC readiness</a>"
                 self.send_html(page("OIDC Callback Rejected - NKP ZeroTouch Framework", body, "about"), status=403, headers=headers)
                 return
-            audit_event("oidc_callback_validated", None, "callback", "blocked", {"reason": "token exchange not implemented"})
-            body = "<h2>OIDC callback validated</h2><div class='notice'>State validation passed, but login is not completed because token exchange, signed JWT validation, nonce validation, and role mapping require a reviewed OIDC/JWKS runtime dependency.</div><a class='back-link' href='/login'>Back to local login</a>"
-            self.send_html(page("OIDC Callback Guard - NKP ZeroTouch Framework", body, "about"), status=501, headers=headers)
+            settings = load_setting("integrations", default_integrations())
+            status, _, metadata, _ = oidc_readiness(settings)
+            if status != "ok":
+                audit_event("oidc_callback_rejected", None, "callback", "denied", {"reason": "oidc not ready"})
+                body = "<h2>OIDC callback rejected</h2><div class='notice'>OIDC discovery is not ready. Check Settings > Integrations and start a fresh handoff.</div><a class='back-link' href='/login/oidc'>Back to OIDC readiness</a>"
+                self.send_html(page("OIDC Callback Rejected - NKP ZeroTouch Framework", body, "about"), status=503, headers=headers)
+                return
+            try:
+                token_payload = oidc_exchange_code(settings, metadata, code)
+                claims = oidc_validate_id_token(token_payload.get("id_token", ""), settings, metadata, expected_nonce)
+                session = oidc_session_from_claims(claims)
+                token = secrets.token_urlsafe(32)
+                save_session(token, session)
+            except Exception as exc:
+                audit_event("oidc_callback_rejected", None, "callback", "denied", {"reason": str(exc)})
+                body = f"<h2>OIDC callback rejected</h2><div class='notice'>{html.escape(str(exc))}</div><a class='back-link' href='/login/oidc'>Back to OIDC readiness</a>"
+                self.send_html(page("OIDC Callback Rejected - NKP ZeroTouch Framework", body, "about"), status=403, headers=headers)
+                return
+            audit_event("oidc_login", session, session.get("username", ""), "success", {"subject": session.get("oidcSubject", "")})
+            headers["Set-Cookie"] = [clear_oidc_cookie_header(), session_cookie_header(token)]
+            self.send_redirect("/", headers)
             return
         if parsed.path == "/logout":
             token = cookie_value(self.headers, "zt_session")

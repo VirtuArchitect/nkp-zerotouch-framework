@@ -52,6 +52,42 @@ class JsonHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
+class OidcProviderHandler(BaseHTTPRequestHandler):
+    metadata = {}
+    token_response = {}
+    seen_token_forms = []
+
+    def log_message(self, format, *args):
+        return
+
+    def do_GET(self):
+        if self.path != "/.well-known/openid-configuration":
+            self.send_response(404)
+            self.end_headers()
+            return
+        body = app.json.dumps(type(self).metadata).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_POST(self):
+        if self.path != "/token":
+            self.send_response(404)
+            self.end_headers()
+            return
+        length = int(self.headers.get("Content-Length", "0"))
+        raw_body = self.rfile.read(length).decode("utf-8")
+        type(self).seen_token_forms.append(urllib.parse.parse_qs(raw_body))
+        body = app.json.dumps(type(self).token_response).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
 class FakePostgresCursor:
     def __init__(self, conn):
         self.conn = conn
@@ -131,6 +167,40 @@ def start_json_server(expected_path, payload):
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     return server
+
+
+def start_oidc_provider():
+    class Handler(OidcProviderHandler):
+        pass
+
+    Handler.metadata = {}
+    Handler.token_response = {}
+    Handler.seen_token_forms = []
+    server = app.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    issuer = f"http://127.0.0.1:{server.server_address[1]}"
+    Handler.metadata = {
+        "issuer": issuer,
+        "authorization_endpoint": f"{issuer}/authorize",
+        "token_endpoint": f"{issuer}/token",
+        "jwks_uri": f"{issuer}/jwks.json",
+    }
+    return server, Handler, issuer
+
+
+def base64url_json(data):
+    raw = app.json.dumps(data, separators=(",", ":")).encode("utf-8")
+    return app.base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def make_hs256_id_token(claims, secret):
+    header = base64url_json({"alg": "HS256", "typ": "JWT"})
+    payload = base64url_json(claims)
+    signing_input = f"{header}.{payload}".encode("ascii")
+    signature = app.hmac.new(secret.encode("utf-8"), signing_input, app.hashlib.sha256).digest()
+    encoded_signature = app.base64.urlsafe_b64encode(signature).decode("ascii").rstrip("=")
+    return f"{header}.{payload}.{encoded_signature}"
 
 
 def request(opener, base_url, path, data=None, allow_error=False, timeout=30, headers=None):
@@ -1000,6 +1070,7 @@ def test_oidc_readiness_validates_discovery_metadata():
 
         assert status == "ok"
         assert "discovery ready" in note
+        assert "callback validates" in note
         assert metadata["issuer"] == issuer
         assert all(passed for _, passed, _ in checks)
     finally:
@@ -1111,7 +1182,7 @@ def test_oidc_login_page_shows_readiness_contract():
         assert "Continue to identity provider" in body
         assert "response_type=code" in body
         assert "authorization_endpoint" in body
-        assert "token validation" in body
+        assert "HS256" in body
         assert any(cookie.name == "zt_oidc" for cookie in cookie_jar)
     finally:
         server.shutdown()
@@ -1131,7 +1202,7 @@ def test_oidc_login_page_shows_readiness_contract():
             integrations_path.write_text(original_integrations, encoding="utf-8")
 
 
-def test_oidc_callback_validates_state_and_fails_closed():
+def test_oidc_callback_validates_state_and_rejects_incomplete_exchange():
     integrations_path = app.SETTINGS / "integrations.json"
     original_integrations = integrations_path.read_text(encoding="utf-8") if integrations_path.exists() else None
     server = start_json_server(
@@ -1179,9 +1250,8 @@ def test_oidc_callback_validates_state_and_fails_closed():
         oidc_cookie = next(cookie for cookie in cookie_jar if cookie.name == "zt_oidc")
         expected_state = oidc_cookie.value.split(".", 1)[0]
         status, _, body = request(opener, base_url, f"/login/oidc/callback?code=abc&state={urllib.parse.quote(expected_state)}", allow_error=True)
-        assert status == 501
-        assert "State validation passed" in body
-        assert "signed JWT validation" in body
+        assert status == 403
+        assert "OIDC callback rejected" in body
 
         status, _, _ = request(opener, base_url, "/login/oidc")
         assert status == 200
@@ -1228,6 +1298,150 @@ def test_oidc_callback_rejects_missing_state_or_provider_error():
     finally:
         dashboard_server.shutdown()
         dashboard_server.server_close()
+
+
+def test_oidc_callback_exchanges_code_and_maps_local_role():
+    rbac_path = app.SETTINGS / "rbac.json"
+    integrations_path = app.SETTINGS / "integrations.json"
+    original_rbac = rbac_path.read_text(encoding="utf-8") if rbac_path.exists() else None
+    original_integrations = integrations_path.read_text(encoding="utf-8") if integrations_path.exists() else None
+    original_sessions = dict(app.SESSIONS)
+    old_secret = os.environ.get("ZT_OIDC_CLIENT_SECRET")
+    provider_server, provider_handler, issuer = start_oidc_provider()
+    dashboard_server = None
+    try:
+        os.environ["ZT_OIDC_CLIENT_SECRET"] = "oidc-client-secret"
+        rbac = app.default_rbac()
+        account = {
+            "username": "oidc-operator",
+            "displayName": "OIDC Operator",
+            "role": "Deployment Operator",
+            "status": "active",
+        }
+        rbac["accounts"] = [account]
+        app.write_json(rbac_path, rbac)
+        app.save_setting("integrations", {
+            **app.default_integrations(),
+            "oidc_enabled": "true",
+            "oidc_issuer": issuer,
+            "oidc_client_id": "zt-console",
+            "oidc_redirect_uri": "http://localhost:18080/login/oidc/callback",
+        })
+
+        dashboard_server = app.ThreadingHTTPServer(("127.0.0.1", 0), app.Handler)
+        thread = threading.Thread(target=dashboard_server.serve_forever, daemon=True)
+        thread.start()
+        base_url = f"http://127.0.0.1:{dashboard_server.server_address[1]}"
+        cookie_jar = http.cookiejar.CookieJar()
+        opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookie_jar))
+        no_redirect_opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookie_jar), NoRedirect)
+
+        status, _, _ = request(opener, base_url, "/login/oidc")
+        assert status == 200
+        oidc_cookie = next(cookie for cookie in cookie_jar if cookie.name == "zt_oidc")
+        expected_state, expected_nonce, error = app.parse_oidc_handoff_cookie(oidc_cookie.value)
+        assert error == ""
+        provider_handler.token_response = {
+            "id_token": make_hs256_id_token(
+                {
+                    "iss": issuer,
+                    "aud": "zt-console",
+                    "sub": "subject-123",
+                    "preferred_username": "oidc-operator",
+                    "nonce": expected_nonce,
+                    "iat": int(app.time.time()) - 1,
+                    "exp": int(app.time.time()) + 300,
+                },
+                "oidc-client-secret",
+            )
+        }
+
+        status, _, _ = request(
+            no_redirect_opener,
+            base_url,
+            f"/login/oidc/callback?code=auth-code&state={urllib.parse.quote(expected_state)}",
+            allow_error=True,
+        )
+        assert status == 303
+        assert provider_handler.seen_token_forms[-1]["code"] == ["auth-code"]
+        assert provider_handler.seen_token_forms[-1]["client_secret"] == ["oidc-client-secret"]
+
+        status, _, body = request(opener, base_url, "/")
+        assert status == 200
+        assert "oidc-operator (Deployment Operator)" in body
+    finally:
+        provider_server.shutdown()
+        provider_server.server_close()
+        if dashboard_server is not None:
+            dashboard_server.shutdown()
+            dashboard_server.server_close()
+        app.SESSIONS.clear()
+        app.SESSIONS.update(original_sessions)
+        if old_secret is None:
+            os.environ.pop("ZT_OIDC_CLIENT_SECRET", None)
+        else:
+            os.environ["ZT_OIDC_CLIENT_SECRET"] = old_secret
+        if original_rbac is None:
+            rbac_path.unlink(missing_ok=True)
+        else:
+            rbac_path.write_text(original_rbac, encoding="utf-8")
+        if original_integrations is None:
+            integrations_path.unlink(missing_ok=True)
+        else:
+            integrations_path.write_text(original_integrations, encoding="utf-8")
+
+
+def test_oidc_token_validation_rejects_invalid_issuer_and_missing_role_mapping():
+    rbac_path = app.SETTINGS / "rbac.json"
+    original_rbac = rbac_path.read_text(encoding="utf-8") if rbac_path.exists() else None
+    old_secret = os.environ.get("ZT_OIDC_CLIENT_SECRET")
+    try:
+        os.environ["ZT_OIDC_CLIENT_SECRET"] = "oidc-client-secret"
+        settings = {
+            **app.default_integrations(),
+            "oidc_issuer": "https://issuer.example.test",
+            "oidc_client_id": "zt-console",
+        }
+        metadata = {"issuer": "https://issuer.example.test"}
+        token = make_hs256_id_token(
+            {
+                "iss": "https://other-issuer.example.test",
+                "aud": "zt-console",
+                "sub": "subject-123",
+                "preferred_username": "missing-user",
+                "nonce": "nonce-value",
+                "iat": int(app.time.time()) - 1,
+                "exp": int(app.time.time()) + 300,
+            },
+            "oidc-client-secret",
+        )
+        try:
+            app.oidc_validate_id_token(token, settings, metadata, "nonce-value")
+        except ValueError as exc:
+            assert "issuer mismatch" in str(exc)
+        else:
+            raise AssertionError("Expected invalid issuer to be rejected")
+
+        app.write_json(rbac_path, app.default_rbac())
+        claims = {
+            "sub": "subject-123",
+            "preferred_username": "missing-user",
+        }
+        try:
+            app.oidc_session_from_claims(claims)
+        except ValueError as exc:
+            assert "does not map to an active local RBAC account" in str(exc)
+        else:
+            raise AssertionError("Expected missing role mapping to be rejected")
+    finally:
+        if old_secret is None:
+            os.environ.pop("ZT_OIDC_CLIENT_SECRET", None)
+        else:
+            os.environ["ZT_OIDC_CLIENT_SECRET"] = old_secret
+        if original_rbac is None:
+            rbac_path.unlink(missing_ok=True)
+        else:
+            rbac_path.write_text(original_rbac, encoding="utf-8")
 
 
 def test_dashboard_cli_apply_actions_require_apply_flag():

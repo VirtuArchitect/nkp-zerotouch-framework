@@ -80,8 +80,12 @@ the configured endpoint with `NUTANIX_PC_USERNAME` and `NUTANIX_PC_PASSWORD`.
 Registry readiness is probed through `/v2/` with `ZT_REGISTRY_USERNAME` and
 `ZT_REGISTRY_PASSWORD`.
 
-OIDC metadata is probed for discovery readiness, while full authorization-code
-login remains a future production integration item.
+OIDC metadata is probed for discovery readiness. The built-in login callback
+completes authorization-code exchange for HS256 `id_token` responses, validates
+nonce, issuer, audience, and expiry, then maps the identity to an active local
+RBAC account. Keep the client secret in `ZT_OIDC_CLIENT_SECRET`; do not save it
+in integration settings. RSA/JWKS identity providers remain fail-closed until a
+reviewed JWT crypto dependency is added.
 
 Postgres can be used for dashboard sessions when `session_store=postgres`, a
 password-free DSN is saved, and optional `psycopg` or `psycopg2` is installed in
