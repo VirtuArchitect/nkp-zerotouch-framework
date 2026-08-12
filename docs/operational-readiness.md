@@ -71,7 +71,9 @@ Before exposing this console beyond a trusted operator workstation:
   unless a reviewed JWT crypto dependency is added for RSA/JWKS providers.
 - Connect console state to Postgres if multi-user operation is required.
 - Encrypt or externalize all secrets; do not store raw credentials in the repo or database.
-- Connect Vault or an equivalent external secret backend.
+- Connect Vault or an equivalent external secret backend. The console can
+  resolve HashiCorp Vault KV key presence with `VAULT_TOKEN`, while secret
+  values remain hidden.
 - Review and tune role separation for authoring, approving, and executing deployment changes.
 - Confirm approval policy, release-channel gates, and plan-review controls are
   enabled for production channels.
@@ -104,6 +106,8 @@ Keep live apply operations deliberate and controlled:
 - OIDC RSA/JWKS validation requires a reviewed JWT crypto dependency before
   providers that sign with RSA can replace local login.
 - No external Postgres service is connected in this repository; Postgres-backed dashboard sessions require deployment-specific database provisioning and runtime driver installation.
-- No external Vault service connected yet.
+- No external Vault service is connected in this repository; HashiCorp Vault KV
+  key-presence checks require deployment-specific Vault provisioning and a
+  runtime `VAULT_TOKEN`.
 - No live Prism Central authorization validation against a real NKP lab yet.
 - No end-to-end deployment proof against a real NKP lab yet.

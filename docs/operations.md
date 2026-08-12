@@ -20,6 +20,13 @@ Bash:
 
 Real `*.secrets.yaml` files are ignored by Git.
 
+The dashboard can also resolve HashiCorp Vault KV key presence for required
+runtime secrets. Configure `Settings > Secrets` with backend
+`hashicorp-vault`, a Vault URL, optional namespace, and a secret path such as
+`kv/nkp/zerotouch`. Provide `VAULT_TOKEN` in the dashboard runtime
+environment. The console displays only whether expected keys are available from
+the environment, Vault, or missing; it never renders secret values.
+
 ## backup
 
 Copies generated state, reports, and generated plans to a timestamped backup folder under the environment workspace.

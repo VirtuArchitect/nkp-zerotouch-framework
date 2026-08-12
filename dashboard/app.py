@@ -970,6 +970,18 @@ def default_secrets():
     }
 
 
+SECRET_ENV_KEYS = [
+    "NUTANIX_PC_USERNAME",
+    "NUTANIX_PC_PASSWORD",
+    "ZT_REGISTRY_USERNAME",
+    "ZT_REGISTRY_PASSWORD",
+    "ZT_PROXY_USERNAME",
+    "ZT_PROXY_PASSWORD",
+    "ZT_SSH_PRIVATE_KEY",
+    "ZT_SSH_USERNAME",
+]
+
+
 def default_providers():
     return {
         "default_provider": "nutanix-ahv",
@@ -1283,6 +1295,81 @@ def vault_status(settings):
         headers["X-Vault-Token"] = token
     status, note = http_probe(f"{addr}/v1/sys/health", headers=headers)
     return status, f"health {note}"
+
+
+def vault_secret_request_path(secret_path):
+    cleaned = (secret_path or "").strip().strip("/")
+    if not cleaned:
+        return ""
+    if cleaned.startswith("v1/"):
+        return f"/{cleaned}"
+    if "/data/" in cleaned:
+        return f"/v1/{cleaned}"
+    parts = cleaned.split("/", 1)
+    if len(parts) == 1:
+        return f"/v1/{parts[0]}"
+    mount, path = parts
+    return f"/v1/{mount}/data/{path}"
+
+
+def vault_extract_secret_data(payload):
+    if not isinstance(payload, dict):
+        return {}
+    data = payload.get("data")
+    if isinstance(data, dict):
+        nested = data.get("data")
+        if isinstance(nested, dict):
+            return nested
+        return data
+    return {}
+
+
+def vault_secret_metadata(settings=None):
+    settings = settings or load_setting("secrets", default_secrets())
+    if settings.get("backend") != "hashicorp-vault":
+        return {"status": "warn", "note": "Vault backend disabled", "keys": []}
+    addr = settings.get("vault_url", "").rstrip("/")
+    secret_path = settings.get("secret_path", "")
+    token = os.environ.get("VAULT_TOKEN", "")
+    if not addr:
+        return {"status": "warn", "note": "Vault URL missing", "keys": []}
+    if not secret_path:
+        return {"status": "warn", "note": "Vault secret path missing", "keys": []}
+    if not token:
+        return {"status": "warn", "note": "VAULT_TOKEN not set", "keys": []}
+    request_path = vault_secret_request_path(secret_path)
+    headers = {"Accept": "application/json", "X-Vault-Token": token}
+    namespace = settings.get("namespace", "").strip()
+    if namespace:
+        headers["X-Vault-Namespace"] = namespace
+    try:
+        request = Request(f"{addr}{request_path}", headers=headers, method="GET")
+        with urlopen(request, timeout=3) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        return {"status": "warn", "note": f"Vault secret HTTP {exc.code}", "keys": []}
+    except Exception as exc:
+        return {"status": "warn", "note": f"Vault secret read failed: {exc}", "keys": []}
+    data = vault_extract_secret_data(payload)
+    keys = sorted(str(key) for key, value in data.items() if value not in {"", None})
+    status = "ok" if keys else "warn"
+    note = f"{len(keys)} key(s) available" if keys else "Vault secret contained no usable keys"
+    return {"status": status, "note": note, "keys": keys}
+
+
+def runtime_secret_rows(settings=None):
+    settings = settings or load_setting("secrets", default_secrets())
+    vault_metadata = vault_secret_metadata(settings)
+    vault_keys = set(vault_metadata.get("keys", []))
+    rows = []
+    for name in SECRET_ENV_KEYS + ["VAULT_TOKEN"]:
+        if os.environ.get(name):
+            rows.append((name, "ok", "environment"))
+        elif name in vault_keys:
+            rows.append((name, "ok", "vault"))
+        else:
+            rows.append((name, "warn", "missing"))
+    return rows, vault_metadata
 
 
 def integration_checks():
@@ -4545,9 +4632,10 @@ class Handler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/settings/secrets":
             settings = load_setting("secrets", default_secrets())
+            runtime_rows, vault_metadata = runtime_secret_rows(settings)
             secret_rows = "".join(
-                f"<tr><td><code>{html.escape(name)}</code></td><td><span class='chip {'ok' if os.environ.get(name) else 'warn'}'>{'present' if os.environ.get(name) else 'missing'}</span></td></tr>"
-                for name in ["NUTANIX_PC_USERNAME", "NUTANIX_PC_PASSWORD", "ZT_REGISTRY_USERNAME", "ZT_REGISTRY_PASSWORD", "VAULT_TOKEN"]
+                f"<tr><td><code>{html.escape(name)}</code></td><td><span class='chip {status}'>{html.escape(source)}</span></td></tr>"
+                for name, status, source in runtime_rows
             )
             body = f"""
 <div class="section-head">
@@ -4572,8 +4660,11 @@ class Handler(BaseHTTPRequestHandler):
   </form>
 </section>
 <div class="section-head"><div><h2>Runtime Secret Checks</h2><div class="section-copy">Presence checks only. Secret values are never displayed.</div></div></div>
+<section class="ops-strip">
+  <div class="ops-item"><div class="ops-label">Secret Backend</div><div class="ops-value"><span class="chip {vault_metadata.get('status', 'warn')}">{html.escape(vault_metadata.get('note', 'not checked'))}</span></div></div>
+</section>
 <section class="panel"><table><thead><tr><th>Key</th><th>Status</th></tr></thead><tbody>{secret_rows}</tbody></table></section>
-<div class="notice">This records backend metadata only. Secret values are not stored by the console.</div>
+<div class="notice">This records backend metadata only. Secret values are not stored or displayed by the console. Vault keys are shown only by name and presence.</div>
 """
             self.send_html(page("Secrets - NKP ZeroTouch Framework", body, "secrets"))
             return
@@ -4739,7 +4830,7 @@ class Handler(BaseHTTPRequestHandler):
     </table>
   </form>
 </section>
-<div class="notice">These settings provide concrete integration contracts. External Postgres, Vault, and OIDC services must still be deployed and connected in the target environment. Postgres session storage is not active yet; selecting it records intent while runtime sessions continue to use memory.</div>
+<div class="notice">These settings provide concrete integration contracts. External Postgres, Vault, and OIDC services must still be deployed and connected in the target environment. Postgres session storage is available when the optional driver is installed and the configured database is reachable.</div>
 <div class="notice">Do not include database passwords in the Postgres DSN. Store credentials in Vault or environment-scoped secrets and keep this field to endpoint metadata only.</div>
 """
             self.send_html(page("Integrations - NKP ZeroTouch Framework", body, "integrations"))
