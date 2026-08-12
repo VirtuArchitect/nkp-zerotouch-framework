@@ -441,6 +441,97 @@ def test_session_cookie_policy_matches_ttl_and_secure_flag():
             os.environ["ZT_COOKIE_SECURE"] = old_secure
 
 
+def test_login_failure_helpers_lock_and_clear():
+    original_failures = dict(app.LOGIN_FAILURES)
+    original_max = app.LOGIN_MAX_FAILURES
+    original_lockout = app.LOGIN_LOCKOUT_SECONDS
+    try:
+        app.LOGIN_FAILURES.clear()
+        app.LOGIN_MAX_FAILURES = 2
+        app.LOGIN_LOCKOUT_SECONDS = 60
+        key = app.login_failure_key("Admin User", "127.0.0.1")
+
+        assert app.login_lockout_remaining(key, now=100) == 0
+        assert app.record_login_failure(key, now=100) is False
+        assert app.record_login_failure(key, now=101) is True
+        assert app.login_lockout_remaining(key, now=110) == 51
+
+        app.clear_login_failures(key)
+        assert app.login_lockout_remaining(key, now=120) == 0
+    finally:
+        app.LOGIN_FAILURES.clear()
+        app.LOGIN_FAILURES.update(original_failures)
+        app.LOGIN_MAX_FAILURES = original_max
+        app.LOGIN_LOCKOUT_SECONDS = original_lockout
+
+
+def test_login_repeated_failures_are_rate_limited():
+    rbac_path = app.SETTINGS / "rbac.json"
+    original_rbac = rbac_path.read_text(encoding="utf-8") if rbac_path.exists() else None
+    original_failures = dict(app.LOGIN_FAILURES)
+    original_max = app.LOGIN_MAX_FAILURES
+    original_lockout = app.LOGIN_LOCKOUT_SECONDS
+    rbac = app.default_rbac()
+    account = {
+        "username": "rate-limit-admin",
+        "displayName": "Rate Limit Admin",
+        "role": "Admin",
+        "status": "active",
+    }
+    account.update(app.password_record("RateLimitAdmin-Local-123!"))
+    rbac["accounts"] = [account]
+    app.write_json(rbac_path, rbac)
+    app.LOGIN_FAILURES.clear()
+    app.LOGIN_MAX_FAILURES = 2
+    app.LOGIN_LOCKOUT_SECONDS = 30
+    server = app.ThreadingHTTPServer(("127.0.0.1", 0), app.Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base_url = f"http://127.0.0.1:{server.server_address[1]}"
+    opener = urllib.request.build_opener()
+    try:
+        status, _, body = request(
+            opener,
+            base_url,
+            "/login",
+            {"username": "rate-limit-admin", "password": "WrongPassword-123!"},
+            allow_error=True,
+        )
+        assert status == 403
+        assert "Invalid username" in body
+
+        status, _, body = request(
+            opener,
+            base_url,
+            "/login",
+            {"username": "rate-limit-admin", "password": "WrongPassword-123!"},
+            allow_error=True,
+        )
+        assert status == 429
+        assert "Too many failed login attempts" in body
+
+        status, _, body = request(
+            opener,
+            base_url,
+            "/login",
+            {"username": "rate-limit-admin", "password": "RateLimitAdmin-Local-123!"},
+            allow_error=True,
+        )
+        assert status == 429
+        assert "temporarily locked" in body
+    finally:
+        server.shutdown()
+        server.server_close()
+        app.LOGIN_FAILURES.clear()
+        app.LOGIN_FAILURES.update(original_failures)
+        app.LOGIN_MAX_FAILURES = original_max
+        app.LOGIN_LOCKOUT_SECONDS = original_lockout
+        if original_rbac is None:
+            rbac_path.unlink(missing_ok=True)
+        else:
+            rbac_path.write_text(original_rbac, encoding="utf-8")
+
+
 def test_postgres_session_store_is_contract_only():
     status, note = app.session_store_status({
         **app.default_integrations(),

@@ -36,6 +36,7 @@ LOCKS = ZT / "locks"
 CHANGE_RECORDS = ZT / "change-records"
 ENV_DIR = ROOT / "configs" / "environments"
 SESSIONS = {}
+LOGIN_FAILURES = {}
 try:
     SESSION_TTL_SECONDS = int(os.environ.get("ZT_SESSION_TTL_SECONDS", "43200"))
 except ValueError:
@@ -44,6 +45,14 @@ try:
     MIN_PASSWORD_LENGTH = int(os.environ.get("ZT_MIN_PASSWORD_LENGTH", "12"))
 except ValueError:
     MIN_PASSWORD_LENGTH = 12
+try:
+    LOGIN_MAX_FAILURES = int(os.environ.get("ZT_LOGIN_MAX_FAILURES", "5"))
+except ValueError:
+    LOGIN_MAX_FAILURES = 5
+try:
+    LOGIN_LOCKOUT_SECONDS = int(os.environ.get("ZT_LOGIN_LOCKOUT_SECONDS", "300"))
+except ValueError:
+    LOGIN_LOCKOUT_SECONDS = 300
 SAFE_ACTIONS = {"validate", "prepare", "generate", "verify", "backup", "runs", "evidence"}
 ACTION_ORDER = ["validate", "prepare", "generate", "verify", "backup", "runs", "evidence"]
 CLI_APPLY_ACTIONS = {"registry", "deploy", "upgrade", "destroy"}
@@ -263,6 +272,36 @@ def password_policy_error(password):
     if len(password or "") < MIN_PASSWORD_LENGTH:
         return f"Password must be at least {MIN_PASSWORD_LENGTH} characters."
     return ""
+
+
+def login_failure_key(username, client_ip):
+    return f"{safe_key(username) or 'unknown'}@{client_ip or 'unknown'}"
+
+
+def login_lockout_remaining(key, now=None):
+    record = LOGIN_FAILURES.get(key) or {}
+    locked_until = float(record.get("lockedUntil", 0) or 0)
+    current = now or time.time()
+    if locked_until > current:
+        return int(locked_until - current)
+    if locked_until:
+        LOGIN_FAILURES.pop(key, None)
+    return 0
+
+
+def record_login_failure(key, now=None):
+    current = now or time.time()
+    record = LOGIN_FAILURES.get(key) or {}
+    count = int(record.get("count", 0) or 0) + 1
+    if LOGIN_MAX_FAILURES > 0 and count >= LOGIN_MAX_FAILURES:
+        LOGIN_FAILURES[key] = {"count": count, "lockedUntil": current + max(LOGIN_LOCKOUT_SECONDS, 1)}
+        return True
+    LOGIN_FAILURES[key] = {"count": count, "lockedUntil": 0}
+    return False
+
+
+def clear_login_failures(key):
+    LOGIN_FAILURES.pop(key, None)
 
 
 def verify_password(password, account):
@@ -4441,6 +4480,13 @@ class Handler(BaseHTTPRequestHandler):
             if not username or not password:
                 self.send_html(page("Login Failed", "<h2>Login failed</h2><div class='notice'>Username and password are required.</div><a class='back-link' href='/login'>Back to login</a>", "about"), status=400)
                 return
+            failure_key = login_failure_key(username, self.client_address[0] if self.client_address else "")
+            lockout_remaining = login_lockout_remaining(failure_key)
+            if lockout_remaining:
+                audit_event("login_rate_limited", None, username, "denied", {"retryAfterSeconds": lockout_remaining})
+                body = f"<h2>Login temporarily locked</h2><div class='notice'>Too many failed login attempts. Try again in {lockout_remaining} seconds.</div><a class='back-link' href='/login'>Back to login</a>"
+                self.send_html(page("Login Locked", body, "about"), status=429, headers={"Retry-After": str(lockout_remaining)})
+                return
             if not login_accounts:
                 password_error = password_policy_error(password)
                 if password_error:
@@ -4448,7 +4494,11 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 expected_bootstrap_token = os.environ.get("ZT_BOOTSTRAP_TOKEN", "")
                 if bootstrap_token_required() and (not expected_bootstrap_token or not secrets.compare_digest(form_value(form, "bootstrap_token"), expected_bootstrap_token)):
-                    self.send_html(page("Bootstrap Blocked", "<h2>Bootstrap blocked</h2><div class='notice'>A valid bootstrap token is required before creating the first administrator account.</div><a class='back-link' href='/login'>Back to login</a>", "about"), status=403)
+                    locked = record_login_failure(failure_key)
+                    status = 429 if locked else 403
+                    headers = {"Retry-After": str(LOGIN_LOCKOUT_SECONDS)} if locked else None
+                    message = "Too many failed bootstrap attempts. Try again later." if locked else "A valid bootstrap token is required before creating the first administrator account."
+                    self.send_html(page("Bootstrap Blocked", f"<h2>Bootstrap blocked</h2><div class='notice'>{html.escape(message)}</div><a class='back-link' href='/login'>Back to login</a>", "about"), status=status, headers=headers)
                     return
                 account = {
                     "username": username,
@@ -4466,8 +4516,13 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 account = next((acct for acct in login_accounts if safe_key(acct.get("username", "")) == username and acct.get("status") == "active"), None)
                 if not account or not verify_password(password, account):
-                    self.send_html(page("Login Failed", "<h2>Login failed</h2><div class='notice'>Invalid username, password, or account status.</div><a class='back-link' href='/login'>Back to login</a>", "about"), status=403)
+                    locked = record_login_failure(failure_key)
+                    status = 429 if locked else 403
+                    headers = {"Retry-After": str(LOGIN_LOCKOUT_SECONDS)} if locked else None
+                    message = "Too many failed login attempts. Try again later." if locked else "Invalid username, password, or account status."
+                    self.send_html(page("Login Failed", f"<h2>Login failed</h2><div class='notice'>{html.escape(message)}</div><a class='back-link' href='/login'>Back to login</a>", "about"), status=status, headers=headers)
                     return
+            clear_login_failures(failure_key)
             token = secrets.token_urlsafe(32)
             session = {
                 "username": username,

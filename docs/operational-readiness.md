@@ -59,6 +59,9 @@ Before exposing this console beyond a trusted operator workstation:
   before the first admin account exists.
 - Keep local console account passwords at least 12 characters, or set
   `ZT_MIN_PASSWORD_LENGTH` to match the organization's workstation policy.
+- Keep local login throttling enabled for workstation use. Defaults are five
+  failed attempts and a 300-second lockout; tune with `ZT_LOGIN_MAX_FAILURES`
+  and `ZT_LOGIN_LOCKOUT_SECONDS`.
 - Set `ZT_COOKIE_SECURE=true` whenever the dashboard is served through HTTPS or
   an HTTPS-terminating reverse proxy so browser cookies are marked `Secure`.
 - Move from memory sessions to file-backed local sessions. Treat Postgres-backed shared session storage as future work until a reviewed storage backend is implemented.
