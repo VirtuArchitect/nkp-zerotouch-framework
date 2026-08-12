@@ -70,9 +70,10 @@ Before exposing this console beyond a trusted operator workstation:
 - Enable `audit_mirror=postgres` for shared operator consoles that need central
   audit search while retaining the local append-only `.zt` audit log.
 - Connect OIDC/SAML or enterprise SSO to a real identity provider.
-- For built-in OIDC login, configure `ZT_OIDC_CLIENT_SECRET`, map provider
-  identities to active local RBAC accounts, and use HS256 `id_token` validation
-  unless a reviewed JWT crypto dependency is added for RSA/JWKS providers.
+- For built-in OIDC login, map provider identities to active local RBAC
+  accounts. Configure `ZT_OIDC_CLIENT_SECRET` for HS256 providers; RS256
+  providers are validated through provider JWKS metadata with 2048-bit minimum
+  RSA keys.
 - Connect console state to Postgres if multi-user operation is required.
 - Encrypt or externalize all secrets; do not store raw credentials in the repo or database.
 - Connect Vault or an equivalent external secret backend. The console can
@@ -112,8 +113,9 @@ Keep live apply operations deliberate and controlled:
 ## Current Gaps
 
 - No production SSO provider connected yet.
-- OIDC RSA/JWKS validation requires a reviewed JWT crypto dependency before
-  providers that sign with RSA can replace local login.
+- Production SSO still requires deployment-specific provider configuration,
+  claim mapping, and external validation evidence even though HS256 and
+  RS256/JWKS token validation are implemented.
 - No external Postgres service is connected in this repository; Postgres-backed dashboard sessions require deployment-specific database provisioning and runtime driver installation.
 - No external Vault service is connected in this repository; HashiCorp Vault KV
   key-presence checks require deployment-specific Vault provisioning and a

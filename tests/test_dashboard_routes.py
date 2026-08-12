@@ -255,6 +255,30 @@ def make_hs256_id_token(claims, secret):
     return f"{header}.{payload}.{encoded_signature}"
 
 
+RSA_TEST_N = 18273610253123465378369737450627623619317696544888769594679236467796359330456561656712037650469490631016080630597890367213116595957204152683677909761384092103975843763171587272317840313391028853638652649585281335852660591156528467146866268896842237424787863964740909036913436423321621608931571310194831770121543203479567880382225271067569546955011232965281062622525751267200697364570540940477955781312498636650028706531453204756374243169834386498941757602128222539359526348901537894240534007919138038585869168495352185862348271183180416885586930386442427487934732753169278211961015384178988749158722764082032076621271
+RSA_TEST_E = 65537
+RSA_TEST_D = 17891056989054536460367337588225299747219433278953688771878377221358215915265350545538060879234247315854354237488954871480684596176114324075685385047213181406710865847748674753624276724731607586458399793408907592886246957162498269595475443547398906943581691125587079487214102691646426454324950380985571212137134428574252368783695540584569673077962653694198319774147885194042675069047430333294693852654297148264898281624354649269226304628056756555792209071942184645448072018009818417143197081706970713548478976021973768173734585136934737067851480123976425101700489793172558564821042585719556248788026883219134959692473
+
+
+def base64url_uint(value):
+    raw = value.to_bytes((value.bit_length() + 7) // 8, "big")
+    return app.base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def make_rs256_id_token(claims, kid="rs256-test"):
+    header = base64url_json({"alg": "RS256", "typ": "JWT", "kid": kid})
+    payload = base64url_json(claims)
+    signing_input = f"{header}.{payload}".encode("ascii")
+    digest_info_prefix = bytes.fromhex("3031300d060960864801650304020105000420")
+    digest = app.hashlib.sha256(signing_input).digest()
+    key_bytes = (RSA_TEST_N.bit_length() + 7) // 8
+    padding_len = key_bytes - len(digest_info_prefix) - len(digest) - 3
+    encoded = b"\x00\x01" + (b"\xff" * padding_len) + b"\x00" + digest_info_prefix + digest
+    signature = pow(int.from_bytes(encoded, "big"), RSA_TEST_D, RSA_TEST_N).to_bytes(key_bytes, "big")
+    encoded_signature = app.base64.urlsafe_b64encode(signature).decode("ascii").rstrip("=")
+    return f"{header}.{payload}.{encoded_signature}"
+
+
 def request(opener, base_url, path, data=None, allow_error=False, timeout=30, headers=None):
     encoded = None
     if data is not None:
@@ -1817,6 +1841,103 @@ def test_oidc_token_validation_rejects_invalid_issuer_and_missing_role_mapping()
             rbac_path.unlink(missing_ok=True)
         else:
             rbac_path.write_text(original_rbac, encoding="utf-8")
+
+
+def test_oidc_token_validation_accepts_rs256_jwks_token():
+    settings = {
+        "oidc_issuer": "https://issuer.example.test",
+        "oidc_client_id": "zt-console",
+    }
+    metadata = {
+        "issuer": "https://issuer.example.test",
+        "jwks": {
+            "keys": [{
+                "kty": "RSA",
+                "kid": "rs256-test",
+                "use": "sig",
+                "alg": "RS256",
+                "n": base64url_uint(RSA_TEST_N),
+                "e": base64url_uint(RSA_TEST_E),
+            }],
+        },
+    }
+    token = make_rs256_id_token({
+        "iss": "https://issuer.example.test",
+        "aud": "zt-console",
+        "nonce": "nonce-value",
+        "exp": 2000000000,
+        "sub": "operator@example.test",
+    })
+
+    claims = app.oidc_validate_id_token(token, settings, metadata, "nonce-value", now=1900000000)
+
+    assert claims["sub"] == "operator@example.test"
+
+
+def test_oidc_token_validation_rejects_weak_rs256_jwks_key():
+    settings = {
+        "oidc_issuer": "https://issuer.example.test",
+        "oidc_client_id": "zt-console",
+    }
+    metadata = {
+        "issuer": "https://issuer.example.test",
+        "jwks": {
+            "keys": [{
+                "kty": "RSA",
+                "kid": "rs256-test",
+                "n": base64url_uint(125612564335990357601294960944811076326502029738360326758204504355200139680995862094680327085192349872030173768999196932735563046396026615786366587371779560269884182039249133585722503695377160733372355272052347995539417368158494240984565305571074407304983654831150632696463695229725463896264686404629881777),
+                "e": base64url_uint(RSA_TEST_E),
+            }],
+        },
+    }
+    token = make_rs256_id_token({
+        "iss": "https://issuer.example.test",
+        "aud": "zt-console",
+        "nonce": "nonce-value",
+        "exp": 2000000000,
+        "sub": "operator@example.test",
+    })
+
+    try:
+        app.oidc_validate_id_token(token, settings, metadata, "nonce-value", now=1900000000)
+    except ValueError as exc:
+        assert "at least 2048 bits" in str(exc)
+    else:
+        raise AssertionError("Expected weak RS256 key to be rejected")
+
+
+def test_oidc_token_validation_rejects_unknown_rs256_jwks_key_id():
+    settings = {
+        "oidc_issuer": "https://issuer.example.test",
+        "oidc_client_id": "zt-console",
+    }
+    metadata = {
+        "issuer": "https://issuer.example.test",
+        "jwks": {
+            "keys": [{
+                "kty": "RSA",
+                "kid": "rs256-test",
+                "use": "sig",
+                "alg": "RS256",
+                "n": base64url_uint(RSA_TEST_N),
+                "e": base64url_uint(RSA_TEST_E),
+            }],
+        },
+    }
+    token = make_rs256_id_token({
+        "iss": "https://issuer.example.test",
+        "aud": "zt-console",
+        "nonce": "nonce-value",
+        "exp": 2000000000,
+        "sub": "operator@example.test",
+    }, kid="missing-key")
+
+    try:
+        app.oidc_validate_id_token(token, settings, metadata, "nonce-value", now=1900000000)
+    except ValueError as exc:
+        assert "key id not found" in str(exc)
+    else:
+        raise AssertionError("Expected unknown RS256 key ID to be rejected")
 
 
 def test_dashboard_cli_apply_actions_require_apply_flag():

@@ -98,11 +98,11 @@ Registry readiness is probed through `/v2/` with `ZT_REGISTRY_USERNAME` and
 `ZT_REGISTRY_PASSWORD`.
 
 OIDC metadata is probed for discovery readiness. The built-in login callback
-completes authorization-code exchange for HS256 `id_token` responses, validates
-nonce, issuer, audience, and expiry, then maps the identity to an active local
-RBAC account. Keep the client secret in `ZT_OIDC_CLIENT_SECRET`; do not save it
-in integration settings. RSA/JWKS identity providers remain fail-closed until a
-reviewed JWT crypto dependency is added.
+completes authorization-code exchange for HS256 or RS256/JWKS `id_token`
+responses, validates nonce, issuer, audience, expiry, and signature, then maps
+the identity to an active local RBAC account. Keep HS256 client secrets in
+`ZT_OIDC_CLIENT_SECRET`; do not save them in integration settings. RS256 keys
+are resolved from the provider JWKS metadata and must be at least 2048 bits.
 
 Postgres can be used for dashboard sessions when `session_store=postgres`, a
 password-free DSN is saved, and optional `psycopg` or `psycopg2` is installed in
