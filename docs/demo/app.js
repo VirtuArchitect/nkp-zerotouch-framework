@@ -1,7 +1,7 @@
 const metrics = [
   ["Ready to Deploy", "3", "environments clear deploy gate"],
   ["Blocked", "1", "environments need operator action"],
-  ["Pending Approval", "3", "apply jobs awaiting review"],
+  ["Pending Approval", "4", "apply and restore jobs awaiting review"],
   ["Drift Detected", "4", "environments with drift signals"],
 ];
 
@@ -98,6 +98,7 @@ const nextActions = [
 const jobs = [
   ["job-20260629-apply-003", "deploy", "pending_approval", "jgoulden", "1 of 2"],
   ["job-20260629-registry-002", "registry", "pending_approval", "operator", "0 of 1"],
+  ["job-20260713-restore-004", "restore", "pending_approval", "jgoulden", "0 of 2"],
   ["job-20260629-generate-001", "generate", "completed", "jgoulden", "not required"],
 ];
 
@@ -158,6 +159,36 @@ const evidencePacks = [
   },
 ];
 
+const restorePlans = [
+  {
+    environment: "lab-connected",
+    manifest: "backup-manifest.json",
+    plan: "restore-20260713-214000.md",
+    status: "ready",
+    statusClass: "ok",
+    signal: "metadata clean",
+    action: "Request approval",
+  },
+  {
+    environment: "lab-airgapped",
+    manifest: "backup-manifest.json",
+    plan: "restore-20260713-193643.md",
+    status: "blocked",
+    statusClass: "warn",
+    signal: "verification report missing",
+    action: "Resolve blockers",
+  },
+  {
+    environment: "lab-proxied",
+    manifest: "backup-manifest.json",
+    plan: "not generated",
+    status: "blocked",
+    statusClass: "warn",
+    signal: "backup components missing",
+    action: "Generate plan",
+  },
+];
+
 const uatCases = [
   ["UAT-001", "Connected config validation", "partial", "2 validation evidence records", "Validation pass or accepted warnings", "Config hash and validation output"],
   ["UAT-002", "Proxied config validation", "partial", "proxy/no-proxy checks captured", "Proxy/no-proxy checks reviewed", "Config hash, proxy review, validation output"],
@@ -182,7 +213,6 @@ const genericSections = {
   plan: ["Plan Review", "Artifact review with hash evidence before apply approval.", [["deploy-plan.md", "awaiting approval"], ["registry-plan.md", "generated"], ["Change record", "linked to pending job"]]],
   kubeconfig: ["Kubeconfig", "Kubeconfig presence and verification output.", [["lab-connected", "not yet captured"], ["lab-airgapped", "report missing"], ["Access", "local artifact only"]]],
   backups: ["Backups", "Local backup snapshots before destructive workflows.", [["Latest backup", "not captured in demo"], ["Scope", "state, generated, reports"], ["Restore path", ".zt/environments/<name>/backup"]]],
-  restore: ["Restore", "Restore workflow for local ZeroTouch state.", [["Mode", "operator selected backup"], ["Safety", "review before overwrite"], ["Audit", "restore event captured"]]],
   sources: ["Sources", "NKP bundle paths, source metadata, and checksums.", [["Standard bundle", "/mnt/c/Share/nkp-bundle_v2.17.1"], ["Air-gapped bundle", "/mnt/c/Share/nkp-air-gapped-bundle_v2.17.1"], ["Git source", "VirtuArchitect/nkp-zerotouch-framework"]]],
   inventory: ["Inventory", "AHV inventory and future bare-metal provider notes.", [["Provider", "nutanix-ahv"], ["Prism Element", "pe-cluster"], ["Image", "nkp-node-image"]]],
   network: ["Network", "Management, workload, API VIP, DNS, NTP, and proxy fields.", [["API VIP", "10.10.10.51 reserved for lab-new"], ["Pod CIDR", "192.168.0.0/16"], ["Service CIDR", "10.96.0.0/12"]]],
@@ -307,6 +337,25 @@ function renderUat() {
   }).join("");
 }
 
+function renderRestore() {
+  $("#restoreRows").innerHTML = restorePlans.map((item) => `
+    <tr>
+      <td><div class="env-name">${item.environment}</div><div class="env-file">${item.manifest}</div></td>
+      <td><code>${item.plan}</code></td>
+      <td><span class="chip ${item.statusClass}">${item.status}</span><div class="env-file">${item.signal}</div></td>
+      <td><button class="button-link" type="button" data-command="restore">${item.action}</button></td>
+    </tr>
+  `).join("");
+
+  $("#restoreActions").innerHTML = [
+    ["Plan-first", "Restore plans are generated under .zt/restore-plans before any operator action."],
+    ["Approval-gated", "Clean restore metadata can create a pending approval job for manual authorization."],
+    ["No-copy boundary", "The approved authorization job records evidence only; actual file copy remains manual."],
+  ].map(([heading, body]) => `
+    <article class="settings-card"><h3>${heading}</h3><p>${body}</p></article>
+  `).join("");
+}
+
 function renderGeneric(sectionKey) {
   const [title, copy, cards] = genericSections[sectionKey] || genericSections.settings;
   $("#genericTitle").textContent = title;
@@ -317,7 +366,7 @@ function renderGeneric(sectionKey) {
 }
 
 function setView(viewName) {
-  const dedicated = ["environments", "jobs", "runs", "pipeline", "cli", "artifacts", "evidence", "uat"];
+  const dedicated = ["environments", "jobs", "runs", "pipeline", "cli", "artifacts", "evidence", "uat", "restore"];
   const targetView = dedicated.includes(viewName) ? viewName : "generic";
   $$(".view").forEach((view) => view.classList.toggle("active", view.dataset.view === targetView));
   $$("[data-view-link]").forEach((item) => item.classList.toggle("active", item.dataset.viewLink === viewName));
@@ -364,6 +413,7 @@ document.addEventListener("click", (event) => {
   if (command === "edit") toast("Edit workflow preview");
   if (command === "manifest") toast("Evidence manifest preview");
   if (command === "metric") toast("Metric drill-down preview");
+  if (command === "restore") toast("Restore approval workflow preview; file copy remains manual");
 });
 
 renderMetrics();
@@ -375,6 +425,7 @@ renderPipeline();
 renderArtifacts();
 renderEvidence();
 renderUat();
+renderRestore();
 renderGeneric("settings");
 renderThemeLabel();
 

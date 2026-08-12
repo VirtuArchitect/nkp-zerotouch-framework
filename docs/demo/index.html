@@ -194,6 +194,29 @@
             <div class="notice">UAT evidence is an operational readiness signal, not production validation. Partial coverage means the console found a candidate local signal; an operator still needs reviewed outcomes, exceptions, owners, and environment-specific acceptance before calling UAT complete.</div>
           </section>
 
+          <section class="view" data-view="restore">
+            <div class="section-head">
+              <div>
+                <h2>Restore</h2>
+                <div class="section-copy">Controlled backup-manifest review, restore plan generation, and approval request workflow.</div>
+              </div>
+            </div>
+            <section class="settings-grid" id="restoreActions"></section>
+            <div class="section-head">
+              <div>
+                <h2>Restore Plans</h2>
+                <div class="section-copy">Clean metadata can request approval; blocked plans require operator remediation first.</div>
+              </div>
+            </div>
+            <section class="panel">
+              <table>
+                <thead><tr><th>Environment</th><th>Plan</th><th>Status</th><th>Action</th></tr></thead>
+                <tbody id="restoreRows"></tbody>
+              </table>
+            </section>
+            <div class="notice">The approval job records authorization only. This demo, and the local console baseline, do not copy files or restore live infrastructure.</div>
+          </section>
+
           <section class="view" data-view="generic">
             <div class="section-head"><div><h2 id="genericTitle">Console Section</h2><div class="section-copy" id="genericCopy">Static demo snapshot of the local NKP ZeroTouch console.</div></div></div>
             <section class="settings-grid" id="genericCards"></section>
