@@ -22,6 +22,9 @@
           "type": "string",
           "enum": ["nutanix-ahv", "air-gapped-ahv", "proxied-ahv", "bare-metal"]
         },
+        "channel": {
+          "type": "string"
+        },
         "proxy": {
           "type": "object",
           "properties": {
@@ -34,6 +37,9 @@
           }
         }
       }
+    },
+    "releaseChannel": {
+      "type": "string"
     },
     "nkp": {
       "type": "object",

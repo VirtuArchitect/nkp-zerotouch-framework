@@ -15,6 +15,8 @@ Current Postgres-backed objects:
 
 - Console sessions in `zt_console_sessions`.
 - Optional audit event mirror records in `zt_console_audit_events`.
+- External validation records remain local JSON metadata under
+  `.zt/external-validations/`.
 
 Recommended future Postgres-backed objects:
 
@@ -23,6 +25,7 @@ Recommended future Postgres-backed objects:
 - Plan review decisions.
 - Environment metadata indexes.
 - Health snapshots and integration probe results.
+- External validation metadata after a schema and retention model are accepted.
 
 Secrets should not be stored in Postgres or embedded in dashboard integration
 settings. Store only references to Vault or an equivalent external secret
@@ -61,3 +64,6 @@ Before production use, confirm:
   the operator run evidence needed for audit.
 - Live runners are isolated, patched, and granted only the Prism Central,
   registry, bundle, SSH, and network access required for the target environment.
+- Production-channel environments have passing external validation evidence
+  records for Prism authorization and deployment UAT, with links to reviewed
+  evidence packs, tickets, or runbook outputs.

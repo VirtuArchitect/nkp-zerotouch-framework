@@ -40,6 +40,8 @@ Before live deployment, operations teams must provide:
 - Authenticated JSON endpoints for future automation and frontend decoupling.
 - Apply gates that require current plan review and release-channel governance.
 - Production readiness view for review, backup, drift, channel, and verification status.
+- External validation evidence records for reviewed Prism authorization,
+  registry access, identity provider, Postgres, Vault, and deployment UAT proof.
 - Restore plan generation from backup manifests with component inventory, active-lock warnings, JSON metadata, change records, and approval-gated manual authorization jobs.
 - Runs, artifacts, health checks, and append-only audit visibility from `.zt`.
 - Artifact viewer and diff workflow for generated plans, reports, logs, state, and configs.
@@ -85,6 +87,9 @@ Before exposing this console beyond a trusted operator workstation:
 - Run deployment jobs from an isolated Linux or WSL runner with pinned NKP
   bundles, least-privilege credentials, and controlled network access.
 - Treat dashboard authenticated API health probes as readiness signals; still verify live deployment permissions before apply.
+- Record external validation evidence references for production channels after
+  Prism authorization and deployment UAT have been reviewed. Store evidence
+  pointers and summaries only; never paste tokens, passwords, or secret values.
 
 ## Recommended Operating Model
 
@@ -115,3 +120,5 @@ Keep live apply operations deliberate and controlled:
   runtime `VAULT_TOKEN`.
 - No live Prism Central authorization validation against a real NKP lab yet.
 - No end-to-end deployment proof against a real NKP lab yet.
+  The console can now record reviewed external evidence for these items, but
+  the evidence must still come from deployment-specific lab or production runs.

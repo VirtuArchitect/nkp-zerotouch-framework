@@ -7,7 +7,15 @@ The environment YAML is the source of truth for ZeroTouch.
 - `name`: local environment name used under `.zt/environments/`
 - `type`: one of `connected`, `proxied`, or `air-gapped`
 - `provider`: deployment provider intent, such as `nutanix-ahv`, `air-gapped-ahv`, `proxied-ahv`, or `bare-metal`
+- `channel`: optional release channel for this environment; top-level
+  `releaseChannel` is also supported and takes precedence
 - `proxy`: required for `proxied`
+
+## releaseChannel
+
+Optional top-level release channel, such as `dev`, `lab`, `pilot`, or
+`production`. Production-channel environments use the stricter production gate,
+including plan review, backup policy, and required external validation evidence.
 
 ## nkp
 

@@ -303,7 +303,7 @@ def test_dashboard_pages_and_api_routes():
         status, _, _ = request(no_redirect_opener, base_url, "/login", {"username": "dashboard-smoke", "password": "DashboardSmoke-Local-123!"}, allow_error=True)
         assert status == 303
 
-        page_paths = ["/", "/setup", "/plan-review", "/kubeconfig", "/drift", "/uat", "/locks", "/change-records", "/backups", "/restore", "/evidence", "/production-readiness", "/release-channels"]
+        page_paths = ["/", "/setup", "/plan-review", "/kubeconfig", "/drift", "/uat", "/external-validations", "/locks", "/change-records", "/backups", "/restore", "/evidence", "/production-readiness", "/release-channels"]
         configs = app.env_configs()
         if configs:
             page_paths.append(f"/environment/view?config={urllib.parse.quote(str(configs[0]))}")
@@ -315,7 +315,7 @@ def test_dashboard_pages_and_api_routes():
             assert "NKP ZeroTouch" in body
             assert "data-theme-toggle" in body
 
-        for path in ["/api/status", "/api/preflight", "/api/evidence", "/api/uat", "/api/environments", "/api/jobs", "/api/locks", "/api/change-records", "/api/production-readiness"]:
+        for path in ["/api/status", "/api/preflight", "/api/evidence", "/api/external-validations", "/api/uat", "/api/environments", "/api/jobs", "/api/locks", "/api/change-records", "/api/production-readiness"]:
             status, content_type, body = request(opener, base_url, path)
             assert status == 200
             assert "application/json" in content_type
@@ -465,6 +465,107 @@ def test_preflight_evidence_status_requires_clean_latest_record(tmp_path):
         assert "clean" in detail
     finally:
         app.ZT = original_zt
+
+
+def test_external_validation_records_feed_production_gate(tmp_path):
+    original_zt = app.ZT
+    original_settings = app.SETTINGS
+    original_locks = app.LOCKS
+    original_change_records = app.CHANGE_RECORDS
+    app.ZT = tmp_path / ".zt"
+    app.SETTINGS = app.ZT / "settings"
+    app.LOCKS = app.ZT / "locks"
+    app.CHANGE_RECORDS = app.ZT / "change-records"
+    try:
+        app.save_setting(
+            "release-channels",
+            {
+                **app.default_release_channels(),
+                "default_channel": "production",
+                "production_requires_backup": "false",
+            },
+        )
+        config = tmp_path / "configs" / "environments" / "prod-validation.yaml"
+        config.parent.mkdir(parents=True)
+        config.write_text(
+            """
+environment:
+  name: prod-validation
+  type: connected
+releaseChannel: production
+nkp:
+  version: v2.17.1
+  bundleType: standard
+  bundlePath: /bundle
+nutanix:
+  prismCentralEndpoint: https://pc.example.local:9440
+  clusterName: pe
+  subnetName: vlan
+  imageName: image
+cluster:
+  name: prod-validation-cluster
+  controlPlaneEndpointIp: 10.0.0.30
+registry:
+  endpoint: registry.example.local
+""",
+            encoding="utf-8",
+        )
+
+        _, _, _, checks = app.production_gate(config)
+        external = [check for check in checks if check[0] == "External validation"][0]
+        assert external[1] is False
+        assert "Prism authorization" in external[2]
+        assert "Deployment UAT" in external[2]
+
+        app.create_external_validation(
+            {
+                "environment": ["prod-validation"],
+                "area": ["prism-authorization"],
+                "status": ["pass"],
+                "summary": ["Prism role and API authorization reviewed"],
+                "evidence_ref": ["LAB-EVIDENCE-001"],
+                "validated_at": ["2026-08-12T12:00:00Z"],
+            },
+            {"username": "tester", "role": "Admin"},
+        )
+        app.create_external_validation(
+            {
+                "environment": ["global"],
+                "area": ["deployment-uat"],
+                "status": ["pass"],
+                "summary": ["Deployment UAT evidence reviewed"],
+                "evidence_ref": ["UAT-PACK-001"],
+                "validated_at": ["2026-08-12T12:05:00Z"],
+            },
+            {"username": "tester", "role": "Admin"},
+        )
+
+        ok, detail = app.external_validation_status("prod-validation")
+        assert ok is True
+        assert "Prism authorization" in detail
+        assert "Deployment UAT" in detail
+        records = app.external_validation_records()
+        assert len(records) == 2
+        assert records[0]["recordedBy"] == "tester"
+        try:
+            app.create_external_validation(
+                {
+                    "environment": ["prod-validation"],
+                    "area": ["vault-service"],
+                    "status": ["pass"],
+                    "summary": ["token=super-secret-value"],
+                },
+                {"username": "tester", "role": "Admin"},
+            )
+        except ValueError as exc:
+            assert "must not contain secret values" in str(exc)
+        else:
+            raise AssertionError("Expected secret-like external validation text to be rejected")
+    finally:
+        app.ZT = original_zt
+        app.SETTINGS = original_settings
+        app.LOCKS = original_locks
+        app.CHANGE_RECORDS = original_change_records
 
 
 def test_dashboard_exposed_bootstrap_requires_token():

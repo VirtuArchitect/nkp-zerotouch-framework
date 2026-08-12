@@ -83,6 +83,7 @@ VIEW_PATHS = {
     "inventory": "/inventory",
     "network": "/network",
     "preflight": "/preflight",
+    "external-validations": "/external-validations",
     "pipeline": "/pipeline",
     "jobs": "/jobs",
     "actions": "/actions",
@@ -1001,6 +1002,116 @@ def preflight_evidence_status(env_name):
     return True, f"validation evidence clean at {record.get('capturedAt', 'unknown time')}"
 
 
+EXTERNAL_VALIDATION_AREAS = {
+    "prism-authorization": "Prism authorization",
+    "registry-authorization": "Registry authorization",
+    "identity-provider": "Identity provider",
+    "postgres-service": "Postgres service",
+    "vault-service": "Vault service",
+    "deployment-uat": "Deployment UAT",
+}
+EXTERNAL_VALIDATION_STATUSES = {"pass", "warn", "fail"}
+PRODUCTION_REQUIRED_EXTERNAL_VALIDATIONS = ["prism-authorization", "deployment-uat"]
+SENSITIVE_VALUE_PATTERN = re.compile(r"(?i)\b(password|passwd|token|secret|private[_-]?key)\s*[:=]\s*\S+")
+
+
+def external_validation_records(limit=100):
+    root = ZT / "external-validations"
+    if not root.exists():
+        return []
+    records = []
+    for path in sorted(root.glob("*.json"), key=lambda item: item.stat().st_mtime, reverse=True):
+        data = read_json(path)
+        if not isinstance(data, dict):
+            continue
+        area = safe_key(data.get("area", ""))
+        status = safe_key(data.get("status", "warn"))
+        records.append({
+            "id": str(data.get("id", path.stem)),
+            "area": area,
+            "areaLabel": EXTERNAL_VALIDATION_AREAS.get(area, area or "external validation"),
+            "environment": str(data.get("environment", "")),
+            "status": status if status in EXTERNAL_VALIDATION_STATUSES else "warn",
+            "validatedAt": str(data.get("validatedAt", "")),
+            "recordedAt": str(data.get("recordedAt", "")),
+            "recordedBy": str(data.get("recordedBy", "")),
+            "evidenceRef": str(data.get("evidenceRef", "")),
+            "summary": str(data.get("summary", "")),
+            "path": str(path),
+        })
+        if len(records) >= limit:
+            break
+    return records
+
+
+def external_validation_matches(record, env_name):
+    scope = safe_key(record.get("environment", ""))
+    return scope in {"", "global", safe_key(env_name)}
+
+
+def latest_external_validation(area, env_name):
+    area = safe_key(area)
+    for record in external_validation_records(200):
+        if record.get("area") == area and external_validation_matches(record, env_name):
+            return record
+    return None
+
+
+def external_validation_status(env_name, required=None):
+    required = required or PRODUCTION_REQUIRED_EXTERNAL_VALIDATIONS
+    missing = []
+    failing = []
+    passing = []
+    for area in required:
+        record = latest_external_validation(area, env_name)
+        label = EXTERNAL_VALIDATION_AREAS.get(area, area)
+        if not record:
+            missing.append(label)
+            continue
+        if record.get("status") != "pass":
+            failing.append(f"{label}: {record.get('status')}")
+        else:
+            passing.append(label)
+    if failing:
+        return False, "; ".join(failing)
+    if missing:
+        return False, "missing " + ", ".join(missing)
+    return True, "validated " + ", ".join(passing)
+
+
+def create_external_validation(form, user):
+    area = safe_key(form_value(form, "area"))
+    if area not in EXTERNAL_VALIDATION_AREAS:
+        raise ValueError("Unknown external validation area.")
+    status = safe_key(form_value(form, "status", "warn"))
+    if status not in EXTERNAL_VALIDATION_STATUSES:
+        raise ValueError("External validation status must be pass, warn, or fail.")
+    summary = form_value(form, "summary").strip()
+    if not summary:
+        raise ValueError("External validation summary is required.")
+    evidence_ref = form_value(form, "evidence_ref").strip()
+    if SENSITIVE_VALUE_PATTERN.search(summary) or SENSITIVE_VALUE_PATTERN.search(evidence_ref):
+        raise ValueError("External validation records must not contain secret values.")
+    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    env_name = form_value(form, "environment", "global").strip() or "global"
+    validated_at = form_value(form, "validated_at").strip() or now
+    record_id = f"ev-{time.strftime('%Y%m%d-%H%M%S', time.gmtime())}-{secrets.token_hex(3)}"
+    record = {
+        "id": record_id,
+        "area": area,
+        "environment": env_name,
+        "status": status,
+        "summary": summary[:1000],
+        "evidenceRef": evidence_ref[:500],
+        "validatedAt": validated_at[:80],
+        "recordedAt": now,
+        "recordedBy": user.get("username", "unknown") if user else "unknown",
+        "recordedRole": user.get("role", "") if user else "",
+    }
+    write_json(ZT / "external-validations" / f"{record_id}.json", record)
+    return record
+
+
 def default_sources():
     return {
         "version": "v2.17.1",
@@ -1143,6 +1254,7 @@ ROUTE_PERMISSIONS = [
     ("/restore", "artifacts"),
     ("/evidence", "artifacts"),
     ("/production-readiness", "preflight"),
+    ("/external-validations", "health"),
     ("/release-channels", "approval-policy"),
     ("/api", "health"),
     ("/sources", "sources"),
@@ -1968,9 +2080,13 @@ def production_gate(config):
     if channel == "production":
         checks.append(("Plan review", review_status == "ok", review_label))
         checks.append(("Backup evidence", not (channels.get("production_requires_backup") == "true") or backup_exists(env_name), "backup found" if backup_exists(env_name) else "backup missing"))
+        external_ok, external_detail = external_validation_status(env_name)
+        checks.append(("External validation", external_ok, external_detail))
     else:
         checks.append(("Plan review", review_status == "ok", review_label))
         checks.append(("Backup evidence", True, "not required for non-production"))
+        external_records = [record for record in external_validation_records(200) if external_validation_matches(record, env_name)]
+        checks.append(("External validation", True, f"{len(external_records)} record(s); not required for non-production"))
     checks.append(("Preflight evidence", preflight_ok, preflight_detail))
     checks.append(("Drift", drift_state == "ok", "; ".join(drift_issues)))
     checks.append(("Verification", verification_ok, verification_detail))
@@ -2353,6 +2469,8 @@ def health_checks():
     checks.append(("Registry authenticated API", registry_auth[0], registry_auth[1]))
     for name, status, note in integration_checks():
         checks.append((f"Integration: {name}", status, note))
+    external_pass = sum(1 for record in external_validation_records(200) if record.get("status") == "pass")
+    checks.append(("External validation evidence", "ok" if external_pass else "warn", f"{external_pass} passing record(s)"))
     return checks
 
 
@@ -2718,6 +2836,7 @@ def page(title, body, active="environments", user=None):
     <div class="nav-label">Readiness</div>
     <a class="{nav_class('setup')}" href="{VIEW_PATHS['setup']}">Setup Wizard</a>
     <a class="{nav_class('preflight')}" href="{VIEW_PATHS['preflight']}">Preflight</a>
+    <a class="{nav_class('external-validations')}" href="{VIEW_PATHS['external-validations']}">External Evidence</a>
     <a class="{nav_class('drift')}" href="{VIEW_PATHS['drift']}">Drift</a>
     <a class="{nav_class('uat')}" href="{VIEW_PATHS['uat']}">UAT</a>
     <a class="{nav_class('production-readiness')}" href="{VIEW_PATHS['production-readiness']}">Production Gate</a>
@@ -3386,6 +3505,9 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if parsed.path == "/api/evidence":
                 self.send_json({"evidencePacks": evidence_packs(100)})
+                return
+            if parsed.path == "/api/external-validations":
+                self.send_json({"externalValidations": external_validation_records(200)})
                 return
             if parsed.path == "/api/uat":
                 self.send_json(uat_payload())
@@ -4322,6 +4444,61 @@ class Handler(BaseHTTPRequestHandler):
 """
             self.send_html(page("Network - NKP ZeroTouch Framework", body, "network"))
             return
+        if parsed.path == "/external-validations":
+            records = external_validation_records(200)
+            area_options = "".join(
+                f"<option value='{html.escape(key)}'>{html.escape(label)}</option>"
+                for key, label in EXTERNAL_VALIDATION_AREAS.items()
+            )
+            env_options = "<option value='global'>global / shared service</option>" + "".join(
+                f"<option value='{html.escape(str(read_json_from_context(config).get('environmentName') or config.stem))}'>{html.escape(str(read_json_from_context(config).get('environmentName') or config.stem))}</option>"
+                for config in env_configs()
+            )
+            rows = []
+            for record in records:
+                chip_class = "ok" if record.get("status") == "pass" else ("warn" if record.get("status") == "warn" else "fail")
+                rows.append(
+                    f"<tr><td><div class='env-name'>{html.escape(record.get('areaLabel', ''))}</div><div class='env-file'>{html.escape(record.get('environment', 'global'))}</div></td>"
+                    f"<td><span class='chip {chip_class}'>{html.escape(record.get('status', 'warn'))}</span><div class='env-file'>{html.escape(record.get('validatedAt', ''))}</div></td>"
+                    f"<td>{html.escape(record.get('summary', ''))}</td>"
+                    f"<td><code>{html.escape(record.get('evidenceRef', ''))}</code><div class='env-file'>recorded by {html.escape(record.get('recordedBy', ''))}</div></td></tr>"
+                )
+            passed = sum(1 for record in records if record.get("status") == "pass")
+            body = f"""
+<section class="summary-grid">
+  {metric_card("Records", len(records), "external validation entries", "/external-validations")}
+  {metric_card("Passed", passed, "passing evidence records", "/external-validations")}
+  {metric_card("Required", len(PRODUCTION_REQUIRED_EXTERNAL_VALIDATIONS), "production validation areas", "/production-readiness")}
+  {metric_card("Environments", len(env_configs()), "configured targets", "/")}
+</section>
+<div class="section-head">
+  <div>
+    <h2>External Validation Evidence</h2>
+    <div class="section-copy">Record reviewed proof for external systems that the repository cannot validate by itself.</div>
+  </div>
+</div>
+<section class="panel">
+  <form method="post" action="/external-validations/create">
+    <table>
+      <thead><tr><th>Evidence Field</th><th>Value</th></tr></thead>
+      <tbody>
+        <tr><td>Scope</td><td><div class="field"><select name="environment">{env_options}</select></div></td></tr>
+        <tr><td>Validation area</td><td><div class="field"><select name="area">{area_options}</select></div></td></tr>
+        <tr><td>Status</td><td><div class="field"><select name="status"><option value="pass">pass</option><option value="warn">warn</option><option value="fail">fail</option></select></div></td></tr>
+        <tr><td>Validated at</td><td><div class="field"><input name="validated_at" placeholder="2026-08-12T12:00:00Z"></div></td></tr>
+        <tr><td>Evidence reference</td><td><div class="field"><input name="evidence_ref" placeholder="change record, ticket, lab evidence pack, or runbook link"></div></td></tr>
+        <tr><td>Summary</td><td><div class="field"><textarea name="summary" placeholder="Reviewed evidence, result, operator, and any exception context"></textarea></div></td></tr>
+        <tr><td></td><td><button>Record external validation</button></td></tr>
+      </tbody>
+    </table>
+  </form>
+</section>
+<div class="section-head"><div><h2>Recorded Evidence</h2><div class="section-copy">Latest reviewed external validation metadata under <code>.zt/external-validations/</code>.</div></div></div>
+<section class="panel"><table><thead><tr><th>Area / Scope</th><th>Status</th><th>Summary</th><th>Evidence Reference</th></tr></thead><tbody>{''.join(rows) or '<tr><td colspan="4" class="muted">No external validation evidence recorded yet.</td></tr>'}</tbody></table></section>
+<div class="notice">For production channels, Prism authorization and deployment UAT external validations must be recorded as passing before the production readiness gate is clear. Store evidence references only; do not paste passwords, tokens, or secret values.</div>
+"""
+            self.send_html(page("External Validation Evidence - NKP ZeroTouch Framework", body, "external-validations"))
+            return
         if parsed.path == "/preflight":
             checks = preflight_checks()
             evidence = preflight_evidence_records(25)
@@ -5125,6 +5302,19 @@ class Handler(BaseHTTPRequestHandler):
             audit_event("integrations_saved", self.current_user(), "integrations", "success")
             body = "<section class='metric'><div class='metric-label'>Settings Saved</div><div class='metric-value'>Integrations</div><div class='metric-foot'><span class='chip ok'>Saved locally</span></div></section><a class='back-link' href='/settings/integrations'>Back to integrations</a>"
             self.send_html(page("Integrations Saved", body, "integrations"))
+            return
+
+        if parsed.path == "/external-validations/create":
+            try:
+                record = create_external_validation(form, self.current_user())
+                audit_event("external_validation_recorded", self.current_user(), record["id"], "success", {"area": record.get("area", ""), "environment": record.get("environment", ""), "status": record.get("status", "")})
+            except ValueError as exc:
+                audit_event("external_validation_rejected", self.current_user(), "external-validation", "denied", {"reason": str(exc)})
+                body = f"<h2>External validation rejected</h2><div class='notice'>{html.escape(str(exc))}</div><a class='back-link' href='/external-validations'>Back to external evidence</a>"
+                self.send_html(page("External Validation Rejected", body, "external-validations"), status=400)
+                return
+            body = f"<section class='metric'><div class='metric-label'>External Validation</div><div class='metric-value'>{html.escape(record['status'])}</div><div class='metric-foot'><span class='chip ok'>{html.escape(record['area'])}</span></div></section><a class='back-link' href='/external-validations'>Back to external evidence</a>"
+            self.send_html(page("External Validation Recorded", body, "external-validations"))
             return
 
         if parsed.path == "/sources/save":

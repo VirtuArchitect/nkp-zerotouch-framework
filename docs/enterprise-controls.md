@@ -15,6 +15,7 @@ decoupling:
 - `/api/locks`
 - `/api/change-records`
 - `/api/production-readiness`
+- `/api/external-validations`
 
 ## Environment Locking
 
@@ -58,12 +59,28 @@ and elevated approvals.
 Apply jobs use the higher of the action approval threshold and the configured
 release-channel approval threshold.
 
+## External Validation Evidence
+
+The console records reviewed external validation metadata under
+`.zt/external-validations/`. These records provide a source-controlled workflow
+for operator-attested proof that cannot be produced by the repository alone,
+including Prism authorization, registry authorization, identity-provider
+readiness, Postgres service readiness, Vault service readiness, and deployment
+UAT results.
+
+Production readiness requires passing Prism authorization and deployment UAT
+external validation records for production-channel environments. Records store
+status, scope, summary, evidence reference, timestamp, and recorder metadata
+only. They must not contain passwords, tokens, kubeconfig contents, or secret
+values.
+
 ## Apply Gates
 
 Apply requests are blocked when:
 
 - Plan review is missing, rejected, or stale.
 - A production environment is missing required backup evidence.
+- A production environment is missing required external validation evidence.
 - Drift detection reports blocking signals.
 - The environment has an active lock.
 
