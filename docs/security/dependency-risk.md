@@ -44,8 +44,8 @@ dependency-light baseline. Correct production OIDC requires signed token
 validation against provider JWKS and should use a reviewed JWT/OIDC library
 rather than ad hoc cryptography.
 
-The dashboard may validate authorization callback state and fail closed without
-new dependencies, but it must not create a logged-in session until token
+The dashboard may validate signed authorization handoff state and fail closed
+without new dependencies, but it must not create a logged-in session until token
 exchange, signed JWT validation, nonce validation, and role mapping are backed
 by a reviewed implementation.
 

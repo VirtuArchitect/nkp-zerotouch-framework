@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import difflib
+import hmac
 import html
 import hashlib
 import json
@@ -272,12 +273,59 @@ def cookie_value(headers, name):
     return ""
 
 
+def oidc_state_secret():
+    configured = os.environ.get("ZT_OIDC_STATE_SECRET", "").strip()
+    if configured:
+        return configured.encode("utf-8")
+    secret_path = SETTINGS / "oidc-state-secret"
+    try:
+        if secret_path.exists():
+            secret = secret_path.read_text(encoding="utf-8").strip()
+        else:
+            SETTINGS.mkdir(parents=True, exist_ok=True)
+            secret = secrets.token_hex(32)
+            secret_path.write_text(secret, encoding="utf-8")
+        return secret.encode("utf-8") if secret else b""
+    except OSError:
+        return b""
+
+
+def oidc_handoff_signature(secret, state, nonce, issued_at):
+    payload = f"{state}.{nonce}.{issued_at}".encode("utf-8")
+    return hmac.new(secret, payload, hashlib.sha256).hexdigest()
+
+
 def oidc_cookie_header(state, nonce):
-    return f"zt_oidc={state}.{nonce}; Path=/login/oidc; Max-Age=300; HttpOnly; SameSite=Lax"
+    issued_at = str(int(time.time()))
+    secret = oidc_state_secret()
+    signature = oidc_handoff_signature(secret, state, nonce, issued_at) if secret else ""
+    return f"zt_oidc={state}.{nonce}.{issued_at}.{signature}; Path=/login/oidc; Max-Age=300; HttpOnly; SameSite=Lax"
 
 
 def clear_oidc_cookie_header():
     return "zt_oidc=; Path=/login/oidc; Max-Age=0; HttpOnly; SameSite=Lax"
+
+
+def parse_oidc_handoff_cookie(cookie):
+    parts = cookie.split(".")
+    if len(parts) != 4:
+        return "", "", "missing or invalid handoff cookie"
+    state, nonce, issued_at, signature = parts
+    if not state or not nonce or not issued_at or not signature:
+        return "", "", "missing or invalid handoff cookie"
+    try:
+        age = int(time.time()) - int(issued_at)
+    except ValueError:
+        return "", "", "invalid handoff timestamp"
+    if age < 0 or age > 300:
+        return "", "", "expired handoff cookie"
+    secret = oidc_state_secret()
+    if not secret:
+        return "", "", "handoff signing unavailable"
+    expected = oidc_handoff_signature(secret, state, nonce, issued_at)
+    if not secrets.compare_digest(expected, signature):
+        return "", "", "handoff signature mismatch"
+    return state, nonce, ""
 
 
 def oidc_authorization_url(settings, metadata, state, nonce):
@@ -2676,7 +2724,7 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/login/oidc/callback":
             query = parse_qs(parsed.query)
             cookie = cookie_value(self.headers, "zt_oidc")
-            expected_state, _, expected_nonce = cookie.partition(".")
+            expected_state, expected_nonce, handoff_error = parse_oidc_handoff_cookie(cookie)
             provided_state = query.get("state", [""])[0]
             code = query.get("code", [""])[0]
             provider_error = query.get("error", [""])[0]
@@ -2686,7 +2734,17 @@ class Handler(BaseHTTPRequestHandler):
                 body = f"<h2>OIDC sign-in rejected</h2><div class='notice'>Identity provider returned <code>{html.escape(provider_error)}</code>.</div><a class='back-link' href='/login/oidc'>Back to OIDC readiness</a>"
                 self.send_html(page("OIDC Rejected - NKP ZeroTouch Framework", body, "about"), status=400, headers=headers)
                 return
-            if not expected_state or not expected_nonce or not provided_state or not code:
+            if not provided_state or not code:
+                audit_event("oidc_callback_rejected", None, "callback", "denied", {"reason": "missing state or code"})
+                body = "<h2>OIDC callback rejected</h2><div class='notice'>The authorization callback was missing the expected state or code. Start a fresh OIDC handoff.</div><a class='back-link' href='/login/oidc'>Back to OIDC readiness</a>"
+                self.send_html(page("OIDC Callback Rejected - NKP ZeroTouch Framework", body, "about"), status=400, headers=headers)
+                return
+            if handoff_error:
+                audit_event("oidc_callback_rejected", None, "callback", "denied", {"reason": handoff_error})
+                body = "<h2>OIDC callback rejected</h2><div class='notice'>The local authorization handoff cookie was invalid, expired, or missing. Start a fresh OIDC handoff.</div><a class='back-link' href='/login/oidc'>Back to OIDC readiness</a>"
+                self.send_html(page("OIDC Callback Rejected - NKP ZeroTouch Framework", body, "about"), status=403, headers=headers)
+                return
+            if not expected_state or not expected_nonce:
                 audit_event("oidc_callback_rejected", None, "callback", "denied", {"reason": "missing state or code"})
                 body = "<h2>OIDC callback rejected</h2><div class='notice'>The authorization callback was missing the expected state or code. Start a fresh OIDC handoff.</div><a class='back-link' href='/login/oidc'>Back to OIDC readiness</a>"
                 self.send_html(page("OIDC Callback Rejected - NKP ZeroTouch Framework", body, "about"), status=400, headers=headers)
