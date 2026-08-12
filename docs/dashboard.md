@@ -44,6 +44,9 @@ Job and approval model:
 - Route access is RBAC-gated by role permissions.
 - Bootstrap and RBAC-created local account passwords must be at least 12
   characters by default. Set `ZT_MIN_PASSWORD_LENGTH` to tune this local policy.
+- Repeated failed local login or bootstrap-token attempts are rate-limited.
+  Defaults are five failures and a 300-second lockout; tune with
+  `ZT_LOGIN_MAX_FAILURES` and `ZT_LOGIN_LOCKOUT_SECONDS`.
 - Login cookies include a `Max-Age` matching the server-side session TTL. Set
   `ZT_COOKIE_SECURE=true` when serving the dashboard through HTTPS so session
   and OIDC handoff cookies are marked `Secure`.
