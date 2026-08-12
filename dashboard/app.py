@@ -1350,7 +1350,7 @@ ROUTE_PERMISSIONS = [
 
 
 def route_permission(path):
-    if path in {"/", "/environments", "/about", "/logout", "/assets/veridian-mark-teal.svg"}:
+    if path in {"/", "/environments", "/about", "/logout", "/assets/nkp-zerotouch-mark.svg"}:
         return None
     for prefix, permission in ROUTE_PERMISSIONS:
         if path.startswith(prefix):
@@ -2953,7 +2953,7 @@ def page(title, body, active="environments", user=None):
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{html.escape(title)}</title>
-  <link rel="icon" type="image/svg+xml" href="/assets/veridian-mark-teal.svg">
+  <link rel="icon" type="image/svg+xml" href="/assets/nkp-zerotouch-mark.svg">
   <script>
     (() => {{
       try {{
@@ -3288,7 +3288,7 @@ def page(title, body, active="environments", user=None):
 <div class="shell">
   <aside class="sidebar">
     <div class="brand">
-      <div class="brand-mark"><img src="/assets/veridian-mark-teal.svg" alt="Veridian"></div>
+      <div class="brand-mark"><img src="/assets/nkp-zerotouch-mark.svg" alt="NKP ZeroTouch Framework"></div>
       <div>
         <div class="brand-title">NKP ZeroTouch</div>
         <div class="brand-subtitle">Framework</div>
@@ -3377,7 +3377,7 @@ class Handler(BaseHTTPRequestHandler):
         return get_session(token)
 
     def require_login(self, parsed):
-        if parsed.path in {"/login", "/login/oidc", "/login/oidc/callback", "/assets/veridian-mark-teal.svg"}:
+        if parsed.path in {"/login", "/login/oidc", "/login/oidc/callback", "/assets/nkp-zerotouch-mark.svg"}:
             return True
         if self.current_user():
             return True
@@ -3409,8 +3409,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         if not self.require_permission(parsed):
             return
-        if parsed.path == "/assets/veridian-mark-teal.svg":
-            asset = ROOT / "dashboard" / "assets" / "veridian-mark-teal.svg"
+        if parsed.path == "/assets/nkp-zerotouch-mark.svg":
+            asset = ROOT / "dashboard" / "assets" / "nkp-zerotouch-mark.svg"
             if not asset.exists():
                 self.send_html(page("Not Found", "<h2>Asset not found</h2>"), status=404)
                 return
