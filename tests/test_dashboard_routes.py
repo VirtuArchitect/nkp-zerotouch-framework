@@ -387,6 +387,27 @@ def test_dashboard_file_session_store_persists_and_logs_out():
             sessions_path.write_text(original_sessions, encoding="utf-8")
 
 
+def test_session_cookie_policy_matches_ttl_and_secure_flag():
+    old_secure = os.environ.get("ZT_COOKIE_SECURE")
+    try:
+        os.environ.pop("ZT_COOKIE_SECURE", None)
+        header = app.session_cookie_header("session-token")
+        assert header == f"zt_session=session-token; Path=/; Max-Age={app.SESSION_TTL_SECONDS}; HttpOnly; SameSite=Lax"
+        assert "Secure" not in header
+        assert app.clear_session_cookie_header() == "zt_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax"
+
+        os.environ["ZT_COOKIE_SECURE"] = "true"
+        header = app.session_cookie_header("session-token")
+        assert header.endswith("; HttpOnly; SameSite=Lax; Secure")
+        assert f"Max-Age={app.SESSION_TTL_SECONDS}" in header
+        assert app.clear_session_cookie_header().endswith("; HttpOnly; SameSite=Lax; Secure")
+    finally:
+        if old_secure is None:
+            os.environ.pop("ZT_COOKIE_SECURE", None)
+        else:
+            os.environ["ZT_COOKIE_SECURE"] = old_secure
+
+
 def test_postgres_session_store_is_contract_only():
     status, note = app.session_store_status({
         **app.default_integrations(),
@@ -697,9 +718,12 @@ def test_oidc_readiness_warns_on_issuer_mismatch_and_missing_endpoints():
 
 def test_oidc_handoff_cookie_is_signed_and_tamper_checked():
     old_secret = os.environ.get("ZT_OIDC_STATE_SECRET")
+    old_secure = os.environ.get("ZT_COOKIE_SECURE")
     try:
         os.environ["ZT_OIDC_STATE_SECRET"] = "test-oidc-state-secret"
+        os.environ["ZT_COOKIE_SECURE"] = "true"
         header = app.oidc_cookie_header("state-value", "nonce-value")
+        assert header.endswith("; HttpOnly; SameSite=Lax; Secure")
         cookie = header.split("zt_oidc=", 1)[1].split(";", 1)[0]
 
         state, nonce, error = app.parse_oidc_handoff_cookie(cookie)
@@ -717,6 +741,10 @@ def test_oidc_handoff_cookie_is_signed_and_tamper_checked():
             os.environ.pop("ZT_OIDC_STATE_SECRET", None)
         else:
             os.environ["ZT_OIDC_STATE_SECRET"] = old_secret
+        if old_secure is None:
+            os.environ.pop("ZT_COOKIE_SECURE", None)
+        else:
+            os.environ["ZT_COOKIE_SECURE"] = old_secure
 
 
 def test_oidc_login_page_shows_readiness_contract():

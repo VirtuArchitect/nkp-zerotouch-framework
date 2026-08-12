@@ -273,6 +273,25 @@ def cookie_value(headers, name):
     return ""
 
 
+def secure_cookie_enabled():
+    return os.environ.get("ZT_COOKIE_SECURE", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def cookie_security_attrs():
+    attrs = "HttpOnly; SameSite=Lax"
+    if secure_cookie_enabled():
+        attrs = f"{attrs}; Secure"
+    return attrs
+
+
+def session_cookie_header(token):
+    return f"zt_session={token}; Path=/; Max-Age={SESSION_TTL_SECONDS}; {cookie_security_attrs()}"
+
+
+def clear_session_cookie_header():
+    return f"zt_session=; Path=/; Max-Age=0; {cookie_security_attrs()}"
+
+
 def oidc_state_secret():
     configured = os.environ.get("ZT_OIDC_STATE_SECRET", "").strip()
     if configured:
@@ -299,11 +318,11 @@ def oidc_cookie_header(state, nonce):
     issued_at = str(int(time.time()))
     secret = oidc_state_secret()
     signature = oidc_handoff_signature(secret, state, nonce, issued_at) if secret else ""
-    return f"zt_oidc={state}.{nonce}.{issued_at}.{signature}; Path=/login/oidc; Max-Age=300; HttpOnly; SameSite=Lax"
+    return f"zt_oidc={state}.{nonce}.{issued_at}.{signature}; Path=/login/oidc; Max-Age=300; {cookie_security_attrs()}"
 
 
 def clear_oidc_cookie_header():
-    return "zt_oidc=; Path=/login/oidc; Max-Age=0; HttpOnly; SameSite=Lax"
+    return f"zt_oidc=; Path=/login/oidc; Max-Age=0; {cookie_security_attrs()}"
 
 
 def parse_oidc_handoff_cookie(cookie):
@@ -2762,7 +2781,7 @@ class Handler(BaseHTTPRequestHandler):
             token = cookie_value(self.headers, "zt_session")
             audit_event("logout", self.current_user(), "session", "success")
             delete_session(token)
-            self.send_redirect("/login", {"Set-Cookie": "zt_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax"})
+            self.send_redirect("/login", {"Set-Cookie": clear_session_cookie_header()})
             return
         if parsed.path.startswith("/api/"):
             if parsed.path == "/api/status":
@@ -4444,7 +4463,7 @@ class Handler(BaseHTTPRequestHandler):
             }
             save_session(token, session)
             audit_event("login", session, username, "success")
-            self.send_redirect("/", {"Set-Cookie": f"zt_session={token}; Path=/; HttpOnly; SameSite=Lax"})
+            self.send_redirect("/", {"Set-Cookie": session_cookie_header(token)})
             return
 
         if not self.require_login(parsed):

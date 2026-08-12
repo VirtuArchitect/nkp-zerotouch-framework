@@ -57,6 +57,8 @@ Before exposing this console beyond a trusted operator workstation:
   command lines with unquoted environment values.
 - Set `ZT_BOOTSTRAP_TOKEN` whenever the dashboard is bound outside localhost
   before the first admin account exists.
+- Set `ZT_COOKIE_SECURE=true` whenever the dashboard is served through HTTPS or
+  an HTTPS-terminating reverse proxy so browser cookies are marked `Secure`.
 - Move from memory sessions to file-backed local sessions. Treat Postgres-backed shared session storage as future work until a reviewed storage backend is implemented.
 - Connect OIDC/SAML or enterprise SSO to a real identity provider.
 - Complete OIDC authorization-code token exchange for production login.
