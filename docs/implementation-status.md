@@ -26,6 +26,7 @@ This maps the public-readiness and real-deployment tasks to the repository featu
 | Artifact viewer | Implemented | generated plans, reports, logs, and allowed config/docs files can be opened from the console |
 | Artifact diff/review | Implemented baseline | allowed artifacts can be compared from the console before operational use |
 | Evidence pack review | Implemented baseline | console lists `.zt/evidence` manifests, redaction status, archive paths, and exposes `/api/evidence` |
+| UAT readiness console | Implemented baseline | console parses `docs/uat/UAT-CASES.md`, maps cases to local evidence signals, and exposes `/api/uat` while keeping production validation separate |
 | Formal plan review | Implemented baseline | console records per-environment approve/reject status under `.zt` |
 | Setup wizard | Implemented baseline | guided first-run setup page links source, connection, inventory, network, secrets, environment, and preflight tasks |
 | Lifecycle/readiness | Implemented baseline | environment table shows lifecycle state and readiness score |

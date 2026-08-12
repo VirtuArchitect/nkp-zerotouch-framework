@@ -56,6 +56,7 @@ VIEW_PATHS = {
     "change-records": "/change-records",
     "locks": "/locks",
     "drift": "/drift",
+    "uat": "/uat",
     "backups": "/backups",
     "restore": "/restore",
     "production-readiness": "/production-readiness",
@@ -587,6 +588,7 @@ ROUTE_PERMISSIONS = [
     ("/change-records", "jobs"),
     ("/locks", "jobs"),
     ("/drift", "preflight"),
+    ("/uat", "preflight"),
     ("/backups", "artifacts"),
     ("/restore", "artifacts"),
     ("/evidence", "artifacts"),
@@ -1003,6 +1005,80 @@ def evidence_packs(limit=100):
             "updated": mtime_label(manifest_path),
         })
     return sorted(packs, key=lambda item: item.get("createdAt") or item.get("updated") or "", reverse=True)[:limit]
+
+
+def uat_cases():
+    cases_path = ROOT / "docs" / "uat" / "UAT-CASES.md"
+    cases = []
+    if not cases_path.exists():
+        return cases
+    for line in cases_path.read_text(encoding="utf-8-sig", errors="replace").splitlines():
+        if not line.startswith("| UAT-"):
+            continue
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if len(cells) < 4:
+            continue
+        case_id, title, required_result, evidence = cells[:4]
+        cases.append({
+            "id": case_id,
+            "title": title,
+            "requiredResult": required_result,
+            "evidence": evidence,
+        })
+    return cases
+
+
+def uat_evidence_status(case):
+    title = case.get("title", "").lower()
+    evidence = case.get("evidence", "").lower()
+    packs = evidence_packs(100)
+    pack_count = len(packs)
+    env_count = len(env_configs())
+    run_count = len(recent_run_summaries(100))
+    preflight_count = len(preflight_evidence_records(100))
+    job_count = len(list_jobs(100))
+    backup_count = len(backup_manifests())
+    has_verification = any(
+        "verification-evidence.json" in file_name
+        for pack in packs
+        for file_name in (read_json(Path(pack.get("manifest", ""))) or {}).get("files", [])
+    )
+
+    if "config validation" in title:
+        return ("partial" if preflight_count else "missing", f"{preflight_count} validation evidence record(s)")
+    if "prepare workspace" in title:
+        return ("partial" if any(env_state(read_json_from_context(config).get("environmentName") or config.stem)["state"] for config in env_configs()) else "missing", f"{env_count} configured environment(s)")
+    if "generate artifacts" in title:
+        generated = sum(1 for config in env_configs() if env_state(read_json_from_context(config).get("environmentName") or config.stem)["generate"])
+        return ("partial" if generated else "missing", f"{generated} environment(s) with generated artifacts")
+    if "point-of-no-return" in title or "deployment execution" in title or "registry" in title:
+        return ("partial" if job_count else "missing", f"{job_count} job/change record candidate(s)")
+    if "post-deployment validation" in title or "verify" in evidence:
+        return ("partial" if has_verification else "missing", "verification evidence found" if has_verification else "verification evidence missing")
+    if "failed deployment" in title or "rollback" in title:
+        return ("partial" if backup_count or pack_count else "missing", f"{backup_count} backup(s), {pack_count} evidence pack(s)")
+    if "dashboard governance" in title:
+        return ("partial" if run_count or job_count else "missing", f"{run_count} run summary record(s), {job_count} job record(s)")
+    return ("partial" if pack_count else "missing", f"{pack_count} evidence pack(s)")
+
+
+def uat_payload():
+    cases = []
+    for case in uat_cases():
+        status, detail = uat_evidence_status(case)
+        item = dict(case)
+        item.update({"status": status, "detail": detail})
+        cases.append(item)
+    passed = sum(1 for case in cases if case["status"] == "pass")
+    partial = sum(1 for case in cases if case["status"] == "partial")
+    missing = sum(1 for case in cases if case["status"] == "missing")
+    return {
+        "ready": bool(cases) and missing == 0 and partial == 0,
+        "evidenceCoverage": bool(cases) and missing == 0,
+        "summary": {"total": len(cases), "pass": passed, "partial": partial, "missing": missing},
+        "cases": cases,
+        "boundary": "UAT evidence is an operational readiness signal, not production validation.",
+    }
 
 
 def environment_lifecycle(name, state):
@@ -1941,6 +2017,7 @@ def page(title, body, active="environments", user=None):
     <a class="{nav_class('setup')}" href="{VIEW_PATHS['setup']}">Setup Wizard</a>
     <a class="{nav_class('preflight')}" href="{VIEW_PATHS['preflight']}">Preflight</a>
     <a class="{nav_class('drift')}" href="{VIEW_PATHS['drift']}">Drift</a>
+    <a class="{nav_class('uat')}" href="{VIEW_PATHS['uat']}">UAT</a>
     <a class="{nav_class('production-readiness')}" href="{VIEW_PATHS['production-readiness']}">Production Gate</a>
     <a class="{nav_class('health')}" href="{VIEW_PATHS['health']}">Health</a>
     <div class="nav-label">Artifacts</div>
@@ -2538,6 +2615,9 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if parsed.path == "/api/evidence":
                 self.send_json({"evidencePacks": evidence_packs(100)})
+                return
+            if parsed.path == "/api/uat":
+                self.send_json(uat_payload())
                 return
             if parsed.path == "/api/environments":
                 rows = []
@@ -3538,6 +3618,39 @@ class Handler(BaseHTTPRequestHandler):
 <section class="panel"><table><thead><tr><th>Environment</th><th>Status</th><th>Signals</th></tr></thead><tbody>{''.join(rows)}</tbody></table></section>
 """
             self.send_html(page("Drift - NKP ZeroTouch Framework", body, "drift"))
+            return
+        if parsed.path == "/uat":
+            payload = uat_payload()
+            summary = payload["summary"]
+            rows = []
+            for case in payload["cases"]:
+                status = case["status"]
+                chip_class = "ok" if status == "pass" else ("warn" if status == "partial" else "fail")
+                rows.append(
+                    f"<tr><td><div class='env-name'>{html.escape(case['id'])}</div><div class='env-file'>{html.escape(case['title'])}</div></td>"
+                    f"<td><span class='chip {chip_class}'>{html.escape(status)}</span><div class='env-file'>{html.escape(case['detail'])}</div></td>"
+                    f"<td>{html.escape(case['requiredResult'])}</td>"
+                    f"<td>{html.escape(case['evidence'])}</td></tr>"
+                )
+            coverage_value = summary["total"] - summary["missing"]
+            coverage_label = "candidate case(s) covered" if payload["evidenceCoverage"] else "case(s) with signals"
+            body = f"""
+<section class="summary-grid">
+  {metric_card("UAT Cases", summary["total"], "documented acceptance checks", "/uat")}
+  {metric_card("Partial Evidence", summary["partial"], "cases with local signals", "/evidence")}
+  {metric_card("Missing Evidence", summary["missing"], "cases needing proof", "/uat")}
+  {metric_card("Evidence Coverage", coverage_value, coverage_label, "/evidence")}
+</section>
+<div class="section-head">
+  <div>
+    <h2>UAT Readiness</h2>
+    <div class="section-copy">Maps documented UAT cases to local evidence records, evidence packs, jobs, backups, and run history.</div>
+  </div>
+</div>
+<section class="panel"><table><thead><tr><th>Case</th><th>Status</th><th>Required Result</th><th>Evidence Requirement</th></tr></thead><tbody>{''.join(rows) or '<tr><td colspan="4" class="muted">No UAT cases found under docs/uat/UAT-CASES.md.</td></tr>'}</tbody></table></section>
+<div class="notice">{html.escape(payload["boundary"])} Partial coverage means the console found a candidate local signal; an operator still needs reviewed outcomes, exceptions, owners, and environment-specific acceptance before calling UAT complete.</div>
+"""
+            self.send_html(page("UAT Readiness - NKP ZeroTouch Framework", body, "uat"))
             return
         if parsed.path == "/production-readiness":
             rows = []

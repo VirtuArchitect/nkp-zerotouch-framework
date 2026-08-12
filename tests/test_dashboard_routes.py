@@ -124,7 +124,7 @@ def test_dashboard_pages_and_api_routes():
         status, _, _ = request(no_redirect_opener, base_url, "/login", {"username": "dashboard-smoke", "password": "DashboardSmoke-Local-123!"}, allow_error=True)
         assert status == 303
 
-        page_paths = ["/", "/setup", "/plan-review", "/kubeconfig", "/drift", "/locks", "/change-records", "/backups", "/restore", "/evidence", "/production-readiness", "/release-channels"]
+        page_paths = ["/", "/setup", "/plan-review", "/kubeconfig", "/drift", "/uat", "/locks", "/change-records", "/backups", "/restore", "/evidence", "/production-readiness", "/release-channels"]
         configs = app.env_configs()
         if configs:
             page_paths.append(f"/environment/view?config={urllib.parse.quote(str(configs[0]))}")
@@ -136,7 +136,7 @@ def test_dashboard_pages_and_api_routes():
             assert "NKP ZeroTouch" in body
             assert "data-theme-toggle" in body
 
-        for path in ["/api/status", "/api/preflight", "/api/evidence", "/api/environments", "/api/jobs", "/api/locks", "/api/change-records", "/api/production-readiness"]:
+        for path in ["/api/status", "/api/preflight", "/api/evidence", "/api/uat", "/api/environments", "/api/jobs", "/api/locks", "/api/change-records", "/api/production-readiness"]:
             status, content_type, body = request(opener, base_url, path)
             assert status == 200
             assert "application/json" in content_type
@@ -174,6 +174,44 @@ def test_preflight_evidence_records_summarize_endpoint_status(tmp_path):
         assert records[0]["summary"]["warnings"] == 1
         assert records[0]["endpoints"][0]["name"] == "Prism Central"
         assert records[0]["endpoints"][0]["status"] == "warn"
+    finally:
+        app.ZT = original_zt
+
+
+def test_uat_payload_maps_cases_to_local_evidence(tmp_path):
+    original_zt = app.ZT
+    app.ZT = tmp_path / ".zt"
+    try:
+        app.write_json(
+            app.ZT / "preflight" / "lab-connected.json",
+            {
+                "capturedAt": "2026-08-12T10:00:00Z",
+                "environment": "lab-connected",
+                "config": "connected.example.yaml",
+                "summary": {"checks": 3, "warnings": 0, "failures": 0},
+                "endpoints": [],
+            },
+        )
+        pack_dir = app.ZT / "evidence" / "lab-connected-20260812T100000Z"
+        app.write_json(
+            pack_dir / "evidence-manifest.json",
+            {
+                "environment": "lab-connected",
+                "createdAt": "2026-08-12T10:00:00Z",
+                "redaction": "applied",
+                "archive": str(pack_dir / "evidence-pack.zip"),
+                "files": ["environment/reports/verification-evidence.json"],
+            },
+        )
+
+        payload = app.uat_payload()
+
+        assert payload["summary"]["total"] >= 12
+        assert payload["ready"] is False
+        assert payload["evidenceCoverage"] is False
+        assert any(case["id"] == "UAT-001" and case["status"] == "partial" for case in payload["cases"])
+        assert any(case["id"] == "UAT-009" and "verification evidence found" in case["detail"] for case in payload["cases"])
+        assert any(case["status"] == "missing" for case in payload["cases"])
     finally:
         app.ZT = original_zt
 

@@ -50,6 +50,7 @@ Deployment readiness sections:
 - `Inventory`: AHV or future bare-metal node inventory, BMC details, boot mode, and OS image notes.
 - `Network`: management/workload CIDRs, API VIP, ingress range, DNS, NTP, proxy, and IP assignment mode.
 - `Preflight`: console-level readiness matrix plus latest `.zt/preflight/` validation evidence across sources, inventory, network, connections, integration probes, uniqueness checks, secrets, and provider.
+- `UAT`: maps documented UAT cases to local evidence records, evidence packs, jobs, backups, and run history without treating partial evidence coverage as completed UAT.
 - `Pipeline`: visual ZeroTouch flow from source intake through validation, preparation, generation, registry, deploy, verify, and operate.
 - `Jobs`: execution queue, approval controls, job detail pages, and captured live logs.
 - `Health`: runner, tool, bundle, Prism, registry, credential environment variables, enterprise integration probes, and state-path readiness.
@@ -57,6 +58,7 @@ Deployment readiness sections:
 - `Evidence Packs`: review page for `.zt/evidence/` manifests, redaction status, archive paths, and pack metadata created by the `evidence` phase. The public demo mirrors this view with simulated evidence-pack data.
 - `/api/preflight`: authenticated JSON view of console preflight checks and structured validation evidence.
 - `/api/evidence`: authenticated JSON view of generated evidence pack manifests and archive metadata.
+- `/api/uat`: authenticated JSON view of documented UAT cases and their local evidence coverage signals.
 - `/api/production-readiness`: authenticated JSON view of the same production gate checks shown in the console.
 
 Settings sections:
