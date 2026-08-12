@@ -54,7 +54,7 @@ Deployment readiness sections:
 - `Jobs`: execution queue, approval controls, job detail pages, and captured live logs.
 - `Health`: runner, tool, bundle, Prism, registry, credential environment variables, enterprise integration probes, and state-path readiness.
 - `Artifacts`: generated file browser, viewer, and diff workflow for plans, logs, reports, state, and configs.
-- `Evidence Packs`: review page for `.zt/evidence/` manifests, redaction status, archive paths, and pack metadata created by the `evidence` phase.
+- `Evidence Packs`: review page for `.zt/evidence/` manifests, redaction status, archive paths, and pack metadata created by the `evidence` phase. The public demo mirrors this view with simulated evidence-pack data.
 - `/api/preflight`: authenticated JSON view of console preflight checks and structured validation evidence.
 - `/api/evidence`: authenticated JSON view of generated evidence pack manifests and archive metadata.
 - `/api/production-readiness`: authenticated JSON view of the same production gate checks shown in the console.
