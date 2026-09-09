@@ -729,9 +729,18 @@ def test_live_demo_surfaces_uat_readiness_boundary():
     assert "Operator attention required before apply" in demo_index
     assert "Recommended Operator Actions" in demo_index
     assert "Environment Profiles" in demo_index
+    assert '<svg class="icon-sprite"' in demo_index
+    assert '<span class="nav-icon">D</span>' not in demo_index
+    assert '<span class="nav-icon">S</span>' not in demo_index
     assert 'id="opsDashboard"' in demo_index
+    assert 'data-view="setup"' in demo_index
+    assert 'id="setupEnvironmentRows"' in demo_index
+    assert "Edit sources" in demo_index
+    assert "Add environment" in demo_index
     assert "const operationalPanels" in demo_app
     assert "renderOperationalPanels();" in demo_app
+    assert "renderSetupEnvironments();" in demo_app
+    assert "Delete requires confirmation" in demo_app
     assert 'data-view-link="uat"' in demo_index
     assert 'data-view="uat"' in demo_index
     assert "UAT evidence is an operational readiness signal, not production validation." in demo_index

@@ -320,6 +320,9 @@ def test_sidebar_prioritizes_operational_console_navigation():
     assert "Execute" in shell
     assert "Assurance" in shell
     assert "Records" in shell
+    assert '<svg viewBox="0 0 24 24">' in shell
+    assert '<span class="nav-icon">D</span>' not in shell
+    assert '<span class="nav-icon">S</span>' not in shell
     assert 'href="/"' in shell and "Dashboard" in shell
     assert 'href="/settings"' in shell and "Global Config" in shell
     assert 'href="/jobs"' in shell and "Jobs / Queue" in shell
@@ -391,6 +394,11 @@ def test_dashboard_pages_and_api_routes(tmp_path):
                 assert "Operations Queue" in body
                 assert "Evidence and Governance" in body
                 assert "Recommended Operator Actions" in body
+            if path == "/setup":
+                assert "Edit sources" in body
+                assert "Edit connections" in body
+                assert "Add environment" in body
+                assert '<form method="post" action="/setup/save">' in body
 
         for path in ["/api/status", "/api/preflight", "/api/evidence", "/api/external-validations", "/api/lab-evidence", "/api/deployment-evidence", "/api/uat", "/api/environments", "/api/jobs", "/api/locks", "/api/change-records", "/api/production-readiness"]:
             status, content_type, body = request(opener, base_url, path)
