@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Clickable static demo of the NKP ZeroTouch Framework console.">
+    <title>NKP ZeroTouch Framework Demo</title>
+    <script>
+      (() => {
+        try {
+          const storedTheme = localStorage.getItem("zt-theme");
+          if (storedTheme === "dark") document.documentElement.removeAttribute("data-theme");
+          if (storedTheme === "light") document.documentElement.dataset.theme = "light";
+        } catch (error) {}
+      })();
+    </script>
+    <link rel="icon" type="image/svg+xml" href="assets/nkp-zerotouch-mark.svg">
+    <link rel="stylesheet" href="styles.css">
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <svg class="icon-sprite" aria-hidden="true">
+      <symbol id="icon-dashboard" viewBox="0 0 24 24"><path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"/></symbol>
+      <symbol id="icon-setup" viewBox="0 0 24 24"><path d="M12 3v10"/><path d="m8 9 4 4 4-4"/><path d="M4 17h16v4H4z"/></symbol>
+      <symbol id="icon-settings" viewBox="0 0 24 24"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z"/><path d="M3 12h3m12 0h3M12 3v3m0 12v3m-6.4-2.6 2.1-2.1m8.6-8.6 2.1-2.1m0 12.8-2.1-2.1M7.7 7.7 5.6 5.6"/></symbol>
+      <symbol id="icon-files" viewBox="0 0 24 24"><path d="M7 3h7l4 4v14H7z"/><path d="M14 3v5h5"/><path d="m10 13-2 2 2 2m4-4 2 2-2 2"/></symbol>
+      <symbol id="icon-pipeline" viewBox="0 0 24 24"><path d="M6 5v5a4 4 0 0 0 4 4h8"/><path d="M6 19v-9"/><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="14" r="2"/></symbol>
+      <symbol id="icon-jobs" viewBox="0 0 24 24"><path d="M8 6h12M8 12h12M8 18h12"/><path d="M4 6h.01M4 12h.01M4 18h.01"/></symbol>
+      <symbol id="icon-terminal" viewBox="0 0 24 24"><path d="m5 7 5 5-5 5"/><path d="M12 17h7"/></symbol>
+      <symbol id="icon-approval" viewBox="0 0 24 24"><path d="M12 3 5 6v6c0 4 3 7 7 9 4-2 7-5 7-9V6z"/><path d="m9 12 2 2 4-5"/></symbol>
+      <symbol id="icon-preflight" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/></symbol>
+      <symbol id="icon-uat" viewBox="0 0 24 24"><path d="M8 4h8l1 3h3v14H4V7h3z"/><path d="M8 12h8M8 16h6"/></symbol>
+      <symbol id="icon-gate" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></symbol>
+      <symbol id="icon-health" viewBox="0 0 24 24"><path d="M4 12h4l2-5 4 10 2-5h4"/></symbol>
+      <symbol id="icon-evidence" viewBox="0 0 24 24"><path d="M4 7h16v13H4z"/><path d="M4 7l3-4h10l3 4"/><path d="M9 12h6"/></symbol>
+      <symbol id="icon-lab" viewBox="0 0 24 24"><path d="M9 3h6"/><path d="M10 3v6l-5 9a2 2 0 0 0 2 3h10a2 2 0 0 0 2-3l-5-9V3"/><path d="M8 16h8"/></symbol>
+      <symbol id="icon-external" viewBox="0 0 24 24"><path d="M14 4h6v6"/><path d="m10 14 10-10"/><path d="M20 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h5"/></symbol>
+      <symbol id="icon-audit" viewBox="0 0 24 24"><path d="M8 6h12M8 12h12M8 18h12"/><path d="m3 6 1 1 2-2m-3 7 1 1 2-2m-3 7 1 1 2-2"/></symbol>
+    </svg>
+    <div class="shell">
+      <aside class="sidebar">
+        <a class="brand" href="#environments" data-view-link="environments" aria-label="NKP ZeroTouch home">
+          <span class="brand-mark"><img src="assets/nkp-zerotouch-mark.svg" alt="NKP ZeroTouch Framework"></span>
+          <span>
+            <span class="brand-title">NKP ZeroTouch</span>
+            <span class="brand-subtitle">Framework</span>
+          </span>
+        </a>
+        <nav class="nav" aria-label="Console sections">
+          <div class="nav-status"><span></span>Framework installed</div>
+          <div class="nav-label">Overview</div>
+          <button class="nav-item active" type="button" data-view-link="environments"><span class="nav-icon"><svg><use href="#icon-dashboard"></use></svg></span>Dashboard</button>
+          <button class="nav-item" type="button" data-view-link="setup"><span class="nav-icon"><svg><use href="#icon-setup"></use></svg></span>Setup and Install</button>
+          <div class="nav-label">Configure</div>
+          <button class="nav-item" type="button" data-view-link="settings"><span class="nav-icon"><svg><use href="#icon-settings"></use></svg></span>Global Config</button>
+          <button class="nav-item" type="button" data-view-link="sources"><span class="nav-icon"><svg><use href="#icon-files"></use></svg></span>Config Files</button>
+          <button class="nav-item" type="button" data-view-link="pipeline"><span class="nav-icon"><svg><use href="#icon-pipeline"></use></svg></span>Pipeline</button>
+          <div class="nav-label">Execute</div>
+          <button class="nav-item" type="button" data-view-link="jobs"><span class="nav-icon"><svg><use href="#icon-jobs"></use></svg></span>Jobs / Queue</button>
+          <button class="nav-item" type="button" data-view-link="cli"><span class="nav-icon"><svg><use href="#icon-terminal"></use></svg></span>CLI Console</button>
+          <button class="nav-item" type="button" data-view-link="approval"><span class="nav-icon"><svg><use href="#icon-approval"></use></svg></span>Approval Policy</button>
+          <div class="nav-label">Assurance</div>
+          <button class="nav-item" type="button" data-view-link="preflight"><span class="nav-icon"><svg><use href="#icon-preflight"></use></svg></span>Preflight</button>
+          <button class="nav-item" type="button" data-view-link="uat"><span class="nav-icon"><svg><use href="#icon-uat"></use></svg></span>UAT Evidence</button>
+          <button class="nav-item" type="button" data-view-link="production"><span class="nav-icon"><svg><use href="#icon-gate"></use></svg></span>Production Gate</button>
+          <button class="nav-item" type="button" data-view-link="health"><span class="nav-icon"><svg><use href="#icon-health"></use></svg></span>Health</button>
+          <div class="nav-label">Records</div>
+          <button class="nav-item" type="button" data-view-link="evidence"><span class="nav-icon"><svg><use href="#icon-evidence"></use></svg></span>Evidence Packs</button>
+          <button class="nav-item" type="button" data-view-link="lab"><span class="nav-icon"><svg><use href="#icon-lab"></use></svg></span>Lab Evidence</button>
+          <button class="nav-item" type="button" data-view-link="external"><span class="nav-icon"><svg><use href="#icon-external"></use></svg></span>External Evidence</button>
+          <button class="nav-item" type="button" data-view-link="audit"><span class="nav-icon"><svg><use href="#icon-audit"></use></svg></span>Audit Trail</button>
+        </nav>
+      </aside>
+
+      <div class="content">
+        <header class="topbar">
+          <div>
+            <h1>NKP ZeroTouch Framework</h1>
+            <div class="section-copy">Nutanix Kubernetes Platform deployment console</div>
+          </div>
+          <div class="topbar-meta">
+            <span class="badge connected">Console Online</span>
+            <span class="operator-pill">jgoulden (Admin)</span>
+            <button class="button-link theme-toggle" type="button" data-theme-toggle><span data-theme-label>Light</span></button>
+            <button class="button-link" type="button" data-command="demo-login">Log out</button>
+            <span>CLI apply requires approval</span>
+          </div>
+        </header>
+
+        <main>
+          <section class="view active" data-view="environments">
+            <section class="status-banner warn">
+              <div>
+                <h2>Operator attention required before apply</h2>
+                <p>Runtime checks are available, but blocked environments and drift signals require operator review. Apply-class work remains approval-gated through the controlled CLI path.</p>
+              </div>
+              <button class="button-link status-action" type="button" data-command="metric">View Execution History</button>
+            </section>
+
+            <section class="summary-grid" id="summaryGrid"></section>
+
+            <section class="ops-dashboard" id="opsDashboard"></section>
+
+            <div class="section-head">
+              <div>
+                <h2>Recommended Operator Actions</h2>
+                <div class="section-copy">Highest-signal actions based on current state, drift, evidence, and production gate checks.</div>
+              </div>
+            </div>
+            <section class="next-actions" id="nextActions"></section>
+
+            <div class="section-head">
+              <div>
+                <h2>Environment Profiles</h2>
+                <div class="section-copy">Deployment targets, readiness signals, gate state, and next operator action.</div>
+              </div>
+            </div>
+            <section class="panel">
+              <table>
+                <thead>
+                  <tr><th>Name</th><th>Type / Channel</th><th>Lifecycle / Readiness</th><th>Deploy Gate</th><th>Drift</th><th>Evidence</th><th>Next Action</th><th>Manage</th></tr>
+                </thead>
+                <tbody id="environmentRows"></tbody>
+              </table>
+            </section>
+
+            <div class="section-head">
+              <div>
+                <h2>Recent Runs</h2>
+                <div class="section-copy">Latest framework executions captured under the local .zt workspace.</div>
+              </div>
+            </div>
+            <section class="panel">
+              <ul class="run-list" id="recentRuns"></ul>
+            </section>
+            <div class="notice">Destructive and apply actions are intentionally CLI-only. This console exposes validation, preparation, generation, verification, backup, and run inspection workflows.</div>
+          </section>
+
+          <section class="view" data-view="setup">
+            <div class="section-head">
+              <div>
+                <h2>Setup and Install</h2>
+                <div class="section-copy">Editable first-run configuration for source bundles, endpoints, inventory, network, provider, and secret backend metadata.</div>
+                <div class="toolbar">
+                  <button class="button-link" type="button" data-command="edit">Edit sources</button>
+                  <button class="button-link" type="button" data-command="edit">Edit connections</button>
+                  <button class="button-link" type="button" data-command="open">Add environment</button>
+                </div>
+              </div>
+            </div>
+            <section class="panel">
+              <table class="config-table">
+                <thead><tr><th>Area</th><th>Current Value</th><th>Manage</th></tr></thead>
+                <tbody>
+                  <tr><td>NKP version</td><td><input value="v2.17.1"></td><td><button class="button-link" type="button" data-command="edit">Save</button></td></tr>
+                  <tr><td>Standard bundle</td><td><input value="/mnt/c/Share/nkp-bundle_v2.17.1"></td><td><button class="button-link" type="button" data-command="edit">Edit</button></td></tr>
+                  <tr><td>Prism Central endpoint</td><td><input value="https://pc.example:9440"></td><td><button class="button-link" type="button" data-command="edit">Edit</button></td></tr>
+                  <tr><td>Inventory nodes</td><td><textarea>ahv-node-01&#10;ahv-node-02&#10;ahv-node-03</textarea></td><td><button class="button-link" type="button" data-command="open">Add</button></td></tr>
+                  <tr><td>Secret backend</td><td><select><option>local-file</option><option>hashicorp-vault</option><option>external</option></select></td><td><button class="button-link" type="button" data-command="edit">Save</button></td></tr>
+                </tbody>
+              </table>
+            </section>
+            <div class="section-head">
+              <div>
+                <h2>Environment Config Files</h2>
+                <div class="section-copy">Config records expose add, edit, duplicate, and delete actions before operational use.</div>
+              </div>
+            </div>
+            <section class="panel">
+              <table>
+                <thead><tr><th>Name</th><th>File</th><th>Provider</th><th>Manage</th></tr></thead>
+                <tbody id="setupEnvironmentRows"></tbody>
+              </table>
+            </section>
+          </section>
+
+          <section class="view" data-view="jobs">
+            <div class="section-head"><div><h2>Jobs</h2><div class="section-copy">Execution queue, approval controls, and captured logs.</div></div></div>
+            <section class="panel">
+              <table>
+                <thead><tr><th>Job</th><th>Action</th><th>Status</th><th>Requester</th><th>Approval</th></tr></thead>
+                <tbody id="jobRows"></tbody>
+              </table>
+            </section>
+          </section>
+
+          <section class="view" data-view="runs">
+            <div class="section-head"><div><h2>Runs</h2><div class="section-copy">Latest framework execution summaries.</div></div></div>
+            <section class="panel"><ul class="run-list" id="runsList"></ul></section>
+          </section>
+
+          <section class="view" data-view="pipeline">
+            <div class="section-head"><div><h2>Pipeline</h2><div class="section-copy">ZeroTouch phase progression for a controlled NKP rollout.</div></div></div>
+            <section class="pipeline" id="pipelineSteps"></section>
+          </section>
+
+          <section class="view" data-view="cli">
+            <div class="section-head"><div><h2>CLI</h2><div class="section-copy">Apply-class commands require explicit flags and approval.</div></div></div>
+            <section class="terminal-window">
+              <div class="terminal-bar"><span class="terminal-dot"></span><span class="terminal-dot"></span><span class="terminal-dot"></span> Controlled CLI Window</div>
+              <div class="terminal-body">
+                <div class="terminal-prompt">PS C:\workspace\nkp-zerotouch-framework&gt;</div>
+                <textarea class="terminal-input" spellcheck="false">deploy --apply --config configs/environments/connected.example.yaml</textarea>
+                <div class="terminal-help">Allowed apply examples: registry --apply, deploy --apply, upgrade --apply, destroy --apply --confirm-destroy.</div>
+              </div>
+            </section>
+          </section>
+
+          <section class="view" data-view="artifacts">
+            <div class="section-head"><div><h2>Artifacts</h2><div class="section-copy">Generated plans, reports, logs, state, and configuration evidence.</div></div></div>
+            <section class="panel">
+              <table>
+                <thead><tr><th>Artifact</th><th>Type</th><th>Environment</th><th>Status</th></tr></thead>
+                <tbody id="artifactRows"></tbody>
+              </table>
+            </section>
+          </section>
+
+          <section class="view" data-view="evidence">
+            <div class="section-head"><div><h2>Evidence Packs</h2><div class="section-copy">Reviewable evidence bundles created by the evidence phase under .zt/evidence.</div></div></div>
+            <section class="panel">
+              <table>
+                <thead><tr><th>Pack</th><th>Environment</th><th>Created</th><th>Files</th><th>Redaction</th><th>Open</th></tr></thead>
+                <tbody id="evidenceRows"></tbody>
+              </table>
+            </section>
+            <div class="notice">Evidence packs exclude raw kubeconfig and local secret values. Generated plans and logs can still contain topology, VIPs, endpoints, and environment names.</div>
+          </section>
+
+          <section class="view" data-view="uat">
+            <section class="summary-grid" id="uatMetrics"></section>
+            <div class="section-head">
+              <div>
+                <h2>UAT Readiness</h2>
+                <div class="section-copy">Maps documented UAT cases to local evidence records, evidence packs, jobs, backups, and run history.</div>
+              </div>
+            </div>
+            <section class="panel">
+              <table>
+                <thead><tr><th>Case</th><th>Status</th><th>Required Result</th><th>Evidence Requirement</th></tr></thead>
+                <tbody id="uatRows"></tbody>
+              </table>
+            </section>
+            <div class="section-head">
+              <div>
+                <h2>Deployment Evidence Records</h2>
+                <div class="section-copy">Controlled-UAT evidence captured from local phase outputs.</div>
+              </div>
+            </div>
+            <section class="panel">
+              <table>
+                <thead><tr><th>Environment</th><th>Status</th><th>Signal Coverage</th><th>Boundary</th></tr></thead>
+                <tbody id="deploymentEvidenceRows"></tbody>
+              </table>
+            </section>
+            <div class="notice">UAT evidence is an operational readiness signal, not production validation. Partial coverage means the console found a candidate local signal; an operator still needs reviewed outcomes, exceptions, owners, and environment-specific acceptance before calling UAT complete.</div>
+          </section>
+
+          <section class="view" data-view="restore">
+            <div class="section-head">
+              <div>
+                <h2>Restore</h2>
+                <div class="section-copy">Controlled backup-manifest review, restore plan generation, and approval request workflow.</div>
+              </div>
+            </div>
+            <section class="settings-grid" id="restoreActions"></section>
+            <div class="section-head">
+              <div>
+                <h2>Restore Plans</h2>
+                <div class="section-copy">Clean metadata can request approval; blocked plans require operator remediation first.</div>
+              </div>
+            </div>
+            <section class="panel">
+              <table>
+                <thead><tr><th>Environment</th><th>Plan</th><th>Status</th><th>Action</th></tr></thead>
+                <tbody id="restoreRows"></tbody>
+              </table>
+            </section>
+            <div class="notice">The approval job records authorization only. This demo, and the local console baseline, do not copy files or restore live infrastructure.</div>
+          </section>
+
+          <section class="view" data-view="generic">
+            <div class="section-head"><div><h2 id="genericTitle">Console Section</h2><div class="section-copy" id="genericCopy">Static demo snapshot of the local NKP ZeroTouch console.</div></div></div>
+            <section class="settings-grid" id="genericCards"></section>
+          </section>
+        </main>
+      </div>
+    </div>
+  </body>
+</html>
