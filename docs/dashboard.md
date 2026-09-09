@@ -66,6 +66,10 @@ Deployment readiness sections:
 - `External Evidence`: reviewed external validation records for Prism
   authorization, registry access, identity provider, Postgres, Vault, and
   deployment UAT proof that the repository cannot generate on its own.
+- `Lab Evidence`: runtime Prism Central and Prism Element TCP/API authorization
+  proof captured by the `lab-evidence` phase. The page shows endpoint status,
+  probe names, evidence paths, and credential environment variable names without
+  storing secret values.
 - `UAT`: maps documented UAT cases to local evidence records, evidence packs, jobs, backups, and run history without treating partial evidence coverage as completed UAT. The public demo mirrors this view with simulated UAT readiness data.
 - `Pipeline`: visual ZeroTouch flow from source intake through validation, preparation, generation, registry, deploy, verify, and operate.
 - `Jobs`: execution queue, approval controls, job detail pages, and captured live logs.
@@ -77,6 +81,7 @@ Deployment readiness sections:
 - `/api/preflight`: authenticated JSON view of console preflight checks and structured validation evidence.
 - `/api/evidence`: authenticated JSON view of generated evidence pack manifests and archive metadata.
 - `/api/external-validations`: authenticated JSON view of reviewed external validation metadata.
+- `/api/lab-evidence`: authenticated JSON view of redacted Prism lab connectivity and authorization captures.
 - `/api/uat`: authenticated JSON view of documented UAT cases and their local evidence coverage signals.
 - `/api/production-readiness`: authenticated JSON view of the same production gate checks shown in the console.
 

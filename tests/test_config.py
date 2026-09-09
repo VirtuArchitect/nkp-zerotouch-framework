@@ -4,17 +4,77 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
+from base64 import b64encode
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
 TOOL = ROOT / "tools" / "zt_config.py"
+LAB_EVIDENCE_TOOL = ROOT / "tools" / "lab_evidence.py"
 
 
 def run_tool(*args):
     result = subprocess.run([sys.executable, str(TOOL), *args], cwd=ROOT, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
     return result.stdout
+
+
+def local_path(value):
+    path = str(value)
+    if path.startswith("/mnt/") and len(path) > 6 and path[6] == "/":
+        drive = path[5].upper()
+        rest = path[7:].replace("/", "\\")
+        return Path(f"{drive}:\\{rest}")
+    return Path(path)
+
+
+class _LabEvidenceHandler(BaseHTTPRequestHandler):
+    username = "admin"
+    password = "secret-value"
+
+    def _authorized(self):
+        expected = "Basic " + b64encode(f"{self.username}:{self.password}".encode("utf-8")).decode("ascii")
+        return self.headers.get("Authorization") == expected
+
+    def _send_json(self, status, payload):
+        body = json.dumps(payload).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self):
+        if not self._authorized():
+            self._send_json(401, {"error": "unauthorized"})
+            return
+        self._send_json(200, {"status": "ok"})
+
+    def do_POST(self):
+        if not self._authorized():
+            self._send_json(401, {"error": "unauthorized"})
+            return
+        self._send_json(200, {"entities": []})
+
+    def log_message(self, *_args):
+        return
+
+
+class lab_evidence_server:
+    def __enter__(self):
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), _LabEvidenceHandler)
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        host, port = self.server.server_address
+        self.url = f"http://{host}:{port}"
+        return self.url
+
+    def __exit__(self, *_exc):
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=5)
 
 
 def _make_bundle(root):
@@ -387,6 +447,126 @@ def test_secret_env_shell_quotes_values(tmp_path):
     assert "export NUTANIX_USER='admin user'" in output
     assert "export NUTANIX_PASSWORD='$(touch SHOULD_NOT_EXIST)'" in output
     assert 'export ZT_REGISTRY_PASSWORD=' in output
+
+
+def test_lab_evidence_records_redacted_prism_authorization(tmp_path):
+    shutil.rmtree(ROOT / ".zt" / "lab-evidence", ignore_errors=True)
+    shutil.rmtree(ROOT / ".zt" / "external-validations", ignore_errors=True)
+    config = tmp_path / "lab-evidence.yaml"
+    with lab_evidence_server() as endpoint:
+        config.write_text(
+            f"""
+environment:
+  name: lab-evidence-test
+  type: connected
+nkp:
+  version: v2.17.1
+nutanix:
+  prismCentralEndpoint: {endpoint}
+  clusterName: pe-cluster
+cluster:
+  name: lab-evidence-cluster
+  kubernetesVersion: v1.32.3
+""",
+            encoding="utf-8",
+        )
+        env = os.environ.copy()
+        env.update({
+            "NUTANIX_PC_USERNAME": "admin",
+            "NUTANIX_PC_PASSWORD": "secret-value",
+            "NUTANIX_PE_ENDPOINT": endpoint,
+            "NUTANIX_PE_USERNAME": "admin",
+            "NUTANIX_PE_PASSWORD": "secret-value",
+        })
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(LAB_EVIDENCE_TOOL),
+                "--config",
+                str(config),
+                "--write-external-validation",
+            ],
+            cwd=ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+
+    assert result.returncode == 0, result.stderr
+    output = json.loads(result.stdout)
+    assert output["status"] == "pass"
+    evidence_path = local_path(output["evidencePath"])
+    external_path = local_path(output["externalValidationRecords"][0])
+    evidence_text = evidence_path.read_text(encoding="utf-8")
+    external_text = external_path.read_text(encoding="utf-8")
+    evidence = json.loads(evidence_text)
+    external = json.loads(external_text)
+
+    assert evidence["summary"]["authenticatedTargets"] == 2
+    assert all(target["authenticatedApi"]["status"] == "pass" for target in evidence["targets"])
+    assert external["area"] == "prism-authorization"
+    assert external["status"] == "pass"
+    assert "secret-value" not in evidence_text
+    assert "secret-value" not in external_text
+    assert "Authorization" not in evidence_text
+
+
+def test_bash_lab_evidence_phase_invokes_redacted_helper(tmp_path):
+    shutil.rmtree(ROOT / ".zt" / "lab-evidence", ignore_errors=True)
+    scratch = ROOT / ".zt-test" / f"bash-lab-evidence-{os.getpid()}"
+    shutil.rmtree(scratch, ignore_errors=True)
+    scratch.mkdir(parents=True)
+    config = scratch / "bash-lab-evidence.yaml"
+    try:
+        config.write_text(
+            """
+environment:
+  name: bash-lab-evidence
+  type: connected
+nkp:
+  version: v2.17.1
+nutanix:
+  prismCentralEndpoint: http://127.0.0.1:9
+  clusterName: pe-cluster
+cluster:
+  name: bash-lab-evidence-cluster
+  kubernetesVersion: v1.32.3
+""",
+            encoding="utf-8",
+        )
+        env = os.environ.copy()
+        env.update({
+            "NUTANIX_PC_USERNAME": "admin",
+            "NUTANIX_PC_PASSWORD": "secret-value",
+        })
+
+        result = subprocess.run(
+            [
+                "bash",
+                "scripts/zt.sh",
+                "lab-evidence",
+                "--config",
+                config.relative_to(ROOT).as_posix(),
+            ],
+            cwd=ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+
+    assert result.returncode == 1
+    output = json.loads(result.stdout)
+    evidence_text = local_path(output["evidencePath"]).read_text(encoding="utf-8")
+    evidence = json.loads(evidence_text)
+    assert output["status"] == "fail"
+    assert evidence["summary"]["authenticatedTargets"] == 0
+    assert "secret-value" not in result.stdout
+    assert "secret-value" not in evidence_text
 
 
 def test_operator_controlled_docs_baseline_is_present():

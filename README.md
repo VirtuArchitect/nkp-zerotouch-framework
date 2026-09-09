@@ -15,7 +15,7 @@ Live demo: https://virtuarchitect.github.io/nkp-zerotouch-framework/
 | Area | Status | Notes |
 | --- | --- | --- |
 | Live demo | Simulated | GitHub Pages prototype for reviewing console workflows. It does not provision infrastructure. |
-| Local CLI phases | Implemented baseline | Validation, prepare, generate, registry, deploy, verify, backup, upgrade, destroy, and run capture are available through `scripts/zt.*`. |
+| Local CLI phases | Implemented baseline | Validation, prepare, generate, registry, deploy, verify, backup, upgrade, destroy, lab-evidence, and run capture are available through `scripts/zt.*`. |
 | Local dashboard | Implemented baseline | The console reads local `.zt` state, creates safe jobs, gates apply jobs, and records approvals/audit events. |
 | Live infrastructure apply | Guarded | Apply-class actions require explicit flags, approvals, real NKP bundle paths, Prism Central details, registry access, and operator review. |
 | Enterprise integrations | Probed baseline | Postgres, Vault, OIDC, and session-store settings can be modeled and health-checked; full production integration depends on local configuration. |
@@ -158,7 +158,7 @@ The main phase sequence is:
 
 See `docs/phases.md` for details.
 
-Additional operational phases are available for secrets, backup, upgrade planning, guarded destroy planning, and CI smoke checks. See `docs/operations.md`.
+Additional operational phases are available for secrets, backup, lab evidence capture, upgrade planning, guarded destroy planning, and CI smoke checks. See `docs/operations.md`.
 
 ## Documentation
 

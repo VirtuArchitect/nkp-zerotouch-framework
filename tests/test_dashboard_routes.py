@@ -299,9 +299,24 @@ def request(opener, base_url, path, data=None, allow_error=False, timeout=30, he
             exc.close()
 
 
-def test_dashboard_pages_and_api_routes():
+def test_dashboard_pages_and_api_routes(tmp_path):
+    original_zt = app.ZT
+    original_settings = app.SETTINGS
+    original_jobs = app.JOBS
+    original_audit = app.AUDIT
+    original_locks = app.LOCKS
+    original_change_records = app.CHANGE_RECORDS
+    original_sessions = dict(app.SESSIONS)
+    original_failures = dict(app.LOGIN_FAILURES)
+    app.ZT = tmp_path / ".zt"
+    app.SETTINGS = app.ZT / "settings"
+    app.JOBS = app.ZT / "jobs"
+    app.AUDIT = app.ZT / "audit"
+    app.LOCKS = app.ZT / "locks"
+    app.CHANGE_RECORDS = app.ZT / "change-records"
+    app.SESSIONS.clear()
+    app.LOGIN_FAILURES.clear()
     rbac_path = app.SETTINGS / "rbac.json"
-    original = rbac_path.read_text(encoding="utf-8") if rbac_path.exists() else None
     rbac = app.default_rbac()
     account = {
         "username": "dashboard-smoke",
@@ -327,7 +342,7 @@ def test_dashboard_pages_and_api_routes():
         status, _, _ = request(no_redirect_opener, base_url, "/login", {"username": "dashboard-smoke", "password": "DashboardSmoke-Local-123!"}, allow_error=True)
         assert status == 303
 
-        page_paths = ["/", "/setup", "/plan-review", "/kubeconfig", "/drift", "/uat", "/external-validations", "/locks", "/change-records", "/backups", "/restore", "/evidence", "/production-readiness", "/release-channels"]
+        page_paths = ["/", "/setup", "/plan-review", "/kubeconfig", "/drift", "/uat", "/external-validations", "/lab-evidence", "/locks", "/change-records", "/backups", "/restore", "/evidence", "/production-readiness", "/release-channels"]
         configs = app.env_configs()
         if configs:
             page_paths.append(f"/environment/view?config={urllib.parse.quote(str(configs[0]))}")
@@ -339,7 +354,7 @@ def test_dashboard_pages_and_api_routes():
             assert "NKP ZeroTouch" in body
             assert "data-theme-toggle" in body
 
-        for path in ["/api/status", "/api/preflight", "/api/evidence", "/api/external-validations", "/api/uat", "/api/environments", "/api/jobs", "/api/locks", "/api/change-records", "/api/production-readiness"]:
+        for path in ["/api/status", "/api/preflight", "/api/evidence", "/api/external-validations", "/api/lab-evidence", "/api/uat", "/api/environments", "/api/jobs", "/api/locks", "/api/change-records", "/api/production-readiness"]:
             status, content_type, body = request(opener, base_url, path)
             assert status == 200
             assert "application/json" in content_type
@@ -347,10 +362,16 @@ def test_dashboard_pages_and_api_routes():
     finally:
         server.shutdown()
         server.server_close()
-        if original is None:
-            rbac_path.unlink(missing_ok=True)
-        else:
-            rbac_path.write_text(original, encoding="utf-8")
+        app.ZT = original_zt
+        app.SETTINGS = original_settings
+        app.JOBS = original_jobs
+        app.AUDIT = original_audit
+        app.LOCKS = original_locks
+        app.CHANGE_RECORDS = original_change_records
+        app.SESSIONS.clear()
+        app.SESSIONS.update(original_sessions)
+        app.LOGIN_FAILURES.clear()
+        app.LOGIN_FAILURES.update(original_failures)
 
 
 def test_preflight_evidence_records_summarize_endpoint_status(tmp_path):

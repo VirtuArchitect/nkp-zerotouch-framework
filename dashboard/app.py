@@ -39,6 +39,7 @@ CHANGE_RECORDS = ZT / "change-records"
 ENV_DIR = ROOT / "configs" / "environments"
 SESSIONS = {}
 LOGIN_FAILURES = {}
+CONTEXT_CACHE = {}
 POSTGRES_SESSION_TABLE = "zt_console_sessions"
 POSTGRES_AUDIT_TABLE = "zt_console_audit_events"
 try:
@@ -84,6 +85,7 @@ VIEW_PATHS = {
     "network": "/network",
     "preflight": "/preflight",
     "external-validations": "/external-validations",
+    "lab-evidence": "/lab-evidence",
     "pipeline": "/pipeline",
     "jobs": "/jobs",
     "actions": "/actions",
@@ -1119,6 +1121,63 @@ def external_validation_records(limit=100):
     return records
 
 
+def lab_evidence_records(limit=100):
+    root = ZT / "lab-evidence"
+    if not root.exists():
+        return []
+    records = []
+    files = sorted(root.glob("*/lab-evidence.json"), key=lambda item: item.stat().st_mtime, reverse=True)
+    for path in files:
+        data = read_json(path)
+        if not isinstance(data, dict):
+            continue
+        summary = data.get("summary", {})
+        if not isinstance(summary, dict):
+            summary = {}
+        targets = []
+        for target in data.get("targets", []):
+            if not isinstance(target, dict):
+                continue
+            tcp = target.get("tcp", {})
+            auth = target.get("authenticatedApi", {})
+            credential_source = target.get("credentialSource", {})
+            targets.append({
+                "name": str(target.get("name", "")),
+                "kind": safe_key(target.get("kind", "")),
+                "endpoint": str(target.get("endpoint", "")),
+                "tcpStatus": safe_key(tcp.get("status", "warn")) if isinstance(tcp, dict) else "warn",
+                "tcpDetail": str(tcp.get("detail", "")) if isinstance(tcp, dict) else "",
+                "authStatus": safe_key(auth.get("status", "warn")) if isinstance(auth, dict) else "warn",
+                "authHttpStatus": auth.get("httpStatus") if isinstance(auth, dict) else None,
+                "authCandidate": str(auth.get("candidate", "")) if isinstance(auth, dict) else "",
+                "authDetail": str(auth.get("detail", "")) if isinstance(auth, dict) else "",
+                "usernameEnv": str(credential_source.get("usernameEnv", "")) if isinstance(credential_source, dict) else "",
+                "passwordEnv": str(credential_source.get("passwordEnv", "")) if isinstance(credential_source, dict) else "",
+                "valuesRecorded": bool(credential_source.get("valuesRecorded", True)) if isinstance(credential_source, dict) else True,
+                "tlsVerification": str(target.get("tlsVerification", "")),
+            })
+        records.append({
+            "environment": str(data.get("environment", "")),
+            "type": str(data.get("type", "")),
+            "cluster": str(data.get("cluster", "")),
+            "config": str(data.get("config", "")),
+            "status": safe_key(data.get("status", "warn")),
+            "capturedAt": str(data.get("capturedAt", "")),
+            "summary": {
+                "targets": int(summary.get("targets", len(targets)) or 0),
+                "authenticatedTargets": int(summary.get("authenticatedTargets", 0) or 0),
+                "reachableButUnauthenticatedTargets": int(summary.get("reachableButUnauthenticatedTargets", 0) or 0),
+                "failedTargets": int(summary.get("failedTargets", 0) or 0),
+                "secretValuesRecorded": bool(summary.get("secretValuesRecorded", False)),
+            },
+            "targets": targets,
+            "path": str(path),
+        })
+        if len(records) >= limit:
+            break
+    return records
+
+
 def external_validation_matches(record, env_name):
     scope = safe_key(record.get("environment", ""))
     return scope in {"", "global", safe_key(env_name)}
@@ -1330,6 +1389,7 @@ ROUTE_PERMISSIONS = [
     ("/evidence", "artifacts"),
     ("/production-readiness", "preflight"),
     ("/external-validations", "health"),
+    ("/lab-evidence", "health"),
     ("/release-channels", "approval-policy"),
     ("/api", "health"),
     ("/sources", "sources"),
@@ -2912,6 +2972,7 @@ def page(title, body, active="environments", user=None):
     <a class="{nav_class('setup')}" href="{VIEW_PATHS['setup']}">Setup Wizard</a>
     <a class="{nav_class('preflight')}" href="{VIEW_PATHS['preflight']}">Preflight</a>
     <a class="{nav_class('external-validations')}" href="{VIEW_PATHS['external-validations']}">External Evidence</a>
+    <a class="{nav_class('lab-evidence')}" href="{VIEW_PATHS['lab-evidence']}">Lab Evidence</a>
     <a class="{nav_class('drift')}" href="{VIEW_PATHS['drift']}">Drift</a>
     <a class="{nav_class('uat')}" href="{VIEW_PATHS['uat']}">UAT</a>
     <a class="{nav_class('production-readiness')}" href="{VIEW_PATHS['production-readiness']}">Production Gate</a>
@@ -3583,6 +3644,9 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if parsed.path == "/api/external-validations":
                 self.send_json({"externalValidations": external_validation_records(200)})
+                return
+            if parsed.path == "/api/lab-evidence":
+                self.send_json({"labEvidence": lab_evidence_records(200)})
                 return
             if parsed.path == "/api/uat":
                 self.send_json(uat_payload())
@@ -4573,6 +4637,57 @@ class Handler(BaseHTTPRequestHandler):
 <div class="notice">For production channels, Prism authorization and deployment UAT external validations must be recorded as passing before the production readiness gate is clear. Store evidence references only; do not paste passwords, tokens, or secret values.</div>
 """
             self.send_html(page("External Validation Evidence - NKP ZeroTouch Framework", body, "external-validations"))
+            return
+        if parsed.path == "/lab-evidence":
+            records = lab_evidence_records(200)
+            latest = records[0] if records else {}
+            passed_records = sum(1 for record in records if record.get("status") == "pass")
+            authenticated = sum(int(record.get("summary", {}).get("authenticatedTargets", 0) or 0) for record in records)
+            failed = sum(int(record.get("summary", {}).get("failedTargets", 0) or 0) for record in records)
+            target_rows = []
+            for record in records:
+                for target in record.get("targets", []):
+                    tcp_class = "ok" if target.get("tcpStatus") == "pass" else "warn"
+                    auth_class = "ok" if target.get("authStatus") == "pass" else ("warn" if target.get("authStatus") == "warn" else "fail")
+                    http_status = target.get("authHttpStatus")
+                    auth_detail = f"HTTP {http_status}" if http_status else target.get("authDetail", "")
+                    target_rows.append(
+                        f"<tr><td><div class='env-name'>{html.escape(record.get('environment', ''))}</div><div class='env-file'>{html.escape(record.get('capturedAt', ''))}</div></td>"
+                        f"<td><div class='env-name'>{html.escape(target.get('name', ''))}</div><div class='env-file'>{html.escape(target.get('endpoint', ''))}</div></td>"
+                        f"<td><span class='chip {tcp_class}'>{html.escape(target.get('tcpStatus', 'warn'))}</span><div class='env-file'>{html.escape(target.get('tcpDetail', ''))}</div></td>"
+                        f"<td><span class='chip {auth_class}'>{html.escape(target.get('authStatus', 'warn'))}</span><div class='env-file'>{html.escape(auth_detail)}</div></td>"
+                        f"<td>{html.escape(target.get('authCandidate', ''))}<div class='env-file'>credential envs: {html.escape(target.get('usernameEnv', ''))}, {html.escape(target.get('passwordEnv', ''))}</div></td></tr>"
+                    )
+            evidence_rows = []
+            for record in records:
+                status = record.get("status", "warn")
+                chip_class = "ok" if status == "pass" else ("warn" if status == "warn" else "fail")
+                summary = record.get("summary", {})
+                evidence_rows.append(
+                    f"<tr><td><div class='env-name'>{html.escape(record.get('environment', ''))}</div><div class='env-file'>{html.escape(record.get('config', ''))}</div></td>"
+                    f"<td><span class='chip {chip_class}'>{html.escape(status)}</span><div class='env-file'>{html.escape(record.get('capturedAt', ''))}</div></td>"
+                    f"<td>{html.escape(str(summary.get('authenticatedTargets', 0)))} authenticated, {html.escape(str(summary.get('reachableButUnauthenticatedTargets', 0)))} reachable without auth, {html.escape(str(summary.get('failedTargets', 0)))} failed</td>"
+                    f"<td><code>{html.escape(record.get('path', ''))}</code><div class='env-file'>secret values recorded: {html.escape(str(summary.get('secretValuesRecorded', False)).lower())}</div></td></tr>"
+                )
+            body = f"""
+<section class="summary-grid">
+  {metric_card("Evidence Runs", len(records), "redacted lab captures", "/lab-evidence")}
+  {metric_card("Passing Runs", passed_records, "captures with all targets authenticated", "/lab-evidence")}
+  {metric_card("Authenticated", authenticated, "Prism targets with API proof", "/lab-evidence")}
+  {metric_card("Failed Targets", failed, "targets needing operator action", "/lab-evidence")}
+</section>
+<div class="section-head">
+  <div>
+    <h2>Lab Evidence</h2>
+    <div class="section-copy">Runtime Prism connectivity and authorization proof captured by <code>lab-evidence</code> without storing secret values.</div>
+  </div>
+</div>
+<section class="panel"><table><thead><tr><th>Environment</th><th>Target</th><th>TCP</th><th>Authenticated API</th><th>Probe</th></tr></thead><tbody>{''.join(target_rows) or '<tr><td colspan="5" class="muted">No lab evidence yet. Run lab-evidence with runtime credential environment variables.</td></tr>'}</tbody></table></section>
+<div class="section-head"><div><h2>Evidence Files</h2><div class="section-copy">Latest redacted evidence metadata under <code>.zt/lab-evidence/</code>.</div></div></div>
+<section class="panel"><table><thead><tr><th>Environment</th><th>Status</th><th>Summary</th><th>Evidence Path</th></tr></thead><tbody>{''.join(evidence_rows) or '<tr><td colspan="4" class="muted">No lab evidence files recorded yet.</td></tr>'}</tbody></table></section>
+<div class="notice">Latest capture: {html.escape(latest.get('capturedAt', 'not captured'))}. Store credentials in runtime environment variables only; this page exposes endpoint reachability, API status, probe names, and file references.</div>
+"""
+            self.send_html(page("Lab Evidence - NKP ZeroTouch Framework", body, "lab-evidence"))
             return
         if parsed.path == "/preflight":
             checks = preflight_checks()
@@ -5863,16 +5978,32 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def read_json_from_context(config):
-    result = subprocess.run(
-        [sys.executable, str(ROOT / "tools" / "zt_config.py"), "context", "--config", str(config)],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
+    config = Path(config)
+    try:
+        key = (str(config.resolve()), config.stat().st_mtime)
+    except OSError:
+        return {"environmentName": config.stem, "environmentType": "unknown"}
+    cached = CONTEXT_CACHE.get(key)
+    if cached is not None:
+        return dict(cached)
+    try:
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "tools" / "zt_config.py"), "context", "--config", str(config)],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return {"environmentName": config.stem, "environmentType": "unknown"}
     if result.returncode != 0:
         return {"environmentName": config.stem, "environmentType": "unknown"}
-    return json.loads(result.stdout)
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return {"environmentName": config.stem, "environmentType": "unknown"}
+    CONTEXT_CACHE[key] = data
+    return dict(data)
 
 
 def main():
