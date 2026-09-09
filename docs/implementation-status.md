@@ -14,6 +14,7 @@ This maps the public-readiness and real-deployment tasks to the repository featu
 | Strengthen live verification | Implemented baseline | `verify` writes summary, component health, structured evidence, and runs `kubectl`/NKP queries when kubeconfig exists |
 | Package lab evidence | Implemented baseline | `evidence` phase creates a redacted review pack and archive from preflight, generated, report, log, state metadata, and run evidence |
 | Capture live lab evidence | Implemented baseline | `lab-evidence` phase probes Prism Central and optional Prism Element TCP/API authentication with runtime credentials, writes redacted `.zt/lab-evidence` metadata, can create `prism-authorization` external validation records, and exposes captures through the console Lab Evidence page/API |
+| Capture deployment UAT evidence | Implemented baseline | `deployment-evidence` phase aggregates preflight, lab evidence, plan review, job/change, run, backup, verification, evidence-pack, and external validation signals into redacted `.zt/deployment-evidence` records exposed on the UAT console page/API |
 | Confirm generated NKP flags | Supported | generated `deploy.sh` and runbooks are review points |
 | Decide upgrade/destroy automation | Guarded | plan-first `upgrade` and `destroy` phases |
 | Add real CI strategy | Implemented baseline | GitHub Actions syntax/helper/security/package checks and all-environment config validation |

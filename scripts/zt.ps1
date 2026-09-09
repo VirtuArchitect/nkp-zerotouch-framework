@@ -1,6 +1,6 @@
 param(
     [Parameter(Position = 0)]
-    [ValidateSet("validate", "prepare", "generate", "registry", "deploy", "verify", "kubeconfig", "secrets", "backup", "upgrade", "destroy", "runs", "evidence", "lab-evidence", "ci")]
+    [ValidateSet("validate", "prepare", "generate", "registry", "deploy", "verify", "kubeconfig", "secrets", "backup", "upgrade", "destroy", "runs", "evidence", "lab-evidence", "deployment-evidence", "ci")]
     [string]$Command = "validate",
 
     [Parameter(Mandatory = $true)]
@@ -1235,6 +1235,21 @@ function Invoke-LabEvidence {
     $output
 }
 
+function Invoke-DeploymentEvidence {
+    param([string]$ConfigPath)
+
+    $toolPath = Join-Path $PSScriptRoot "..\tools\deployment_evidence.py"
+    $arguments = @("--config", $ConfigPath)
+    if ($WriteExternalValidation) {
+        $arguments += "--write-external-validation"
+    }
+    $output = & python $toolPath @arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "Deployment evidence phase failed: $($output -join "`n")"
+    }
+    $output
+}
+
 function Invoke-Ci {
     param([string]$ConfigPath)
 
@@ -1296,6 +1311,9 @@ switch ($Command) {
     }
     "lab-evidence" {
         Invoke-LabEvidence -ConfigPath $Config
+    }
+    "deployment-evidence" {
+        Invoke-DeploymentEvidence -ConfigPath $Config
     }
     "ci" {
         Invoke-Ci -ConfigPath $Config

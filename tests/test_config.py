@@ -13,6 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 TOOL = ROOT / "tools" / "zt_config.py"
 LAB_EVIDENCE_TOOL = ROOT / "tools" / "lab_evidence.py"
+DEPLOYMENT_EVIDENCE_TOOL = ROOT / "tools" / "deployment_evidence.py"
 
 
 def run_tool(*args):
@@ -569,6 +570,80 @@ cluster:
     assert "secret-value" not in evidence_text
 
 
+def test_deployment_evidence_records_controlled_uat_signal_coverage(tmp_path):
+    shutil.rmtree(ROOT / ".zt" / "deployment-evidence", ignore_errors=True)
+    shutil.rmtree(ROOT / ".zt" / "external-validations", ignore_errors=True)
+    env_name = f"deployment-evidence-{os.getpid()}"
+    config = tmp_path / "deployment-evidence.yaml"
+    config.write_text(
+        f"""
+environment:
+  name: {env_name}
+  type: connected
+  provider: nutanix-ahv
+nkp:
+  version: v2.17.1
+  bundleType: standard
+  bundlePath: /tmp/nkp
+nutanix:
+  prismCentralEndpoint: https://pc.example.test:9440
+cluster:
+  name: {env_name}-cluster
+  controlPlaneEndpointIp: 10.44.0.50
+""",
+        encoding="utf-8",
+    )
+    state_root = ROOT / ".zt" / "environments" / env_name
+    (ROOT / ".zt" / "preflight").mkdir(parents=True, exist_ok=True)
+    (ROOT / ".zt" / "preflight" / f"{env_name}.json").write_text(
+        json.dumps({"summary": {"failures": 0, "warnings": 0}}),
+        encoding="utf-8",
+    )
+    (state_root / "review").mkdir(parents=True, exist_ok=True)
+    (state_root / "review" / "deploy-plan-review.json").write_text(
+        json.dumps({"status": "approved", "reviewedAt": "2026-09-09T14:00:00Z"}),
+        encoding="utf-8",
+    )
+    (state_root / "reports").mkdir(parents=True, exist_ok=True)
+    (state_root / "reports" / "verification-evidence.json").write_text(
+        json.dumps({"status": "pass"}),
+        encoding="utf-8",
+    )
+    lab_dir = ROOT / ".zt" / "lab-evidence" / f"{env_name}-20260909-140000"
+    lab_dir.mkdir(parents=True, exist_ok=True)
+    (lab_dir / "lab-evidence.json").write_text(
+        json.dumps({"environment": env_name, "status": "pass", "summary": {"authenticatedTargets": 2}}),
+        encoding="utf-8",
+    )
+    job_dir = ROOT / ".zt" / "jobs" / f"job-{env_name}"
+    job_dir.mkdir(parents=True, exist_ok=True)
+    (job_dir / "job.json").write_text(
+        json.dumps({"id": f"job-{env_name}", "environment": env_name, "action": "deploy", "status": "succeeded", "createdAt": "2026-09-09T14:00:00Z"}),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [sys.executable, str(DEPLOYMENT_EVIDENCE_TOOL), "--config", str(config), "--write-external-validation"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    output = json.loads(result.stdout)
+    assert output["status"] == "pass"
+    evidence_text = local_path(output["evidencePath"]).read_text(encoding="utf-8")
+    evidence = json.loads(evidence_text)
+    assert evidence["productionValidated"] is False
+    assert evidence["summary"]["requiredSignalsPassed"] == evidence["summary"]["requiredSignals"]
+    assert evidence["redaction"]["secretValuesRecorded"] is False
+    assert "secret-value" not in evidence_text
+    external_text = local_path(output["externalValidationRecords"][0]).read_text(encoding="utf-8")
+    external = json.loads(external_text)
+    assert external["area"] == "deployment-uat"
+    assert external["status"] == "pass"
+
+
 def test_operator_controlled_docs_baseline_is_present():
     expected_tag = f"v{(ROOT / 'VERSION').read_text(encoding='utf-8').strip()}"
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
@@ -653,4 +728,6 @@ def test_live_demo_surfaces_uat_readiness_boundary():
     assert 'data-view="uat"' in demo_index
     assert "UAT evidence is an operational readiness signal, not production validation." in demo_index
     assert "const uatCases" in demo_app
+    assert "Deployment Evidence Records" in demo_index
+    assert "const deploymentEvidence" in demo_app
     assert "renderUat();" in demo_app

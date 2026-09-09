@@ -299,6 +299,17 @@ def request(opener, base_url, path, data=None, allow_error=False, timeout=30, he
             exc.close()
 
 
+def test_dashboard_evidence_actions_write_external_validation_metadata(tmp_path):
+    config = tmp_path / "env.yaml"
+    config.write_text("environment:\n  name: command-test\n", encoding="utf-8")
+
+    lab_command = app.action_command("lab-evidence", config)
+    deployment_command = app.action_command("deployment-evidence", config)
+
+    assert "--write-external-validation" in lab_command or "-WriteExternalValidation" in lab_command
+    assert "--write-external-validation" in deployment_command or "-WriteExternalValidation" in deployment_command
+
+
 def test_dashboard_pages_and_api_routes(tmp_path):
     original_zt = app.ZT
     original_settings = app.SETTINGS
@@ -354,7 +365,7 @@ def test_dashboard_pages_and_api_routes(tmp_path):
             assert "NKP ZeroTouch" in body
             assert "data-theme-toggle" in body
 
-        for path in ["/api/status", "/api/preflight", "/api/evidence", "/api/external-validations", "/api/lab-evidence", "/api/uat", "/api/environments", "/api/jobs", "/api/locks", "/api/change-records", "/api/production-readiness"]:
+        for path in ["/api/status", "/api/preflight", "/api/evidence", "/api/external-validations", "/api/lab-evidence", "/api/deployment-evidence", "/api/uat", "/api/environments", "/api/jobs", "/api/locks", "/api/change-records", "/api/production-readiness"]:
             status, content_type, body = request(opener, base_url, path)
             assert status == 200
             assert "application/json" in content_type

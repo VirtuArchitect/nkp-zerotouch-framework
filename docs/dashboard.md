@@ -23,6 +23,8 @@ Dashboard-safe actions:
 - `backup`: creates and immediately starts a safe job
 - `runs`: creates and immediately starts a safe job
 - `evidence`: creates and immediately starts a safe job
+- `lab-evidence`: creates and immediately starts a safe job
+- `deployment-evidence`: creates and immediately starts a safe job
 
 Apply/destructive actions use the controlled CLI window and require approval:
 
@@ -70,7 +72,7 @@ Deployment readiness sections:
   proof captured by the `lab-evidence` phase. The page shows endpoint status,
   probe names, evidence paths, and credential environment variable names without
   storing secret values.
-- `UAT`: maps documented UAT cases to local evidence records, evidence packs, jobs, backups, and run history without treating partial evidence coverage as completed UAT. The public demo mirrors this view with simulated UAT readiness data.
+- `UAT`: maps documented UAT cases to local evidence records, evidence packs, jobs, backups, run history, and `deployment-evidence` phase records without treating partial evidence coverage as completed UAT. The public demo mirrors this view with simulated UAT readiness data.
 - `Pipeline`: visual ZeroTouch flow from source intake through validation, preparation, generation, registry, deploy, verify, and operate.
 - `Jobs`: execution queue, approval controls, job detail pages, and captured live logs.
 - `Health`: runner, tool, bundle, Prism, registry, credential environment variables, enterprise integration probes, and state-path readiness.
@@ -82,6 +84,7 @@ Deployment readiness sections:
 - `/api/evidence`: authenticated JSON view of generated evidence pack manifests and archive metadata.
 - `/api/external-validations`: authenticated JSON view of reviewed external validation metadata.
 - `/api/lab-evidence`: authenticated JSON view of redacted Prism lab connectivity and authorization captures.
+- `/api/deployment-evidence`: authenticated JSON view of controlled-UAT deployment evidence records and signal coverage.
 - `/api/uat`: authenticated JSON view of documented UAT cases and their local evidence coverage signals.
 - `/api/production-readiness`: authenticated JSON view of the same production gate checks shown in the console.
 
