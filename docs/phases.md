@@ -111,3 +111,26 @@ and an archive when native archive tooling is available.
 The evidence pack excludes raw `state/kubeconfig` and local secret values.
 Operators should still review generated plans, logs, endpoint metadata, and
 cluster topology before sharing the pack outside the lab.
+
+## lab-evidence
+
+Captures redacted live lab connectivity and authorization evidence under
+`.zt/lab-evidence/`.
+
+The phase probes Prism Central from the environment config or
+`NUTANIX_PC_ENDPOINT`, and optionally probes Prism Element from
+`NUTANIX_PE_ENDPOINT` or `--prism-element` / `-PrismElement`. Credentials must
+come from runtime environment variables:
+
+- `NUTANIX_PC_USERNAME`
+- `NUTANIX_PC_PASSWORD`
+- `NUTANIX_PE_USERNAME`
+- `NUTANIX_PE_PASSWORD`
+
+The evidence records TCP reachability, authenticated API status, HTTP status
+codes, probe names, and credential environment variable names only. It does not
+record usernames, passwords, tokens, or response bodies.
+
+Use `--write-external-validation` or `-WriteExternalValidation` to create a
+redacted `prism-authorization` external validation record when authentication
+succeeds.

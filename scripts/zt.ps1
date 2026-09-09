@@ -1,6 +1,6 @@
 param(
     [Parameter(Position = 0)]
-    [ValidateSet("validate", "prepare", "generate", "registry", "deploy", "verify", "kubeconfig", "secrets", "backup", "upgrade", "destroy", "runs", "evidence", "ci")]
+    [ValidateSet("validate", "prepare", "generate", "registry", "deploy", "verify", "kubeconfig", "secrets", "backup", "upgrade", "destroy", "runs", "evidence", "lab-evidence", "ci")]
     [string]$Command = "validate",
 
     [Parameter(Mandatory = $true)]
@@ -17,6 +17,10 @@ param(
     [switch]$ConfirmDestroy
     ,
     [string]$Kubeconfig
+    ,
+    [string]$PrismElement
+    ,
+    [switch]$WriteExternalValidation
 )
 
 $ErrorActionPreference = "Stop"
@@ -1213,6 +1217,24 @@ This pack is intended for lab review and change evidence. It excludes raw kubeco
     Write-Check -Status "PASS" -Message "Created evidence pack: $evidenceDir"
 }
 
+function Invoke-LabEvidence {
+    param([string]$ConfigPath)
+
+    $toolPath = Join-Path $PSScriptRoot "..\tools\lab_evidence.py"
+    $arguments = @("--config", $ConfigPath)
+    if ($PrismElement) {
+        $arguments += @("--prism-element", $PrismElement)
+    }
+    if ($WriteExternalValidation) {
+        $arguments += "--write-external-validation"
+    }
+    $output = & python $toolPath @arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "Lab evidence phase failed: $($output -join "`n")"
+    }
+    $output
+}
+
 function Invoke-Ci {
     param([string]$ConfigPath)
 
@@ -1271,6 +1293,9 @@ switch ($Command) {
     }
     "evidence" {
         Invoke-Evidence -ConfigPath $Config
+    }
+    "lab-evidence" {
+        Invoke-LabEvidence -ConfigPath $Config
     }
     "ci" {
         Invoke-Ci -ConfigPath $Config

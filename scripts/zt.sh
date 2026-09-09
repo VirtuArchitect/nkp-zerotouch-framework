@@ -9,6 +9,8 @@ secrets_path=""
 target_bundle=""
 confirm_destroy="false"
 kubeconfig_source=""
+prism_element_endpoint=""
+write_external_validation="false"
 failures=0
 warnings=0
 python_bin="${PYTHON_BIN:-}"
@@ -28,7 +30,7 @@ fi
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    validate|prepare|generate|registry|deploy|verify|kubeconfig|secrets|backup|upgrade|destroy|runs|evidence|ci)
+    validate|prepare|generate|registry|deploy|verify|kubeconfig|secrets|backup|upgrade|destroy|runs|evidence|lab-evidence|ci)
       command_name="$1"
       shift
       ;;
@@ -59,6 +61,14 @@ while [[ $# -gt 0 ]]; do
     --kubeconfig)
       kubeconfig_source="${2:-}"
       shift 2
+      ;;
+    --prism-element)
+      prism_element_endpoint="${2:-}"
+      shift 2
+      ;;
+    --write-external-validation)
+      write_external_validation="true"
+      shift
       ;;
     *)
       echo "Unknown argument: $1" >&2
@@ -893,6 +903,18 @@ PY
   check PASS "Created evidence pack: $evidence_dir"
 }
 
+lab_evidence_phase() {
+  load_context
+  local args=("./tools/lab_evidence.py" "--config" "$config_path")
+  if [[ -n "$prism_element_endpoint" ]]; then
+    args+=("--prism-element" "$prism_element_endpoint")
+  fi
+  if [[ "$write_external_validation" == "true" ]]; then
+    args+=("--write-external-validation")
+  fi
+  "$python_bin" "${args[@]}"
+}
+
 ci_phase() {
   check INFO "Running local CI smoke checks."
   bash -n ./scripts/zt.sh
@@ -1027,6 +1049,9 @@ case "$command_name" in
     ;;
   evidence)
     evidence_phase
+    ;;
+  lab-evidence)
+    lab_evidence_phase
     ;;
   ci)
     ci_phase

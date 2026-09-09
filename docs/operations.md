@@ -105,3 +105,45 @@ Output:
 The pack excludes raw kubeconfig and local secret values. Review the archive
 before sharing because generated plans and logs can still contain environment
 names, endpoints, VIPs, and topology.
+
+## lab-evidence
+
+Captures live lab connectivity and authorization proof without storing secrets.
+
+PowerShell:
+
+```powershell
+$env:NUTANIX_PC_ENDPOINT = "https://pc.lab.example:9440"
+$env:NUTANIX_PC_USERNAME = "admin"
+$env:NUTANIX_PC_PASSWORD = "<runtime-only>"
+$env:NUTANIX_PE_ENDPOINT = "https://pe.lab.example:9440"
+$env:NUTANIX_PE_USERNAME = "admin"
+$env:NUTANIX_PE_PASSWORD = "<runtime-only>"
+.\scripts\zt.ps1 lab-evidence -Config .\configs\environments\connected.example.yaml -WriteExternalValidation
+```
+
+Bash:
+
+```bash
+export NUTANIX_PC_ENDPOINT="https://pc.lab.example:9440"
+export NUTANIX_PC_USERNAME="admin"
+export NUTANIX_PC_PASSWORD="<runtime-only>"
+export NUTANIX_PE_ENDPOINT="https://pe.lab.example:9440"
+export NUTANIX_PE_USERNAME="admin"
+export NUTANIX_PE_PASSWORD="<runtime-only>"
+./scripts/zt.sh lab-evidence --config ./configs/environments/connected.example.yaml --write-external-validation
+```
+
+Output:
+
+```text
+.zt/lab-evidence/<environment>-<timestamp>/
+  README.md
+  lab-evidence.json
+.zt/external-validations/ev-*.json
+```
+
+The external validation record is created only when at least one Prism target
+authenticates successfully. Evidence files include endpoints, probe names, HTTP
+status codes, timing, and credential environment variable names; they never
+include secret values or response bodies.
