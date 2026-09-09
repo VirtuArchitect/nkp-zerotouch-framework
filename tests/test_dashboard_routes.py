@@ -310,6 +310,19 @@ def test_dashboard_evidence_actions_write_external_validation_metadata(tmp_path)
     assert "--write-external-validation" in deployment_command or "-WriteExternalValidation" in deployment_command
 
 
+def test_sidebar_prioritizes_operational_console_navigation():
+    shell = app.page("Navigation", "<h2>Body</h2>", "environments")
+
+    assert "Operate" in shell
+    assert "Assure" in shell
+    assert "Evidence" in shell
+    assert "Admin" in shell
+    assert 'href="/settings">Settings</a>' in shell
+    assert 'href="/settings/new-environment">New Environment</a>' not in shell
+    assert 'href="/settings/providers">Providers</a>' not in shell
+    assert 'href="/network">Network</a>' not in shell
+
+
 def test_dashboard_pages_and_api_routes(tmp_path):
     original_zt = app.ZT
     original_settings = app.SETTINGS
@@ -353,7 +366,7 @@ def test_dashboard_pages_and_api_routes(tmp_path):
         status, _, _ = request(no_redirect_opener, base_url, "/login", {"username": "dashboard-smoke", "password": "DashboardSmoke-Local-123!"}, allow_error=True)
         assert status == 303
 
-        page_paths = ["/", "/setup", "/plan-review", "/kubeconfig", "/drift", "/uat", "/external-validations", "/lab-evidence", "/locks", "/change-records", "/backups", "/restore", "/evidence", "/production-readiness", "/release-channels"]
+        page_paths = ["/", "/setup", "/settings", "/plan-review", "/kubeconfig", "/drift", "/uat", "/external-validations", "/lab-evidence", "/locks", "/change-records", "/backups", "/restore", "/evidence", "/production-readiness", "/release-channels"]
         configs = app.env_configs()
         if configs:
             page_paths.append(f"/environment/view?config={urllib.parse.quote(str(configs[0]))}")
@@ -379,6 +392,81 @@ def test_dashboard_pages_and_api_routes(tmp_path):
         app.AUDIT = original_audit
         app.LOCKS = original_locks
         app.CHANGE_RECORDS = original_change_records
+        app.SESSIONS.clear()
+        app.SESSIONS.update(original_sessions)
+        app.LOGIN_FAILURES.clear()
+        app.LOGIN_FAILURES.update(original_failures)
+
+
+def test_setup_save_persists_first_run_configuration(tmp_path):
+    original_zt = app.ZT
+    original_settings = app.SETTINGS
+    original_sessions = dict(app.SESSIONS)
+    original_failures = dict(app.LOGIN_FAILURES)
+    app.ZT = tmp_path / ".zt"
+    app.SETTINGS = app.ZT / "settings"
+    app.SESSIONS.clear()
+    app.LOGIN_FAILURES.clear()
+    rbac = app.default_rbac()
+    account = {
+        "username": "setup-admin",
+        "displayName": "Setup Admin",
+        "role": "Admin",
+        "status": "active",
+    }
+    account.update(app.password_record("SetupSmoke-Local-123!"))
+    rbac["accounts"] = [account]
+    app.write_json(app.SETTINGS / "rbac.json", rbac)
+
+    server = app.ThreadingHTTPServer(("127.0.0.1", 0), app.Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base_url = f"http://127.0.0.1:{server.server_address[1]}"
+    cookie_jar = http.cookiejar.CookieJar()
+    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookie_jar))
+    no_redirect_opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookie_jar), NoRedirect)
+
+    try:
+        status, _, _ = request(opener, base_url, "/login")
+        assert status == 200
+        status, _, _ = request(no_redirect_opener, base_url, "/login", {"username": "setup-admin", "password": "SetupSmoke-Local-123!"}, allow_error=True)
+        assert status == 303
+        status, _, body = request(opener, base_url, "/setup")
+        assert status == 200
+        csrf = body.split('name="csrf_token" value="', 1)[1].split('"', 1)[0]
+        status, _, body = request(
+            opener,
+            base_url,
+            "/setup/save",
+            {
+                "csrf_token": csrf,
+                "version": "v2.17.1",
+                "standard_bundle": "/bundles/standard",
+                "airgapped_bundle": "/bundles/airgap",
+                "prism": "https://pc.example.test:9440",
+                "registry": "registry.example.test",
+                "default_provider": "nutanix-ahv",
+                "runner_type": "container",
+                "nodes": "node-a\nnode-b",
+                "api_vip": "10.50.0.10",
+                "dns_servers": "10.50.0.2",
+                "ntp_servers": "0.pool.ntp.org",
+                "backend": "hashicorp-vault",
+            },
+        )
+        assert status == 200
+        assert "Setup Saved" in body
+        assert app.read_json(app.SETTINGS / "connections.json")["prism"] == "https://pc.example.test:9440"
+        assert app.read_json(app.SETTINGS / "sources.json")["standard_bundle"] == "/bundles/standard"
+        assert app.read_json(app.SETTINGS / "inventory.json")["nodes"] == "node-a\nnode-b"
+        assert app.read_json(app.SETTINGS / "network.json")["api_vip"] == "10.50.0.10"
+        assert app.read_json(app.SETTINGS / "providers.json")["runner_type"] == "container"
+        assert app.read_json(app.SETTINGS / "secrets.json")["backend"] == "hashicorp-vault"
+    finally:
+        server.shutdown()
+        server.server_close()
+        app.ZT = original_zt
+        app.SETTINGS = original_settings
         app.SESSIONS.clear()
         app.SESSIONS.update(original_sessions)
         app.LOGIN_FAILURES.clear()

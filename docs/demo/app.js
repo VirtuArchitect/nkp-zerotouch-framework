@@ -210,7 +210,7 @@ const deploymentEvidence = [
 ];
 
 const genericSections = {
-  setup: ["Setup Wizard", "Create a deployment profile from connected, proxied, or air-gapped templates.", [["Source template", "connected.example.yaml"], ["Identity checks", "duplicate names blocked"], ["Next step", "prepare workspace"]]],
+  setup: ["Setup", "First-run checklist plus editable source, connection, inventory, network, provider, and secret-backend metadata.", [["Source template", "connected.example.yaml"], ["Configuration", "saved locally under .zt/settings"], ["Next step", "prepare workspace"]]],
   preflight: ["Preflight", "Readiness matrix across bundle, network, credentials, and provider checks.", [["Bundle", "NKP v2.17.1 discovered"], ["Prism Central", "placeholder endpoint warning"], ["Registry", "required for air-gapped"]]],
   external: ["External Evidence", "Reviewed proof records for systems the static demo cannot validate.", [["Prism authorization", "required for production"], ["Deployment UAT", "required for production"], ["Evidence boundary", "references only; no secrets"]]],
   lab: ["Lab Evidence", "Redacted runtime proof for Prism Central and Prism Element connectivity.", [["Prism Central", "TCP pass and authenticated API pass"], ["Prism Element", "TCP pass and authenticated API pass"], ["Secret handling", "credential values are never recorded"]]],
@@ -229,7 +229,7 @@ const genericSections = {
   approval: ["Approval Policy", "Approval thresholds for apply-class workflows.", [["deploy", "2 approvals"], ["registry", "1 approval"], ["destroy", "2 approvals and confirm flag"]]],
   channels: ["Release Channels", "Environment channel metadata and readiness.", [["lab", "connected/proxied/air-gapped"], ["pilot", "extra approval"], ["production", "stricter gate"]]],
   audit: ["Audit Trail", "Append-only local event stream.", [["08:35", "admin login accepted"], ["08:20", "PowerShell smoke completed"], ["08:18", "Bash smoke completed"]]],
-  settings: ["Providers", "Default provider intent and local settings.", [["Provider", "nutanix-ahv"], ["Auth", "Local RBAC"], ["Persistence", "local .zt state"]]],
+  settings: ["Settings", "Consolidated configuration hub for operational editors.", [["Connections", "Prism, registry, proxy, and bundles"], ["Access", "Secrets, RBAC, integrations, and database"], ["Governance", "Approval policy and release channels"]]],
 };
 
 const $ = (selector) => document.querySelector(selector);
