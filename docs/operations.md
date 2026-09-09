@@ -147,3 +147,32 @@ The external validation record is created only when at least one Prism target
 authenticates successfully. Evidence files include endpoints, probe names, HTTP
 status codes, timing, and credential environment variable names; they never
 include secret values or response bodies.
+
+## deployment-evidence
+
+After validation, lab evidence, plan review, and post-deployment verification
+signals are available, capture the controlled-UAT evidence summary:
+
+PowerShell:
+
+```powershell
+.\scripts\zt.ps1 deployment-evidence -Config .\configs\environments\connected.example.yaml -WriteExternalValidation
+```
+
+Bash:
+
+```bash
+./scripts/zt.sh deployment-evidence --config ./configs/environments/connected.example.yaml --write-external-validation
+```
+
+Output:
+
+```text
+.zt/deployment-evidence/<environment>-<timestamp>/
+  README.md
+  deployment-evidence.json
+.zt/external-validations/ev-*.json
+```
+
+The phase aggregates local evidence and keeps the maturity boundary explicit:
+partial evidence is useful for UAT review, but it is not production validation.

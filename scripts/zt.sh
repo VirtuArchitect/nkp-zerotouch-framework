@@ -30,7 +30,7 @@ fi
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    validate|prepare|generate|registry|deploy|verify|kubeconfig|secrets|backup|upgrade|destroy|runs|evidence|lab-evidence|ci)
+    validate|prepare|generate|registry|deploy|verify|kubeconfig|secrets|backup|upgrade|destroy|runs|evidence|lab-evidence|deployment-evidence|ci)
       command_name="$1"
       shift
       ;;
@@ -915,6 +915,15 @@ lab_evidence_phase() {
   "$python_bin" "${args[@]}"
 }
 
+deployment_evidence_phase() {
+  load_context
+  local args=("./tools/deployment_evidence.py" "--config" "$config_path")
+  if [[ "$write_external_validation" == "true" ]]; then
+    args+=("--write-external-validation")
+  fi
+  "$python_bin" "${args[@]}"
+}
+
 ci_phase() {
   check INFO "Running local CI smoke checks."
   bash -n ./scripts/zt.sh
@@ -1052,6 +1061,9 @@ case "$command_name" in
     ;;
   lab-evidence)
     lab_evidence_phase
+    ;;
+  deployment-evidence)
+    deployment_evidence_phase
     ;;
   ci)
     ci_phase

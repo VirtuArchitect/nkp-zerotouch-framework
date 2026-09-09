@@ -134,3 +134,24 @@ record usernames, passwords, tokens, or response bodies.
 Use `--write-external-validation` or `-WriteExternalValidation` to create a
 redacted `prism-authorization` external validation record when authentication
 succeeds.
+
+## deployment-evidence
+
+Captures controlled-UAT deployment readiness evidence under
+`.zt/deployment-evidence/`. The phase reads local preflight, lab evidence,
+plan-review, job/change, run, backup, verification, and evidence-pack metadata,
+then writes a redacted signal summary.
+
+```bash
+./scripts/zt.sh deployment-evidence --config ./configs/environments/connected.example.yaml --write-external-validation
+```
+
+```powershell
+.\scripts\zt.ps1 deployment-evidence -Config .\configs\environments\connected.example.yaml -WriteExternalValidation
+```
+
+The phase returns `pass` only when required UAT signals are present. Otherwise it
+returns `partial` or `missing` and keeps `productionValidated` set to `false`.
+Use `--write-external-validation` or `-WriteExternalValidation` to create a
+`deployment-uat` external validation record that references the redacted
+deployment evidence file.

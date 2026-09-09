@@ -58,8 +58,8 @@ try:
     LOGIN_LOCKOUT_SECONDS = int(os.environ.get("ZT_LOGIN_LOCKOUT_SECONDS", "300"))
 except ValueError:
     LOGIN_LOCKOUT_SECONDS = 300
-SAFE_ACTIONS = {"validate", "prepare", "generate", "verify", "backup", "runs", "evidence"}
-ACTION_ORDER = ["validate", "prepare", "generate", "verify", "backup", "runs", "evidence"]
+SAFE_ACTIONS = {"validate", "prepare", "generate", "verify", "backup", "runs", "evidence", "lab-evidence", "deployment-evidence"}
+ACTION_ORDER = ["validate", "prepare", "generate", "verify", "backup", "runs", "evidence", "lab-evidence", "deployment-evidence"]
 CLI_APPLY_ACTIONS = {"registry", "deploy", "upgrade", "destroy"}
 CLI_ALLOWED_ACTIONS = CLI_APPLY_ACTIONS
 VIEW_PATHS = {
@@ -1178,6 +1178,53 @@ def lab_evidence_records(limit=100):
     return records
 
 
+def deployment_evidence_records(limit=100):
+    root = ZT / "deployment-evidence"
+    if not root.exists():
+        return []
+    records = []
+    files = sorted(root.glob("*/deployment-evidence.json"), key=lambda item: item.stat().st_mtime, reverse=True)
+    for path in files:
+        data = read_json(path)
+        if not isinstance(data, dict):
+            continue
+        summary = data.get("summary", {})
+        if not isinstance(summary, dict):
+            summary = {}
+        signals = []
+        for item in data.get("signals", []):
+            if not isinstance(item, dict):
+                continue
+            signals.append({
+                "name": str(item.get("name", "")),
+                "status": safe_key(item.get("status", "partial")),
+                "detail": str(item.get("detail", "")),
+                "evidenceRef": str(item.get("evidenceRef", "")),
+            })
+        records.append({
+            "environment": str(data.get("environment", "")),
+            "type": str(data.get("type", "")),
+            "cluster": str(data.get("cluster", "")),
+            "config": str(data.get("config", "")),
+            "status": safe_key(data.get("status", "partial")),
+            "maturity": str(data.get("maturity", "")),
+            "productionValidated": bool(data.get("productionValidated", False)),
+            "capturedAt": str(data.get("capturedAt", "")),
+            "summary": {
+                "signals": int(summary.get("signals", len(signals)) or 0),
+                "passedSignals": int(summary.get("passedSignals", 0) or 0),
+                "requiredSignals": int(summary.get("requiredSignals", 0) or 0),
+                "requiredSignalsPassed": int(summary.get("requiredSignalsPassed", 0) or 0),
+            },
+            "signals": signals,
+            "boundary": str(data.get("boundary", "")),
+            "path": str(path),
+        })
+        if len(records) >= limit:
+            break
+    return records
+
+
 def external_validation_matches(record, env_name):
     scope = safe_key(record.get("environment", ""))
     return scope in {"", "global", safe_key(env_name)}
@@ -1916,6 +1963,9 @@ def uat_evidence_status(case):
     preflight_count = len(preflight_evidence_records(100))
     job_count = len(list_jobs(100))
     backup_count = len(backup_manifests())
+    deployment_records = deployment_evidence_records(100)
+    deployment_count = len(deployment_records)
+    deployment_pass_count = sum(1 for item in deployment_records if item.get("status") == "pass")
     has_verification = any(
         "verification-evidence.json" in file_name
         for pack in packs
@@ -1930,13 +1980,17 @@ def uat_evidence_status(case):
         generated = sum(1 for config in env_configs() if env_state(read_json_from_context(config).get("environmentName") or config.stem)["generate"])
         return ("partial" if generated else "missing", f"{generated} environment(s) with generated artifacts")
     if "point-of-no-return" in title or "deployment execution" in title or "registry" in title:
-        return ("partial" if job_count else "missing", f"{job_count} job/change record candidate(s)")
+        if deployment_pass_count:
+            return ("pass", f"{deployment_pass_count} passing deployment evidence record(s)")
+        return ("partial" if job_count or deployment_count else "missing", f"{job_count} job/change record candidate(s), {deployment_count} deployment evidence record(s)")
     if "post-deployment validation" in title or "verify" in evidence:
+        if deployment_pass_count:
+            return ("pass", f"{deployment_pass_count} passing deployment evidence record(s)")
         return ("partial" if has_verification else "missing", "verification evidence found" if has_verification else "verification evidence missing")
     if "failed deployment" in title or "rollback" in title:
         return ("partial" if backup_count or pack_count else "missing", f"{backup_count} backup(s), {pack_count} evidence pack(s)")
     if "dashboard governance" in title:
-        return ("partial" if run_count or job_count else "missing", f"{run_count} run summary record(s), {job_count} job record(s)")
+        return ("partial" if run_count or job_count or deployment_count else "missing", f"{run_count} run summary record(s), {job_count} job record(s), {deployment_count} deployment evidence record(s)")
     return ("partial" if pack_count else "missing", f"{pack_count} evidence pack(s)")
 
 
@@ -2662,9 +2716,12 @@ def action_command(action, config):
     pwsh_path = shutil.which("pwsh") or shutil.which("powershell")
 
     if bash_path and (ROOT / "scripts" / "zt.sh").exists():
-        return [bash_path, str(ROOT / "scripts" / "zt.sh"), action, "--config", str(config)]
+        command = [bash_path, str(ROOT / "scripts" / "zt.sh"), action, "--config", str(config)]
+        if action in {"lab-evidence", "deployment-evidence"}:
+            command.append("--write-external-validation")
+        return command
     if pwsh_path and (ROOT / "scripts" / "zt.ps1").exists():
-        return [
+        command = [
             pwsh_path,
             "-NoProfile",
             "-ExecutionPolicy",
@@ -2675,6 +2732,9 @@ def action_command(action, config):
             "-Config",
             str(config),
         ]
+        if action in {"lab-evidence", "deployment-evidence"}:
+            command.append("-WriteExternalValidation")
+        return command
     return None
 
 
@@ -3647,6 +3707,9 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if parsed.path == "/api/lab-evidence":
                 self.send_json({"labEvidence": lab_evidence_records(200)})
+                return
+            if parsed.path == "/api/deployment-evidence":
+                self.send_json({"deploymentEvidence": deployment_evidence_records(200)})
                 return
             if parsed.path == "/api/uat":
                 self.send_json(uat_payload())
@@ -4760,6 +4823,19 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/uat":
             payload = uat_payload()
             summary = payload["summary"]
+            deployment_records = deployment_evidence_records(50)
+            deployment_rows = []
+            for record in deployment_records:
+                record_status = record.get("status", "partial")
+                record_class = "ok" if record_status == "pass" else ("warn" if record_status == "partial" else "fail")
+                evidence_summary = record.get("summary", {})
+                deployment_rows.append(
+                    f"<tr><td><div class='env-name'>{html.escape(record.get('environment', ''))}</div><div class='env-file'>{html.escape(record.get('cluster', ''))}</div></td>"
+                    f"<td><span class='chip {record_class}'>{html.escape(record_status)}</span><div class='env-file'>{html.escape(record.get('capturedAt', ''))}</div></td>"
+                    f"<td>{html.escape(str(evidence_summary.get('passedSignals', 0)))} of {html.escape(str(evidence_summary.get('signals', 0)))} signal(s), {html.escape(str(evidence_summary.get('requiredSignalsPassed', 0)))} of {html.escape(str(evidence_summary.get('requiredSignals', 0)))} required</td>"
+                    f"<td><code>{html.escape(record.get('path', ''))}</code><div class='env-file'>production validated: {html.escape(str(record.get('productionValidated', False)).lower())}</div></td></tr>"
+                )
+            deployment_rows_html = "".join(deployment_rows) or '<tr><td colspan="4" class="muted">No deployment evidence phase records yet. Run deployment-evidence after lab evidence, plan review, and verification proof are available.</td></tr>'
             rows = []
             for case in payload["cases"]:
                 status = case["status"]
@@ -4786,6 +4862,8 @@ class Handler(BaseHTTPRequestHandler):
   </div>
 </div>
 <section class="panel"><table><thead><tr><th>Case</th><th>Status</th><th>Required Result</th><th>Evidence Requirement</th></tr></thead><tbody>{''.join(rows) or '<tr><td colspan="4" class="muted">No UAT cases found under docs/uat/UAT-CASES.md.</td></tr>'}</tbody></table></section>
+<div class="section-head"><div><h2>Deployment Evidence Records</h2><div class="section-copy">Controlled-UAT evidence captured from local phase outputs under <code>.zt/deployment-evidence/</code>.</div></div></div>
+<section class="panel"><table><thead><tr><th>Environment</th><th>Status</th><th>Signal Coverage</th><th>Evidence Path</th></tr></thead><tbody>{deployment_rows_html}</tbody></table></section>
 <div class="notice">{html.escape(payload["boundary"])} Partial coverage means the console found a candidate local signal; an operator still needs reviewed outcomes, exceptions, owners, and environment-specific acceptance before calling UAT complete.</div>
 """
             self.send_html(page("UAT Readiness - NKP ZeroTouch Framework", body, "uat"))

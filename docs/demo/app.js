@@ -204,6 +204,11 @@ const uatCases = [
   ["UAT-012", "Dashboard governance", "partial", "3 run records, 3 job records", "Approval/audit/run records are visible", "Dashboard record or screenshot"],
 ];
 
+const deploymentEvidence = [
+  ["lab-new", "partial", "4 of 10 signal(s), 2 of 5 required", "production validated: false"],
+  ["lab-connected", "partial", "5 of 10 signal(s), 3 of 5 required", "production validated: false"],
+];
+
 const genericSections = {
   setup: ["Setup Wizard", "Create a deployment profile from connected, proxied, or air-gapped templates.", [["Source template", "connected.example.yaml"], ["Identity checks", "duplicate names blocked"], ["Next step", "prepare workspace"]]],
   preflight: ["Preflight", "Readiness matrix across bundle, network, credentials, and provider checks.", [["Bundle", "NKP v2.17.1 discovered"], ["Prism Central", "placeholder endpoint warning"], ["Registry", "required for air-gapped"]]],
@@ -334,6 +339,18 @@ function renderUat() {
         <td><span class="chip ${chipClass}">${status}</span><div class="env-file">${detail}</div></td>
         <td>${required}</td>
         <td>${evidence}</td>
+      </tr>
+    `;
+  }).join("");
+
+  $("#deploymentEvidenceRows").innerHTML = deploymentEvidence.map(([environment, status, coverage, boundary]) => {
+    const chipClass = status === "pass" ? "ok" : status === "partial" ? "warn" : "fail";
+    return `
+      <tr>
+        <td><div class="env-name">${environment}</div><div class="env-file">deployment-evidence.json</div></td>
+        <td><span class="chip ${chipClass}">${status}</span></td>
+        <td>${coverage}</td>
+        <td>${boundary}</td>
       </tr>
     `;
   }).join("");
