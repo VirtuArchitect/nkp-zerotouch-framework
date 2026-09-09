@@ -3033,30 +3033,52 @@ def page(title, body, active="environments", user=None):
             return "nav-item active"
         return "nav-item active" if key == active else "nav-item"
 
+    def icon_svg(name):
+        icons = {
+            "dashboard": '<path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"/>',
+            "setup": '<path d="M12 3v10"/><path d="m8 9 4 4 4-4"/><path d="M4 17h16v4H4z"/>',
+            "settings": '<path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z"/><path d="M3 12h3m12 0h3M12 3v3m0 12v3m-6.4-2.6 2.1-2.1m8.6-8.6 2.1-2.1m0 12.8-2.1-2.1M7.7 7.7 5.6 5.6"/>',
+            "files": '<path d="M7 3h7l4 4v14H7z"/><path d="M14 3v5h5"/><path d="m10 13-2 2 2 2m4-4 2 2-2 2"/>',
+            "pipeline": '<path d="M6 5v5a4 4 0 0 0 4 4h8"/><path d="M6 19v-9"/><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="14" r="2"/>',
+            "jobs": '<path d="M8 6h12M8 12h12M8 18h12"/><path d="M4 6h.01M4 12h.01M4 18h.01"/>',
+            "terminal": '<path d="m5 7 5 5-5 5"/><path d="M12 17h7"/>',
+            "approval": '<path d="M12 3 5 6v6c0 4 3 7 7 9 4-2 7-5 7-9V6z"/><path d="m9 12 2 2 4-5"/>',
+            "preflight": '<circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/>',
+            "uat": '<path d="M8 4h8l1 3h3v14H4V7h3z"/><path d="M8 12h8M8 16h6"/>',
+            "gate": '<rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>',
+            "health": '<path d="M4 12h4l2-5 4 10 2-5h4"/>',
+            "evidence": '<path d="M4 7h16v13H4z"/><path d="M4 7l3-4h10l3 4"/><path d="M9 12h6"/>',
+            "lab": '<path d="M9 3h6"/><path d="M10 3v6l-5 9a2 2 0 0 0 2 3h10a2 2 0 0 0 2-3l-5-9V3"/><path d="M8 16h8"/>',
+            "external": '<path d="M14 4h6v6"/><path d="m10 14 10-10"/><path d="M20 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h5"/>',
+            "audit": '<path d="M8 6h12M8 12h12M8 18h12"/><path d="m3 6 1 1 2-2m-3 7 1 1 2-2m-3 7 1 1 2-2"/>',
+            "about": '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7h.01"/>',
+        }
+        return f'<span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24">{icons[name]}</svg></span>'
+
     nav = f"""
     <div class="nav-status"><span></span>Framework installed</div>
     <div class="nav-label">Overview</div>
-    <a class="{nav_class('environments')}" href="{VIEW_PATHS['environments']}"><span class="nav-icon">D</span>Dashboard</a>
-    <a class="{nav_class('setup')}" href="{VIEW_PATHS['setup']}"><span class="nav-icon">S</span>Setup and Install</a>
+    <a class="{nav_class('environments')}" href="{VIEW_PATHS['environments']}">{icon_svg('dashboard')}Dashboard</a>
+    <a class="{nav_class('setup')}" href="{VIEW_PATHS['setup']}">{icon_svg('setup')}Setup and Install</a>
     <div class="nav-label">Configure</div>
-    <a class="{nav_class('settings')}" href="{VIEW_PATHS['settings']}"><span class="nav-icon">G</span>Global Config</a>
-    <a class="{nav_class('new-environment')}" href="{VIEW_PATHS['new-environment']}"><span class="nav-icon">C</span>Config Files</a>
-    <a class="{nav_class('pipeline')}" href="{VIEW_PATHS['pipeline']}"><span class="nav-icon">P</span>Pipeline</a>
+    <a class="{nav_class('settings')}" href="{VIEW_PATHS['settings']}">{icon_svg('settings')}Global Config</a>
+    <a class="{nav_class('new-environment')}" href="{VIEW_PATHS['new-environment']}">{icon_svg('files')}Config Files</a>
+    <a class="{nav_class('pipeline')}" href="{VIEW_PATHS['pipeline']}">{icon_svg('pipeline')}Pipeline</a>
     <div class="nav-label">Execute</div>
-    <a class="{nav_class('jobs')}" href="{VIEW_PATHS['jobs']}"><span class="nav-icon">J</span>Jobs / Queue</a>
-    <a class="{nav_class('cli')}" href="{VIEW_PATHS['cli']}"><span class="nav-icon">T</span>CLI Console</a>
-    <a class="{nav_class('approval-policy')}" href="{VIEW_PATHS['approval-policy']}"><span class="nav-icon">A</span>Approval Policy</a>
+    <a class="{nav_class('jobs')}" href="{VIEW_PATHS['jobs']}">{icon_svg('jobs')}Jobs / Queue</a>
+    <a class="{nav_class('cli')}" href="{VIEW_PATHS['cli']}">{icon_svg('terminal')}CLI Console</a>
+    <a class="{nav_class('approval-policy')}" href="{VIEW_PATHS['approval-policy']}">{icon_svg('approval')}Approval Policy</a>
     <div class="nav-label">Assurance</div>
-    <a class="{nav_class('preflight')}" href="{VIEW_PATHS['preflight']}"><span class="nav-icon">V</span>Preflight</a>
-    <a class="{nav_class('uat')}" href="{VIEW_PATHS['uat']}"><span class="nav-icon">U</span>UAT Evidence</a>
-    <a class="{nav_class('production-readiness')}" href="{VIEW_PATHS['production-readiness']}"><span class="nav-icon">R</span>Production Gate</a>
-    <a class="{nav_class('health')}" href="{VIEW_PATHS['health']}"><span class="nav-icon">H</span>Health</a>
+    <a class="{nav_class('preflight')}" href="{VIEW_PATHS['preflight']}">{icon_svg('preflight')}Preflight</a>
+    <a class="{nav_class('uat')}" href="{VIEW_PATHS['uat']}">{icon_svg('uat')}UAT Evidence</a>
+    <a class="{nav_class('production-readiness')}" href="{VIEW_PATHS['production-readiness']}">{icon_svg('gate')}Production Gate</a>
+    <a class="{nav_class('health')}" href="{VIEW_PATHS['health']}">{icon_svg('health')}Health</a>
     <div class="nav-label">Records</div>
-    <a class="{nav_class('evidence')}" href="{VIEW_PATHS['evidence']}"><span class="nav-icon">E</span>Evidence Packs</a>
-    <a class="{nav_class('lab-evidence')}" href="{VIEW_PATHS['lab-evidence']}"><span class="nav-icon">L</span>Lab Evidence</a>
-    <a class="{nav_class('external-validations')}" href="{VIEW_PATHS['external-validations']}"><span class="nav-icon">X</span>External Evidence</a>
-    <a class="{nav_class('audit')}" href="{VIEW_PATHS['audit']}"><span class="nav-icon">I</span>Audit Trail</a>
-    <a class="{nav_class('about')}" href="{VIEW_PATHS['about']}"><span class="nav-icon">N</span>About</a>
+    <a class="{nav_class('evidence')}" href="{VIEW_PATHS['evidence']}">{icon_svg('evidence')}Evidence Packs</a>
+    <a class="{nav_class('lab-evidence')}" href="{VIEW_PATHS['lab-evidence']}">{icon_svg('lab')}Lab Evidence</a>
+    <a class="{nav_class('external-validations')}" href="{VIEW_PATHS['external-validations']}">{icon_svg('external')}External Evidence</a>
+    <a class="{nav_class('audit')}" href="{VIEW_PATHS['audit']}">{icon_svg('audit')}Audit Trail</a>
+    <a class="{nav_class('about')}" href="{VIEW_PATHS['about']}">{icon_svg('about')}About</a>
 """
     return f"""<!doctype html>
 <html lang="en" data-theme="light">
@@ -3235,6 +3257,10 @@ def page(title, body, active="environments", user=None):
       border: 1px solid var(--line); background: var(--panel-2); color: var(--muted);
       font-size: 11px; font-weight: 780; flex: 0 0 auto;
     }}
+    .nav-icon svg {{
+      width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2;
+      stroke-linecap: round; stroke-linejoin: round;
+    }}
     .nav-item.active .nav-icon {{ color: #fff; border-color: rgba(255,255,255,.28); background: rgba(255,255,255,.14); }}
     .nav-dot {{ width: 8px; height: 8px; border-radius: 50%; background: transparent; }}
     .nav-item.active .nav-dot {{ background: var(--accent-2); }}
@@ -3364,6 +3390,7 @@ def page(title, body, active="environments", user=None):
     .button-link:hover {{ background: var(--accent-soft); border-color: rgba(33,194,248,.45); color: var(--control-hover-text); }}
     .button-danger {{ border-color: rgba(239,68,68,.35); color: var(--danger-text); }}
     .button-danger:hover {{ background: var(--bad-soft); border-color: rgba(239,68,68,.45); color: var(--danger-hover-text); }}
+    .toolbar {{ display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 0; }}
     .run-list {{ list-style: none; margin: 0; padding: 0; }}
     .run-list li {{
       display: flex; align-items: center; justify-content: space-between;
@@ -3382,6 +3409,7 @@ def page(title, body, active="environments", user=None):
     .settings-card {{ background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 16px; box-shadow: var(--shadow); }}
     .settings-card h3 {{ margin: 0 0 8px; font-size: 15px; }}
     .settings-card p {{ margin: 0; color: var(--muted); }}
+    .settings-card .actions {{ margin-top: 12px; min-width: 0; }}
     .form-grid {{ display: grid; grid-template-columns: repeat(2, minmax(220px, 1fr)); gap: 14px; }}
     .field label {{ display: block; color: var(--input-label); font-size: 12px; font-weight: 750; margin-bottom: 6px; text-transform: uppercase; }}
     .field input, .field select, .field textarea {{
@@ -3812,7 +3840,7 @@ class Handler(BaseHTTPRequestHandler):
                 ("Release Channels", "/release-channels", "Lab, pilot, and production channel rules", "governance"),
             ]
             cards = "".join(
-                f"<a class='settings-card' href='{href}'><h3>{html.escape(label)}</h3><p>{html.escape(copy)}</p><span class='chip {'ok' if status not in {'needs input', 'not set'} else 'warn'}'>{html.escape(str(status))}</span></a>"
+                f"<a class='settings-card' href='{href}'><h3>{html.escape(label)}</h3><p>{html.escape(copy)}</p><span class='chip {'ok' if status not in {'needs input', 'not set'} else 'warn'}'>{html.escape(str(status))}</span><span class='actions'><span class='button-link'>Open editor</span></span></a>"
                 for label, href, copy, status in items
             )
             body = f"""
@@ -3865,6 +3893,13 @@ class Handler(BaseHTTPRequestHandler):
   <div>
     <h2>Setup Wizard</h2>
     <div class="section-copy">Guided operator flow from source intake through preflight readiness.</div>
+    <div class="toolbar">
+      <a class="button-link" href="/sources">Edit sources</a>
+      <a class="button-link" href="/settings/connections">Edit connections</a>
+      <a class="button-link" href="/inventory">Edit inventory</a>
+      <a class="button-link" href="/network">Edit network</a>
+      <a class="button-link" href="/settings/new-environment">Add environment</a>
+    </div>
   </div>
 </div>
 <section class="panel">

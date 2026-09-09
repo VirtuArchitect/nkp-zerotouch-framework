@@ -105,6 +105,8 @@ html {
   overflow-x: hidden;
 }
 
+.icon-sprite { display: none; }
+
 body {
   margin: 0;
   max-width: 100%;
@@ -237,6 +239,16 @@ button, a { -webkit-tap-highlight-color: transparent; }
   width: 22px;
 }
 
+.nav-icon svg {
+  fill: none;
+  height: 15px;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+  width: 15px;
+}
+
 .nav-item.active .nav-icon {
   background: rgba(255, 255, 255, .14);
   border-color: rgba(255, 255, 255, .28);
@@ -332,6 +344,17 @@ main {
   background: var(--accent-soft);
   border-color: rgba(96, 165, 250, .42);
   color: var(--control-hover-text);
+}
+
+.button-danger {
+  border-color: rgba(239, 68, 68, .35);
+  color: var(--bad);
+}
+
+.button-danger:hover {
+  background: rgba(185, 28, 28, .1);
+  border-color: rgba(239, 68, 68, .45);
+  color: var(--bad);
 }
 
 .view { display: none; }
@@ -511,6 +534,13 @@ main {
   margin: 25px 0 12px;
 }
 
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 14px 0 0;
+}
+
 .next-actions, .settings-grid {
   display: grid;
   gap: 12px;
@@ -541,6 +571,23 @@ table {
   border-collapse: collapse;
   min-width: 1120px;
   width: 100%;
+}
+
+.config-table input,
+.config-table select,
+.config-table textarea {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  min-height: 34px;
+  padding: 7px 9px;
+  width: 100%;
+}
+
+.config-table textarea {
+  min-height: 74px;
+  resize: vertical;
 }
 
 th, td {

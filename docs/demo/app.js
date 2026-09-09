@@ -331,6 +331,23 @@ function renderEnvironments() {
   `).join("");
 }
 
+function renderSetupEnvironments() {
+  $("#setupEnvironmentRows").innerHTML = environments.map((env) => `
+    <tr>
+      <td><div class="env-name">${env.name}</div><div class="env-file">${env.type}</div></td>
+      <td>${env.file}</td>
+      <td>${env.type === "air-gapped" ? "air-gapped-ahv" : env.type === "proxied" ? "proxied-ahv" : "nutanix-ahv"}</td>
+      <td>
+        <div class="manage-actions">
+          <button class="button-link" type="button" data-command="edit">Edit</button>
+          <button class="button-link" type="button" data-command="open">Duplicate</button>
+          <button class="button-link button-danger" type="button" data-command="delete">Delete</button>
+        </div>
+      </td>
+    </tr>
+  `).join("");
+}
+
 function renderRuns() {
   const rows = runs.map(([name, file]) => `<li><code>${name}</code><span class="muted">${file}</span></li>`).join("");
   $("#recentRuns").innerHTML = rows;
@@ -439,12 +456,20 @@ function renderGeneric(sectionKey) {
   $("#genericTitle").textContent = title;
   $("#genericCopy").textContent = copy;
   $("#genericCards").innerHTML = cards.map(([heading, body]) => `
-    <article class="settings-card"><h3>${heading}</h3><p>${body}</p></article>
+    <article class="settings-card">
+      <h3>${heading}</h3>
+      <p>${body}</p>
+      <div class="manage-actions">
+        <button class="button-link" type="button" data-command="edit">Edit</button>
+        <button class="button-link" type="button" data-command="open">Add</button>
+        <button class="button-link button-danger" type="button" data-command="delete">Delete</button>
+      </div>
+    </article>
   `).join("");
 }
 
 function setView(viewName) {
-  const dedicated = ["environments", "jobs", "runs", "pipeline", "cli", "artifacts", "evidence", "uat", "restore"];
+  const dedicated = ["environments", "setup", "jobs", "runs", "pipeline", "cli", "artifacts", "evidence", "uat", "restore"];
   const targetView = dedicated.includes(viewName) ? viewName : "generic";
   $$(".view").forEach((view) => view.classList.toggle("active", view.dataset.view === targetView));
   $$("[data-view-link]").forEach((item) => item.classList.toggle("active", item.dataset.viewLink === viewName));
@@ -489,6 +514,7 @@ document.addEventListener("click", (event) => {
   if (command === "action") toast("Demo action selected; live apply remains CLI-gated");
   if (command === "open") toast("Environment detail preview");
   if (command === "edit") toast("Edit workflow preview");
+  if (command === "delete") toast("Delete requires confirmation in the live console");
   if (command === "manifest") toast("Evidence manifest preview");
   if (command === "metric") toast("Metric drill-down preview");
   if (command === "restore") toast("Restore approval workflow preview; file copy remains manual");
@@ -498,6 +524,7 @@ renderMetrics();
 renderOperationalPanels();
 renderNextActions();
 renderEnvironments();
+renderSetupEnvironments();
 renderRuns();
 renderJobs();
 renderPipeline();
