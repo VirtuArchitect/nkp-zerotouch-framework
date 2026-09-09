@@ -724,6 +724,14 @@ def test_live_demo_surfaces_uat_readiness_boundary():
     demo_index = (ROOT / "docs" / "demo" / "index.html").read_text(encoding="utf-8")
     demo_app = (ROOT / "docs" / "demo" / "app.js").read_text(encoding="utf-8")
 
+    assert '<html lang="en" data-theme="light">' in demo_index
+    assert "Framework installed" in demo_index
+    assert "Operator attention required before apply" in demo_index
+    assert "Recommended Operator Actions" in demo_index
+    assert "Environment Profiles" in demo_index
+    assert 'id="opsDashboard"' in demo_index
+    assert "const operationalPanels" in demo_app
+    assert "renderOperationalPanels();" in demo_app
     assert 'data-view-link="uat"' in demo_index
     assert 'data-view="uat"' in demo_index
     assert "UAT evidence is an operational readiness signal, not production validation." in demo_index

@@ -212,12 +212,17 @@ def mtime_label(path):
 
 
 def metric_card(label, value, foot, href=None):
+    linkable = bool(href)
+    if isinstance(value, (int, float)):
+        linkable = linkable and value > 0
+    else:
+        linkable = linkable and str(value).strip().lower() not in {"", "0", "none", "n/a"}
     content = (
         f'<div class="metric-label">{html.escape(label)}</div>'
-        f'<div class="metric-value">{value}</div>'
+        f'<div class="metric-value">{html.escape(str(value))}</div>'
         f'<div class="metric-foot">{html.escape(foot)}</div>'
     )
-    if href and value > 0:
+    if linkable:
         return f'<a class="metric metric-link" href="{html.escape(href)}">{content}</a>'
     return f'<div class="metric disabled">{content}</div>'
 
@@ -3029,29 +3034,32 @@ def page(title, body, active="environments", user=None):
         return "nav-item active" if key == active else "nav-item"
 
     nav = f"""
-    <div class="nav-label">Operate</div>
-    <a class="{nav_class('environments')}" href="{VIEW_PATHS['environments']}"><span class="nav-dot"></span>Environments</a>
-    <a class="{nav_class('jobs')}" href="{VIEW_PATHS['jobs']}">Jobs</a>
-    <a class="{nav_class('pipeline')}" href="{VIEW_PATHS['pipeline']}">Pipeline</a>
-    <a class="{nav_class('cli')}" href="{VIEW_PATHS['cli']}">CLI</a>
-    <div class="nav-label">Assure</div>
-    <a class="{nav_class('setup')}" href="{VIEW_PATHS['setup']}">Setup</a>
-    <a class="{nav_class('preflight')}" href="{VIEW_PATHS['preflight']}">Preflight</a>
-    <a class="{nav_class('uat')}" href="{VIEW_PATHS['uat']}">UAT</a>
-    <a class="{nav_class('production-readiness')}" href="{VIEW_PATHS['production-readiness']}">Production Gate</a>
-    <a class="{nav_class('health')}" href="{VIEW_PATHS['health']}">Health</a>
-    <div class="nav-label">Evidence</div>
-    <a class="{nav_class('evidence')}" href="{VIEW_PATHS['evidence']}">Evidence Packs</a>
-    <a class="{nav_class('lab-evidence')}" href="{VIEW_PATHS['lab-evidence']}">Lab Evidence</a>
-    <a class="{nav_class('external-validations')}" href="{VIEW_PATHS['external-validations']}">External Evidence</a>
-    <a class="{nav_class('artifacts')}" href="{VIEW_PATHS['artifacts']}">Artifacts</a>
-    <div class="nav-label">Admin</div>
-    <a class="{nav_class('settings')}" href="{VIEW_PATHS['settings']}">Settings</a>
-    <a class="{nav_class('audit')}" href="{VIEW_PATHS['audit']}">Audit Trail</a>
-    <a class="{nav_class('about')}" href="{VIEW_PATHS['about']}">About</a>
+    <div class="nav-status"><span></span>Framework installed</div>
+    <div class="nav-label">Overview</div>
+    <a class="{nav_class('environments')}" href="{VIEW_PATHS['environments']}"><span class="nav-icon">D</span>Dashboard</a>
+    <a class="{nav_class('setup')}" href="{VIEW_PATHS['setup']}"><span class="nav-icon">S</span>Setup and Install</a>
+    <div class="nav-label">Configure</div>
+    <a class="{nav_class('settings')}" href="{VIEW_PATHS['settings']}"><span class="nav-icon">G</span>Global Config</a>
+    <a class="{nav_class('new-environment')}" href="{VIEW_PATHS['new-environment']}"><span class="nav-icon">C</span>Config Files</a>
+    <a class="{nav_class('pipeline')}" href="{VIEW_PATHS['pipeline']}"><span class="nav-icon">P</span>Pipeline</a>
+    <div class="nav-label">Execute</div>
+    <a class="{nav_class('jobs')}" href="{VIEW_PATHS['jobs']}"><span class="nav-icon">J</span>Jobs / Queue</a>
+    <a class="{nav_class('cli')}" href="{VIEW_PATHS['cli']}"><span class="nav-icon">T</span>CLI Console</a>
+    <a class="{nav_class('approval-policy')}" href="{VIEW_PATHS['approval-policy']}"><span class="nav-icon">A</span>Approval Policy</a>
+    <div class="nav-label">Assurance</div>
+    <a class="{nav_class('preflight')}" href="{VIEW_PATHS['preflight']}"><span class="nav-icon">V</span>Preflight</a>
+    <a class="{nav_class('uat')}" href="{VIEW_PATHS['uat']}"><span class="nav-icon">U</span>UAT Evidence</a>
+    <a class="{nav_class('production-readiness')}" href="{VIEW_PATHS['production-readiness']}"><span class="nav-icon">R</span>Production Gate</a>
+    <a class="{nav_class('health')}" href="{VIEW_PATHS['health']}"><span class="nav-icon">H</span>Health</a>
+    <div class="nav-label">Records</div>
+    <a class="{nav_class('evidence')}" href="{VIEW_PATHS['evidence']}"><span class="nav-icon">E</span>Evidence Packs</a>
+    <a class="{nav_class('lab-evidence')}" href="{VIEW_PATHS['lab-evidence']}"><span class="nav-icon">L</span>Lab Evidence</a>
+    <a class="{nav_class('external-validations')}" href="{VIEW_PATHS['external-validations']}"><span class="nav-icon">X</span>External Evidence</a>
+    <a class="{nav_class('audit')}" href="{VIEW_PATHS['audit']}"><span class="nav-icon">I</span>Audit Trail</a>
+    <a class="{nav_class('about')}" href="{VIEW_PATHS['about']}"><span class="nav-icon">N</span>About</a>
 """
     return f"""<!doctype html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -3061,6 +3069,7 @@ def page(title, body, active="environments", user=None):
     (() => {{
       try {{
         const storedTheme = localStorage.getItem("zt-theme");
+        if (storedTheme === "dark") document.documentElement.removeAttribute("data-theme");
         if (storedTheme === "light") document.documentElement.dataset.theme = "light";
       }} catch (error) {{}}
     }})();
@@ -3205,6 +3214,12 @@ def page(title, body, active="environments", user=None):
     .brand-mark img {{ width: 34px; height: 34px; display: block; border-radius: 8px; }}
     .brand-title {{ font-size: 14px; font-weight: 800; color: var(--brand-text); letter-spacing: 0; }}
     .brand-subtitle {{ color: #6b7280; font-size: 12px; margin-top: 1px; }}
+    .nav-status {{
+      min-height: 42px; display: flex; align-items: center; gap: 10px;
+      margin: 0 4px 18px; padding: 0 12px; border: 1px solid var(--line);
+      border-radius: 8px; background: var(--panel); color: var(--heading); font-weight: 650;
+    }}
+    .nav-status span {{ width: 8px; height: 8px; border-radius: 50%; background: var(--good); }}
     .nav-label {{ color: var(--nav-label-text); font-size: 11px; font-weight: 760; text-transform: uppercase; margin: 20px 12px 8px; letter-spacing: .04em; }}
     .nav-item {{
       display: flex; align-items: center; gap: 10px;
@@ -3215,6 +3230,12 @@ def page(title, body, active="environments", user=None):
     }}
     .nav-item:hover {{ background: var(--panel); color: var(--nav-hover-text); border-color: transparent; }}
     .nav-item.active {{ background: var(--accent); color: #fff; border-color: transparent; }}
+    .nav-icon {{
+      width: 22px; height: 22px; border-radius: 6px; display: inline-grid; place-items: center;
+      border: 1px solid var(--line); background: var(--panel-2); color: var(--muted);
+      font-size: 11px; font-weight: 780; flex: 0 0 auto;
+    }}
+    .nav-item.active .nav-icon {{ color: #fff; border-color: rgba(255,255,255,.28); background: rgba(255,255,255,.14); }}
     .nav-dot {{ width: 8px; height: 8px; border-radius: 50%; background: transparent; }}
     .nav-item.active .nav-dot {{ background: var(--accent-2); }}
     .content {{ min-width: 0; }}
@@ -3238,6 +3259,38 @@ def page(title, body, active="environments", user=None):
     .ops-item {{ background: var(--panel); padding: 13px 15px; }}
     .ops-label {{ color: var(--muted); font-size: 11px; font-weight: 760; text-transform: uppercase; letter-spacing: .04em; }}
     .ops-value {{ margin-top: 5px; font-weight: 780; color: var(--heading); }}
+    .status-banner {{
+      display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 18px; align-items: center;
+      padding: 22px 24px; margin-bottom: 22px; border: 1px solid rgba(4,120,87,.28);
+      border-radius: 8px; background: var(--good-soft); box-shadow: var(--shadow);
+    }}
+    .status-banner.warn {{ border-color: rgba(154,103,0,.28); background: var(--warn-soft); }}
+    .status-banner h2 {{ font-size: 18px; margin-bottom: 6px; }}
+    .status-banner p {{ margin: 0; color: var(--ink); max-width: 860px; }}
+    .status-action {{
+      min-width: 168px; min-height: 54px; align-items: center; justify-content: center;
+      background: var(--panel); font-size: 14px;
+    }}
+    .metric-card-icon {{
+      position: absolute; top: 18px; right: 18px; width: 36px; height: 36px;
+      border-radius: 8px; display: grid; place-items: center; background: var(--panel-2);
+      color: var(--accent); font-weight: 800;
+    }}
+    .ops-dashboard {{
+      display: grid; grid-template-columns: repeat(2, minmax(280px, 1fr)); gap: 16px;
+      margin-top: 18px;
+    }}
+    .ops-panel {{ padding: 18px; }}
+    .ops-panel-head {{ display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }}
+    .ops-panel-head h3 {{ margin: 0; color: var(--heading); font-size: 16px; }}
+    .ops-panel-link {{ color: var(--accent); font-weight: 800; }}
+    .status-list {{ display: grid; gap: 8px; }}
+    .status-row {{
+      display: flex; align-items: center; justify-content: space-between; gap: 14px;
+      min-height: 36px; padding: 8px 10px; border-radius: 6px; background: var(--panel-3);
+    }}
+    .status-row span:first-child {{ color: var(--muted); }}
+    .status-row strong {{ color: var(--heading); text-align: right; }}
     .metric {{
       background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
       padding: 17px; box-shadow: var(--shadow); position: relative; overflow: hidden;
@@ -3377,6 +3430,8 @@ def page(title, body, active="environments", user=None):
       main {{ padding: 18px 16px 32px; }}
       .summary-grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
       .ops-strip {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
+      .status-banner {{ grid-template-columns: 1fr; }}
+      .ops-dashboard {{ grid-template-columns: 1fr; }}
       .settings-grid, .form-grid {{ grid-template-columns: 1fr; }}
       .action-group, .detail-grid, .next-actions {{ grid-template-columns: 1fr; }}
       .actions {{ min-width: 270px; }}
@@ -3903,7 +3958,21 @@ class Handler(BaseHTTPRequestHandler):
             recent_runs = list(reversed(runs[-10:]))
             rbac = load_rbac()
             auth_mode = "Local RBAC" if any(account.get("passwordHash") for account in rbac.get("accounts", [])) else "Bootstrap"
-            pending_approvals = sum(1 for job in list_jobs(200) if job.get("status") == "pending_approval")
+            jobs_all = list_jobs(200)
+            pending_approvals = sum(1 for job in jobs_all if job.get("status") == "pending_approval")
+            successful_jobs = sum(1 for job in jobs_all if job.get("status") in {"succeeded", "completed"})
+            failed_jobs = sum(1 for job in jobs_all if job.get("status") in {"failed", "cancelled", "rejected"})
+            queued_jobs = sum(1 for job in jobs_all if job.get("status") in {"queued", "pending_approval"})
+            running_jobs = sum(1 for job in jobs_all if job.get("status") == "running")
+            last_run_label = recent_runs[0].parent.name if recent_runs else "None"
+            health_items = health_checks()
+            health_ok = sum(1 for _, status, _ in health_items if status == "ok")
+            preflight_items = preflight_checks()
+            preflight_ok = sum(1 for item in preflight_items if item.get("status") == "ok")
+            evidence_total = len(evidence_packs(200))
+            validation_total = len(preflight_evidence_records(200))
+            deployment_evidence_total = len(deployment_evidence_records(200))
+            backup_total = len(backup_manifests())
             uniqueness_issues = environment_uniqueness_issues()
             uniqueness_notice = (
                 "<div class='notice'><strong>Environment identity warning:</strong> "
@@ -3915,33 +3984,79 @@ class Handler(BaseHTTPRequestHandler):
                 f"<li><code>{html.escape(p.parent.name)}</code><span class='muted'>summary.md</span></li>"
                 for p in recent_runs
             )
+            banner_class = "status-banner" if blocked_total == 0 and drift_total == 0 else "status-banner warn"
+            banner_title = "Runtime ready for NKP workflows" if blocked_total == 0 else "Operator attention required before apply"
+            banner_copy = (
+                "Runtime checks are healthy for ZeroTouch workflows. Confirm NKP planning, validation evidence, and backup status before production deployment."
+                if blocked_total == 0
+                else f"{blocked_total} environment(s) are blocked and {drift_total} drift signal(s) need review. Apply-class work remains approval-gated through the controlled CLI path."
+            )
             body = f"""
-<section class="ops-strip">
-  <div class="ops-item"><div class="ops-label">Runner</div><div class="ops-value">Docker / Local Shell</div></div>
-  <div class="ops-item"><div class="ops-label">Deployment Modes</div><div class="ops-value">Connected / Proxied / Air-gapped</div></div>
-  <div class="ops-item"><div class="ops-label">Authentication</div><div class="ops-value">{html.escape(auth_mode)}</div></div>
-  <div class="ops-item"><div class="ops-label">Live Apply</div><div class="ops-value">CLI Approval Required</div></div>
+<section class="{banner_class}">
+  <div>
+    <h2>{html.escape(banner_title)}</h2>
+    <p>{html.escape(banner_copy)}</p>
+  </div>
+  <a class="button-link status-action" href="/jobs">View Execution History</a>
 </section>
 <section class="summary-grid">
-  {metric_card("Ready to Deploy", ready_to_deploy, "environments clear deploy gate", "/production-readiness")}
-  {metric_card("Blocked", blocked_total, "environments need operator action", "/preflight")}
-  {metric_card("Pending Approval", pending_approvals, "apply jobs awaiting review", "/jobs")}
-  {metric_card("Drift Detected", drift_total, "environments with drift signals", "/drift")}
+  {metric_card("Total Runs", len(recent_runs), "recorded executions", "/jobs")}
+  {metric_card("Successful", successful_jobs, "completed without error", "/jobs")}
+  {metric_card("Failed", failed_jobs, "needs operator review", "/jobs")}
+  {metric_card("Last Run", last_run_label, "latest captured summary", "/jobs")}
 </section>
 {uniqueness_notice}
+<section class="ops-dashboard">
+  <article class="panel ops-panel">
+    <div class="ops-panel-head"><h3>Readiness Layers</h3><a class="ops-panel-link" href="/preflight">Open</a></div>
+    <div class="status-list">
+      <div class="status-row"><span>Runtime checks</span><strong>{health_ok}/{len(health_items)} passing</strong></div>
+      <div class="status-row"><span>Preflight checks</span><strong>{preflight_ok}/{len(preflight_items)} passing</strong></div>
+      <div class="status-row"><span>Deploy gate</span><strong>{ready_to_deploy}/{env_total} ready</strong></div>
+      <div class="status-row"><span>Drift</span><strong>{drift_total} attention</strong></div>
+    </div>
+  </article>
+  <article class="panel ops-panel">
+    <div class="ops-panel-head"><h3>Deployment Inventory</h3><a class="ops-panel-link" href="/settings">Configure</a></div>
+    <div class="status-list">
+      <div class="status-row"><span>Environment profiles</span><strong>{env_total}</strong></div>
+      <div class="status-row"><span>Verification reports</span><strong>{report_total}</strong></div>
+      <div class="status-row"><span>Backup manifests</span><strong>{backup_total}</strong></div>
+      <div class="status-row"><span>Authentication</span><strong>{html.escape(auth_mode)}</strong></div>
+    </div>
+  </article>
+  <article class="panel ops-panel">
+    <div class="ops-panel-head"><h3>Operations Queue</h3><a class="ops-panel-link" href="/jobs">Open</a></div>
+    <div class="status-list">
+      <div class="status-row"><span>Queued</span><strong>{queued_jobs}</strong></div>
+      <div class="status-row"><span>Running</span><strong>{running_jobs}</strong></div>
+      <div class="status-row"><span>Pending approvals</span><strong>{pending_approvals}</strong></div>
+      <div class="status-row"><span>Failed</span><strong>{failed_jobs}</strong></div>
+    </div>
+  </article>
+  <article class="panel ops-panel">
+    <div class="ops-panel-head"><h3>Evidence and Governance</h3><a class="ops-panel-link" href="/evidence">Review</a></div>
+    <div class="status-list">
+      <div class="status-row"><span>Evidence packs</span><strong>{evidence_total}</strong></div>
+      <div class="status-row"><span>Validation records</span><strong>{validation_total}</strong></div>
+      <div class="status-row"><span>Deployment evidence</span><strong>{deployment_evidence_total}</strong></div>
+      <div class="status-row"><span>Apply boundary</span><strong>CLI approval required</strong></div>
+    </div>
+  </article>
+</section>
 
 <div class="section-head">
   <div>
-    <h2>Recommended Next Actions</h2>
-    <div class="section-copy">Highest-signal operator actions based on current state, review, drift, and production gate checks.</div>
+    <h2>Recommended Operator Actions</h2>
+    <div class="section-copy">Highest-signal actions based on current state, drift, evidence, and production gate checks.</div>
   </div>
 </div>
 <section class="next-actions">{''.join(next_action_cards) or '<div class="next-action"><div><strong>No environments found</strong><div class="env-file">Create an environment profile to start the deployment flow.</div></div><a class="button-link" href="/settings/new-environment">Create</a></div>'}</section>
 
 <div class="section-head">
   <div>
-    <h2>Environments</h2>
-    <div class="section-copy">Operational cockpit for connected, proxied, and air-gapped NKP deployment profiles.</div>
+    <h2>Environment Profiles</h2>
+    <div class="section-copy">Deployment targets, readiness signals, gate state, and next operator action.</div>
   </div>
 </div>
 <section class="panel">

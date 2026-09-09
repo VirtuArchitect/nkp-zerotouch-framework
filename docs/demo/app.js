@@ -1,8 +1,8 @@
 const metrics = [
-  ["Ready to Deploy", "3", "environments clear deploy gate"],
-  ["Blocked", "1", "environments need operator action"],
-  ["Pending Approval", "4", "apply and restore jobs awaiting review"],
-  ["Drift Detected", "4", "environments with drift signals"],
+  ["Total Runs", "10", "recorded executions"],
+  ["Successful", "7", "completed without error"],
+  ["Failed", "3", "needs operator review"],
+  ["Last Run", "20260909-102047", "latest captured summary"],
 ];
 
 const environments = [
@@ -93,6 +93,49 @@ const nextActions = [
   environments[1],
   environments[2],
   environments[3],
+];
+
+const operationalPanels = [
+  {
+    title: "Readiness Layers",
+    link: "Open",
+    rows: [
+      ["Runtime checks", "5/5 passing"],
+      ["Preflight checks", "6/8 passing"],
+      ["Deploy gate", "3/4 ready"],
+      ["Drift", "4 attention"],
+    ],
+  },
+  {
+    title: "Deployment Inventory",
+    link: "Configure",
+    rows: [
+      ["Environment profiles", "4"],
+      ["Verification reports", "3"],
+      ["Backup manifests", "3"],
+      ["Authentication", "Local RBAC"],
+    ],
+  },
+  {
+    title: "Operations Queue",
+    link: "Open",
+    rows: [
+      ["Queued", "4"],
+      ["Running", "0"],
+      ["Pending approvals", "4"],
+      ["Failed", "3"],
+    ],
+  },
+  {
+    title: "Evidence and Governance",
+    link: "Review",
+    rows: [
+      ["Evidence packs", "3"],
+      ["Validation records", "7"],
+      ["Deployment evidence", "2"],
+      ["Apply boundary", "CLI approval required"],
+    ],
+  },
 ];
 
 const jobs = [
@@ -242,6 +285,22 @@ function renderMetrics() {
       <div class="metric-value">${value}</div>
       <div class="metric-foot">${foot}</div>
     </a>
+  `).join("");
+}
+
+function renderOperationalPanels() {
+  $("#opsDashboard").innerHTML = operationalPanels.map((panel) => `
+    <article class="panel ops-panel">
+      <div class="ops-panel-head">
+        <h3>${panel.title}</h3>
+        <button class="ops-panel-link" type="button" data-command="metric">${panel.link}</button>
+      </div>
+      <div class="status-list">
+        ${panel.rows.map(([label, value]) => `
+          <div class="status-row"><span>${label}</span><strong>${value}</strong></div>
+        `).join("")}
+      </div>
+    </article>
   `).join("");
 }
 
@@ -436,6 +495,7 @@ document.addEventListener("click", (event) => {
 });
 
 renderMetrics();
+renderOperationalPanels();
 renderNextActions();
 renderEnvironments();
 renderRuns();
