@@ -313,11 +313,16 @@ def test_dashboard_evidence_actions_write_external_validation_metadata(tmp_path)
 def test_sidebar_prioritizes_operational_console_navigation():
     shell = app.page("Navigation", "<h2>Body</h2>", "environments")
 
-    assert "Operate" in shell
-    assert "Assure" in shell
-    assert "Evidence" in shell
-    assert "Admin" in shell
-    assert 'href="/settings">Settings</a>' in shell
+    assert '<html lang="en" data-theme="light">' in shell
+    assert "Framework installed" in shell
+    assert "Overview" in shell
+    assert "Configure" in shell
+    assert "Execute" in shell
+    assert "Assurance" in shell
+    assert "Records" in shell
+    assert 'href="/"' in shell and "Dashboard" in shell
+    assert 'href="/settings"' in shell and "Global Config" in shell
+    assert 'href="/jobs"' in shell and "Jobs / Queue" in shell
     assert 'href="/settings/new-environment">New Environment</a>' not in shell
     assert 'href="/settings/providers">Providers</a>' not in shell
     assert 'href="/network">Network</a>' not in shell
@@ -377,6 +382,15 @@ def test_dashboard_pages_and_api_routes(tmp_path):
             assert "text/html" in content_type
             assert "NKP ZeroTouch" in body
             assert "data-theme-toggle" in body
+            assert 'data-theme="light"' in body
+            assert "Framework installed" in body
+            if path == "/":
+                assert "Operator attention required before apply" in body or "Runtime ready for NKP workflows" in body
+                assert "Readiness Layers" in body
+                assert "Deployment Inventory" in body
+                assert "Operations Queue" in body
+                assert "Evidence and Governance" in body
+                assert "Recommended Operator Actions" in body
 
         for path in ["/api/status", "/api/preflight", "/api/evidence", "/api/external-validations", "/api/lab-evidence", "/api/deployment-evidence", "/api/uat", "/api/environments", "/api/jobs", "/api/locks", "/api/change-records", "/api/production-readiness"]:
             status, content_type, body = request(opener, base_url, path)

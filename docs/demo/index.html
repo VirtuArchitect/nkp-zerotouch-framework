@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="light">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -9,6 +9,7 @@
       (() => {
         try {
           const storedTheme = localStorage.getItem("zt-theme");
+          if (storedTheme === "dark") document.documentElement.removeAttribute("data-theme");
           if (storedTheme === "light") document.documentElement.dataset.theme = "light";
         } catch (error) {}
       })();
@@ -28,25 +29,28 @@
           </span>
         </a>
         <nav class="nav" aria-label="Console sections">
-          <div class="nav-label">Operate</div>
-          <button class="nav-item active" type="button" data-view-link="environments"><span class="nav-dot"></span>Environments</button>
-          <button class="nav-item" type="button" data-view-link="jobs">Jobs</button>
-          <button class="nav-item" type="button" data-view-link="pipeline">Pipeline</button>
-          <button class="nav-item" type="button" data-view-link="cli">CLI</button>
-          <div class="nav-label">Assure</div>
-          <button class="nav-item" type="button" data-view-link="setup">Setup</button>
-          <button class="nav-item" type="button" data-view-link="preflight">Preflight</button>
-          <button class="nav-item" type="button" data-view-link="uat">UAT</button>
-          <button class="nav-item" type="button" data-view-link="production">Production Gate</button>
-          <button class="nav-item" type="button" data-view-link="health">Health</button>
-          <div class="nav-label">Evidence</div>
-          <button class="nav-item" type="button" data-view-link="evidence">Evidence Packs</button>
-          <button class="nav-item" type="button" data-view-link="lab">Lab Evidence</button>
-          <button class="nav-item" type="button" data-view-link="external">External Evidence</button>
-          <button class="nav-item" type="button" data-view-link="artifacts">Artifacts</button>
-          <div class="nav-label">Admin</div>
-          <button class="nav-item" type="button" data-view-link="settings">Settings</button>
-          <button class="nav-item" type="button" data-view-link="audit">Audit Trail</button>
+          <div class="nav-status"><span></span>Framework installed</div>
+          <div class="nav-label">Overview</div>
+          <button class="nav-item active" type="button" data-view-link="environments"><span class="nav-icon">D</span>Dashboard</button>
+          <button class="nav-item" type="button" data-view-link="setup"><span class="nav-icon">S</span>Setup and Install</button>
+          <div class="nav-label">Configure</div>
+          <button class="nav-item" type="button" data-view-link="settings"><span class="nav-icon">G</span>Global Config</button>
+          <button class="nav-item" type="button" data-view-link="sources"><span class="nav-icon">C</span>Config Files</button>
+          <button class="nav-item" type="button" data-view-link="pipeline"><span class="nav-icon">P</span>Pipeline</button>
+          <div class="nav-label">Execute</div>
+          <button class="nav-item" type="button" data-view-link="jobs"><span class="nav-icon">J</span>Jobs / Queue</button>
+          <button class="nav-item" type="button" data-view-link="cli"><span class="nav-icon">T</span>CLI Console</button>
+          <button class="nav-item" type="button" data-view-link="approval"><span class="nav-icon">A</span>Approval Policy</button>
+          <div class="nav-label">Assurance</div>
+          <button class="nav-item" type="button" data-view-link="preflight"><span class="nav-icon">V</span>Preflight</button>
+          <button class="nav-item" type="button" data-view-link="uat"><span class="nav-icon">U</span>UAT Evidence</button>
+          <button class="nav-item" type="button" data-view-link="production"><span class="nav-icon">R</span>Production Gate</button>
+          <button class="nav-item" type="button" data-view-link="health"><span class="nav-icon">H</span>Health</button>
+          <div class="nav-label">Records</div>
+          <button class="nav-item" type="button" data-view-link="evidence"><span class="nav-icon">E</span>Evidence Packs</button>
+          <button class="nav-item" type="button" data-view-link="lab"><span class="nav-icon">L</span>Lab Evidence</button>
+          <button class="nav-item" type="button" data-view-link="external"><span class="nav-icon">X</span>External Evidence</button>
+          <button class="nav-item" type="button" data-view-link="audit"><span class="nav-icon">I</span>Audit Trail</button>
         </nav>
       </aside>
 
@@ -67,27 +71,30 @@
 
         <main>
           <section class="view active" data-view="environments">
-            <section class="ops-strip">
-              <div class="ops-item"><div class="ops-label">Runner</div><div class="ops-value">Docker / Local Shell</div></div>
-              <div class="ops-item"><div class="ops-label">Deployment Modes</div><div class="ops-value">Connected / Proxied / Air-gapped</div></div>
-              <div class="ops-item"><div class="ops-label">Authentication</div><div class="ops-value">Local RBAC</div></div>
-              <div class="ops-item"><div class="ops-label">Live Apply</div><div class="ops-value">CLI Approval Required</div></div>
+            <section class="status-banner warn">
+              <div>
+                <h2>Operator attention required before apply</h2>
+                <p>Runtime checks are available, but blocked environments and drift signals require operator review. Apply-class work remains approval-gated through the controlled CLI path.</p>
+              </div>
+              <button class="button-link status-action" type="button" data-command="metric">View Execution History</button>
             </section>
 
             <section class="summary-grid" id="summaryGrid"></section>
 
+            <section class="ops-dashboard" id="opsDashboard"></section>
+
             <div class="section-head">
               <div>
-                <h2>Recommended Next Actions</h2>
-                <div class="section-copy">Highest-signal operator actions based on current state, review, drift, and production gate checks.</div>
+                <h2>Recommended Operator Actions</h2>
+                <div class="section-copy">Highest-signal actions based on current state, drift, evidence, and production gate checks.</div>
               </div>
             </div>
             <section class="next-actions" id="nextActions"></section>
 
             <div class="section-head">
               <div>
-                <h2>Environments</h2>
-                <div class="section-copy">Operational cockpit for connected, proxied, and air-gapped NKP deployment profiles.</div>
+                <h2>Environment Profiles</h2>
+                <div class="section-copy">Deployment targets, readiness signals, gate state, and next operator action.</div>
               </div>
             </div>
             <section class="panel">
