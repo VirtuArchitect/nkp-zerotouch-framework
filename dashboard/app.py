@@ -91,6 +91,7 @@ VIEW_PATHS = {
     "actions": "/actions",
     "audit": "/audit",
     "approval-policy": "/approval-policy",
+    "settings": "/settings",
     "connections": "/settings/connections",
     "new-environment": "/settings/new-environment",
     "providers": "/settings/providers",
@@ -1423,6 +1424,7 @@ ROUTE_PERMISSIONS = [
     ("/settings/secrets", "settings"),
     ("/settings/connections", "settings"),
     ("/settings/new-environment", "environments"),
+    ("/settings", "settings"),
     ("/environment", "environments"),
     ("/setup", "environments"),
     ("/kubeconfig", "artifacts"),
@@ -3021,51 +3023,31 @@ def page(title, body, active="environments", user=None):
     body = inject_csrf_fields(body, user)
 
     def nav_class(key):
+        settings_keys = {"settings", "connections", "new-environment", "providers", "secrets", "rbac", "database", "integrations", "sources", "inventory", "network", "approval-policy", "release-channels"}
+        if key == "settings" and active in settings_keys:
+            return "nav-item active"
         return "nav-item active" if key == active else "nav-item"
 
     nav = f"""
-    <div class="nav-label">Operations</div>
+    <div class="nav-label">Operate</div>
     <a class="{nav_class('environments')}" href="{VIEW_PATHS['environments']}"><span class="nav-dot"></span>Environments</a>
     <a class="{nav_class('jobs')}" href="{VIEW_PATHS['jobs']}">Jobs</a>
-    <a class="{nav_class('runs')}" href="{VIEW_PATHS['runs']}">Runs</a>
-    <div class="nav-label">Readiness</div>
-    <a class="{nav_class('setup')}" href="{VIEW_PATHS['setup']}">Setup Wizard</a>
+    <a class="{nav_class('pipeline')}" href="{VIEW_PATHS['pipeline']}">Pipeline</a>
+    <a class="{nav_class('cli')}" href="{VIEW_PATHS['cli']}">CLI</a>
+    <div class="nav-label">Assure</div>
+    <a class="{nav_class('setup')}" href="{VIEW_PATHS['setup']}">Setup</a>
     <a class="{nav_class('preflight')}" href="{VIEW_PATHS['preflight']}">Preflight</a>
-    <a class="{nav_class('external-validations')}" href="{VIEW_PATHS['external-validations']}">External Evidence</a>
-    <a class="{nav_class('lab-evidence')}" href="{VIEW_PATHS['lab-evidence']}">Lab Evidence</a>
-    <a class="{nav_class('drift')}" href="{VIEW_PATHS['drift']}">Drift</a>
     <a class="{nav_class('uat')}" href="{VIEW_PATHS['uat']}">UAT</a>
     <a class="{nav_class('production-readiness')}" href="{VIEW_PATHS['production-readiness']}">Production Gate</a>
     <a class="{nav_class('health')}" href="{VIEW_PATHS['health']}">Health</a>
-    <div class="nav-label">Artifacts</div>
-    <a class="{nav_class('artifacts')}" href="{VIEW_PATHS['artifacts']}">Artifacts</a>
+    <div class="nav-label">Evidence</div>
     <a class="{nav_class('evidence')}" href="{VIEW_PATHS['evidence']}">Evidence Packs</a>
-    <a class="{nav_class('plan-review')}" href="{VIEW_PATHS['plan-review']}">Plan Review</a>
-    <a class="{nav_class('kubeconfig')}" href="{VIEW_PATHS['kubeconfig']}">Kubeconfig</a>
-    <a class="{nav_class('backups')}" href="{VIEW_PATHS['backups']}">Backups</a>
-    <a class="{nav_class('restore')}" href="{VIEW_PATHS['restore']}">Restore</a>
-    <div class="nav-label">Deployment</div>
-    <a class="{nav_class('sources')}" href="{VIEW_PATHS['sources']}">Sources</a>
-    <a class="{nav_class('inventory')}" href="{VIEW_PATHS['inventory']}">Inventory</a>
-    <a class="{nav_class('network')}" href="{VIEW_PATHS['network']}">Network</a>
-    <a class="{nav_class('pipeline')}" href="{VIEW_PATHS['pipeline']}">Pipeline</a>
-    <a class="{nav_class('cli')}" href="{VIEW_PATHS['cli']}">CLI</a>
-    <a class="{nav_class('locks')}" href="{VIEW_PATHS['locks']}">Locks</a>
-    <div class="nav-label">Governance</div>
-    <a class="{nav_class('actions')}" href="{VIEW_PATHS['actions']}">Safe Actions</a>
-    <a class="{nav_class('change-records')}" href="{VIEW_PATHS['change-records']}">Change Records</a>
-    <a class="{nav_class('approval-policy')}" href="{VIEW_PATHS['approval-policy']}">Approval Policy</a>
-    <a class="{nav_class('release-channels')}" href="{VIEW_PATHS['release-channels']}">Release Channels</a>
+    <a class="{nav_class('lab-evidence')}" href="{VIEW_PATHS['lab-evidence']}">Lab Evidence</a>
+    <a class="{nav_class('external-validations')}" href="{VIEW_PATHS['external-validations']}">External Evidence</a>
+    <a class="{nav_class('artifacts')}" href="{VIEW_PATHS['artifacts']}">Artifacts</a>
+    <div class="nav-label">Admin</div>
+    <a class="{nav_class('settings')}" href="{VIEW_PATHS['settings']}">Settings</a>
     <a class="{nav_class('audit')}" href="{VIEW_PATHS['audit']}">Audit Trail</a>
-    <div class="nav-label">Settings</div>
-    <a class="{nav_class('connections')}" href="{VIEW_PATHS['connections']}">Connections</a>
-    <a class="{nav_class('new-environment')}" href="{VIEW_PATHS['new-environment']}">New Environment</a>
-    <a class="{nav_class('providers')}" href="{VIEW_PATHS['providers']}">Providers</a>
-    <a class="{nav_class('secrets')}" href="{VIEW_PATHS['secrets']}">Secrets</a>
-    <a class="{nav_class('rbac')}" href="{VIEW_PATHS['rbac']}">RBAC</a>
-    <a class="{nav_class('database')}" href="{VIEW_PATHS['database']}">Database</a>
-    <a class="{nav_class('integrations')}" href="{VIEW_PATHS['integrations']}">Integrations</a>
-    <div class="nav-label">System</div>
     <a class="{nav_class('about')}" href="{VIEW_PATHS['about']}">About</a>
 """
     return f"""<!doctype html>
@@ -3751,6 +3733,51 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self.send_json({"error": "not found"}, status=404)
             return
+        if parsed.path == "/settings":
+            sources = load_setting("sources", default_sources())
+            connections = read_json(SETTINGS / "connections.json") or {}
+            inventory = load_setting("inventory", default_inventory())
+            network = load_setting("network", default_network())
+            secrets_cfg = load_setting("secrets", default_secrets())
+            providers = load_setting("providers", default_providers())
+            integrations = load_setting("integrations", default_integrations())
+            rbac = load_rbac()
+            items = [
+                ("Connections", "/settings/connections", "Prism, registry, proxy, and bundle endpoints", "configured" if connections.get("prism") or connections.get("registry") else "needs input"),
+                ("Sources", "/sources", "NKP bundle paths, git source, version, and checksum", sources.get("version", "not set")),
+                ("Inventory", "/inventory", "AHV or bare-metal node inventory and BMC notes", inventory.get("mode", "not set")),
+                ("Network", "/network", "VIPs, CIDRs, DNS, NTP, proxy, and IP assignment", network.get("api_vip") or "needs input"),
+                ("Providers", "/settings/providers", "Provider intent and runner placement", providers.get("default_provider", "not set")),
+                ("Secrets", "/settings/secrets", "Secret backend metadata and runtime presence checks", secrets_cfg.get("backend", "not set")),
+                ("RBAC", "/settings/rbac", "Local accounts, roles, and identity provider mode", f"{len(rbac.get('accounts', []))} account(s)"),
+                ("Integrations", "/settings/integrations", "Postgres sessions, audit mirror, Vault, and OIDC", integrations.get("session_store", "memory")),
+                ("Database", "/settings/database", "Password-free Postgres connection metadata", "configured" if read_json(SETTINGS / "database.json") else "optional"),
+                ("New Environment", "/settings/new-environment", "Create a connected, proxied, or air-gapped profile", f"{len(env_configs())} profile(s)"),
+                ("Approval Policy", "/approval-policy", "Approval thresholds for apply-class jobs", "governance"),
+                ("Release Channels", "/release-channels", "Lab, pilot, and production channel rules", "governance"),
+            ]
+            cards = "".join(
+                f"<a class='settings-card' href='{href}'><h3>{html.escape(label)}</h3><p>{html.escape(copy)}</p><span class='chip {'ok' if status not in {'needs input', 'not set'} else 'warn'}'>{html.escape(str(status))}</span></a>"
+                for label, href, copy, status in items
+            )
+            body = f"""
+<section class="summary-grid">
+  {metric_card("Profiles", len(env_configs()), "environment configs", "/")}
+  {metric_card("Accounts", len(rbac.get("accounts", [])), "local console accounts", "/settings/rbac")}
+  {metric_card("Connections", 1 if connections.get("prism") or connections.get("registry") else 0, "endpoint profile", "/settings/connections")}
+  {metric_card("Secret Backend", 1, secrets_cfg.get("backend", "local-file"), "/settings/secrets")}
+</section>
+<div class="section-head">
+  <div>
+    <h2>Settings</h2>
+    <div class="section-copy">Operational configuration for setup, sources, access, integrations, evidence, and governance.</div>
+  </div>
+</div>
+<section class="settings-grid">{cards}</section>
+<div class="notice">Settings pages save local metadata under <code>.zt/settings/</code>. Secret values, raw kubeconfig, and provider tokens are intentionally not stored by the console.</div>
+"""
+            self.send_html(page("Settings - NKP ZeroTouch Framework", body, "settings"))
+            return
         if parsed.path == "/setup":
             sources = load_setting("sources", default_sources())
             connections = read_json(SETTINGS / "connections.json") or {}
@@ -3771,6 +3798,7 @@ class Handler(BaseHTTPRequestHandler):
                 for idx, (label, href, ok, note) in enumerate(checks, 1)
             )
             done = sum(1 for _, _, ok, _ in checks if ok)
+            provider_cfg = load_setting("providers", default_providers())
             body = f"""
 <section class="summary-grid">
   {metric_card("Setup Progress", pct(done, len(checks)), "percent complete", "/setup")}
@@ -3789,6 +3817,34 @@ class Handler(BaseHTTPRequestHandler):
     <thead><tr><th>Step</th><th>Area</th><th>Status</th><th>Operator Task</th></tr></thead>
     <tbody>{rows}</tbody>
   </table>
+</section>
+<div class="section-head">
+  <div>
+    <h2>First-Run Configuration</h2>
+    <div class="section-copy">Save the core operational metadata used by preflight, health, generation, and evidence workflows.</div>
+  </div>
+</div>
+<section class="panel">
+  <form method="post" action="/setup/save">
+    <table>
+      <thead><tr><th>Area</th><th>Value</th></tr></thead>
+      <tbody>
+        <tr><td>NKP version</td><td><div class="field"><input name="version" value="{html.escape(sources.get('version', 'v2.17.1'))}"></div></td></tr>
+        <tr><td>Standard bundle</td><td><div class="field"><input name="standard_bundle" value="{html.escape(sources.get('standard_bundle', ''))}"></div></td></tr>
+        <tr><td>Air-gapped bundle</td><td><div class="field"><input name="airgapped_bundle" value="{html.escape(sources.get('airgapped_bundle', ''))}"></div></td></tr>
+        <tr><td>Prism Central endpoint</td><td><div class="field"><input name="prism" value="{html.escape(connections.get('prism', ''))}" placeholder="https://pc.example:9440"></div></td></tr>
+        <tr><td>Registry endpoint</td><td><div class="field"><input name="registry" value="{html.escape(connections.get('registry', ''))}" placeholder="registry.example.com"></div></td></tr>
+        <tr><td>Provider</td><td><div class="field"><select name="default_provider"><option value="nutanix-ahv" {'selected' if provider_cfg.get('default_provider') == 'nutanix-ahv' else ''}>nutanix-ahv</option><option value="proxied-ahv" {'selected' if provider_cfg.get('default_provider') == 'proxied-ahv' else ''}>proxied-ahv</option><option value="air-gapped-ahv" {'selected' if provider_cfg.get('default_provider') == 'air-gapped-ahv' else ''}>air-gapped-ahv</option><option value="bare-metal" {'selected' if provider_cfg.get('default_provider') == 'bare-metal' else ''}>bare-metal</option></select></div></td></tr>
+        <tr><td>Runner type</td><td><div class="field"><select name="runner_type"><option value="container" {'selected' if provider_cfg.get('runner_type') == 'container' else ''}>container</option><option value="wsl" {'selected' if provider_cfg.get('runner_type') == 'wsl' else ''}>wsl</option><option value="linux-vm" {'selected' if provider_cfg.get('runner_type') == 'linux-vm' else ''}>linux-vm</option><option value="appliance" {'selected' if provider_cfg.get('runner_type') == 'appliance' else ''}>appliance</option></select></div></td></tr>
+        <tr><td>Inventory nodes</td><td><div class="field"><textarea name="nodes">{html.escape(inventory.get('nodes', ''))}</textarea></div></td></tr>
+        <tr><td>API endpoint VIP</td><td><div class="field"><input name="api_vip" value="{html.escape(network.get('api_vip', ''))}"></div></td></tr>
+        <tr><td>DNS servers</td><td><div class="field"><input name="dns_servers" value="{html.escape(network.get('dns_servers', ''))}"></div></td></tr>
+        <tr><td>NTP servers</td><td><div class="field"><input name="ntp_servers" value="{html.escape(network.get('ntp_servers', ''))}"></div></td></tr>
+        <tr><td>Secret backend</td><td><div class="field"><select name="backend"><option value="local-file" {'selected' if secrets_cfg.get('backend') == 'local-file' else ''}>local-file</option><option value="hashicorp-vault" {'selected' if secrets_cfg.get('backend') == 'hashicorp-vault' else ''}>hashicorp-vault</option><option value="external" {'selected' if secrets_cfg.get('backend') == 'external' else ''}>external</option></select></div></td></tr>
+        <tr><td></td><td><button>Save setup configuration</button></td></tr>
+      </tbody>
+    </table>
+  </form>
 </section>
 <div class="notice">Use this page for first-run setup. Once all steps are complete, run validate, prepare, generate, review artifacts, and request apply through the controlled CLI workflow.</div>
 """
@@ -5591,6 +5647,45 @@ class Handler(BaseHTTPRequestHandler):
             audit_event("sources_saved", self.current_user(), "sources", "success")
             body = "<section class='metric'><div class='metric-label'>Settings Saved</div><div class='metric-value'>Sources</div><div class='metric-foot'><span class='chip ok'>Saved locally</span></div></section><a class='back-link' href='/sources'>Back to sources</a>"
             self.send_html(page("Sources Saved", body, "sources"))
+            return
+
+        if parsed.path == "/setup/save":
+            sources = load_setting("sources", default_sources())
+            sources.update({
+                "version": form_value(form, "version"),
+                "standard_bundle": form_value(form, "standard_bundle"),
+                "airgapped_bundle": form_value(form, "airgapped_bundle"),
+            })
+            save_setting("sources", sources)
+            connections = read_json(SETTINGS / "connections.json") or {}
+            connections.update({
+                "prism": form_value(form, "prism"),
+                "registry": form_value(form, "registry"),
+                "savedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            })
+            write_json(SETTINGS / "connections.json", connections)
+            inventory = load_setting("inventory", default_inventory())
+            inventory["nodes"] = form_value(form, "nodes")
+            save_setting("inventory", inventory)
+            network = load_setting("network", default_network())
+            network.update({
+                "api_vip": form_value(form, "api_vip"),
+                "dns_servers": form_value(form, "dns_servers"),
+                "ntp_servers": form_value(form, "ntp_servers"),
+            })
+            save_setting("network", network)
+            providers = load_setting("providers", default_providers())
+            providers.update({
+                "default_provider": form_value(form, "default_provider", "nutanix-ahv"),
+                "runner_type": form_value(form, "runner_type", "container"),
+            })
+            save_setting("providers", providers)
+            secrets_cfg = load_setting("secrets", default_secrets())
+            secrets_cfg["backend"] = form_value(form, "backend", "local-file")
+            save_setting("secrets", secrets_cfg)
+            audit_event("setup_saved", self.current_user(), "setup", "success")
+            body = "<section class='metric'><div class='metric-label'>Setup Saved</div><div class='metric-value'>Configuration</div><div class='metric-foot'><span class='chip ok'>Saved locally</span></div></section><a class='back-link' href='/setup'>Back to setup</a>"
+            self.send_html(page("Setup Saved", body, "setup"))
             return
 
         if parsed.path == "/inventory/save":

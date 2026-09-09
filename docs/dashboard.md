@@ -2,6 +2,11 @@
 
 The dashboard is a local console for inspecting `.zt` state, creating deployment jobs, and approval-gating live apply phases.
 
+The sidebar is intentionally limited to operational destinations: operate,
+assure, evidence, and admin. Detailed editors such as sources, inventory,
+network, providers, secrets, RBAC, integrations, database, approval policy, and
+release channels are reachable from `Settings` instead of crowding the rail.
+
 Run:
 
 ```powershell
@@ -61,6 +66,9 @@ Job and approval model:
 
 Deployment readiness sections:
 
+- `Setup`: first-run checklist plus an editable configuration form for source
+  bundles, Prism and registry endpoints, provider intent, runner type,
+  inventory notes, network metadata, and secret backend metadata.
 - `Sources`: NKP bundle paths, source path, Git URL/ref, version pin, and checksum metadata.
 - `Inventory`: AHV or future bare-metal node inventory, BMC details, boot mode, and OS image notes.
 - `Network`: management/workload CIDRs, API VIP, ingress range, DNS, NTP, proxy, and IP assignment mode.
@@ -90,6 +98,7 @@ Deployment readiness sections:
 
 Settings sections:
 
+- `Settings`: consolidated configuration hub for all operational editors.
 - `Providers`: default provider intent and runner type.
 - `Secrets`: metadata for local-file or external secret backends. Secret values are not stored by the dashboard. When `hashicorp-vault` is selected, the console reads Vault KV metadata with `VAULT_TOKEN` and shows only required key presence.
 - `Integrations`: Postgres, Vault, OIDC, session-store, and audit-mirror integration metadata with endpoint/discovery health probes. File-backed sessions are active for local restarts; Postgres-backed sessions and audit mirroring are available when Postgres is enabled, a password-free DSN is saved, and optional `psycopg` or `psycopg2` is installed in the dashboard runtime. Postgres DSNs must not include passwords; the console rejects password-bearing DSNs and redacts any previously saved value before rendering it. OIDC handoff now issues short-lived signed state/nonce cookies; the callback completes authorization-code exchange for HS256 and RS256/JWKS `id_token` responses, validates nonce, issuer, audience, expiry, and signature, and maps the identity to an active local RBAC account.
